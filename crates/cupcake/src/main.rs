@@ -3,7 +3,12 @@
 #![no_main]
 #![no_std]
 
-mod hactar;
+#[cfg(feature = "ev12")]
+mod ev12;
+
+#[cfg(feature = "ev13")]
+mod ev13;
+
 mod task;
 mod traits;
 
@@ -12,9 +17,14 @@ use panic_halt as _;
 
 #[rtic::app(device = stm32f4xx_hal::pac, peripherals = true)]
 mod app {
-    use crate::hactar;
     use crate::task::*;
     use crate::traits::*;
+
+    #[cfg(feature = "ev12")]
+    use crate::ev12 as hactar;
+
+    #[cfg(feature = "ev13")]
+    use crate::ev13 as hactar;
 
     type Hactar = hactar::Board;
 
@@ -36,11 +46,13 @@ mod app {
 
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local) {
-        let mut board = hactar::Board::new(ctx.device);
+        let mut board = Hactar::new(ctx.device);
 
         let blink_task = BlinkTask::new(board.green_led());
         let button_a_task = ButtonTask::new(ButtonId::A, board.red_led());
         let button_b_task = ButtonTask::new(ButtonId::B, board.blue_led());
+
+        defmt::info!("setup complete");
 
         (
             Shared {},
