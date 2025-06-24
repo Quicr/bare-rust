@@ -15,11 +15,11 @@ build-A:
 
 
 flash:
-	cd crates/ui ; cargo flash --chip STM32F405RG --bin ui --no-default-features --features bsp/board-hactar12,hal/stm32f405 --target=thumbv7em-none-eabihf
+	cd crates/ui ; cargo flash --chip STM32F405RGTx --bin ui --no-default-features --connect-under-reset --features bsp/board-hactar12,hal/stm32f405 --target=thumbv7em-none-eabihf
 
 
 flash-A:
-	cd crates/ui ; cargo flash --chip STM32F405RG --bin ui --no-default-features --features bsp/board-blinkA,hal/stm32f405 --target=thumbv7em-none-eabihf
+	cd crates/ui ; cargo flash --chip STM32F405RGTx --bin ui --no-default-features --features bsp/board-blinkA,hal/stm32f405 --target=thumbv7em-none-eabihf
 
 
 build-mgmt:
@@ -27,7 +27,7 @@ build-mgmt:
 
 
 flash-mgmt:
-	cd crates/mgmt; cargo flash --chip STM32F072CB --bin mgmt --no-default-features --features hal/stm32f072 --target=thumbv6m-none-eabi --release
+	cd crates/mgmt; cargo flash --chip STM32F072CBTx --bin mgmt --no-default-features --features hal/stm32f072 --target=thumbv6m-none-eabi --release
 
 
 run-mgmt:

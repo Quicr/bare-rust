@@ -11,7 +11,6 @@ mod stack;
 mod startup;
 
 #[no_mangle]
-#[export_name = "main"]
 #[inline(never)]
 /// Entry point for the application when the `std` feature is not enabled.
 pub extern "C" fn main() -> ! {
