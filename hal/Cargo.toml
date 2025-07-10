@@ -9,12 +9,6 @@ license = "BSD-2-Clause"
 
 [dependencies]
 
-[lib]
-name = "hal"
-path = "src/mod.rs"
-bench = false
-test = false
-
 [features]
 std = []
 stm32f405 = []

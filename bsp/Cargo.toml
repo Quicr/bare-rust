@@ -10,12 +10,6 @@ license = "BSD-2-Clause"
 [dependencies]
 hal = { path = "../hal" }
 
-[lib]
-name = "bsp"
-path = "src/mod.rs"
-bench = false
-test = false
-
 [features]
 #default = [ "board-blinkA" ]
 #default = [ "board-hactar12" ]
