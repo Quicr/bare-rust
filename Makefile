@@ -46,8 +46,8 @@ doc:
 
 
 clean:
-	cargo clean
-
+	cd mgmt && cargo clean
+	cd ui && cargo clean
 
 cov:
 	cargo llvm-cov --workspace --lib --tests --bin ui --no-default-features --features bsp/board-sim,hal/stm32f405,hal/std,ui/std,ui/exit  -- --test-threads=1
