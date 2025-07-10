@@ -4,16 +4,18 @@
 all: build build-mgmt test doc 
 
 build:
-	cd ui ; cargo build --bin ui --no-default-features --features bsp/board-hactar12,hal/stm32f405 --target=thumbv7em-none-eabihf --verbose
+	cd ui && cargo build
 
+# XXX(RLB): I have not verified that this actually works
 flash:
-	cd ui ; cargo flash --chip STM32F405RGTx --bin ui --no-default-features --connect-under-reset --features bsp/board-hactar12,hal/stm32f405 --target=thumbv7em-none-eabihf
+	cd ui && cargo flash --release --chip STM32F405RGTx --connect-under-reset
 
 build-mgmt:
-	cd mgmt; cargo build --bin mgmt --no-default-features --features hal/stm32f072 --target=thumbv6m-none-eabi  --verbose
+	cd mgmt && cargo build
 
+# XXX(RLB): I have not verified that this actually works
 flash-mgmt:
-	cd mgmt; cargo flash --chip STM32F072CBTx --bin mgmt --no-default-features --features hal/stm32f072 --target=thumbv6m-none-eabi --release
+	cd mgmt && cargo flash --release --chip STM32F072CBTx  --connect-under-reset
 
 run-mgmt:
 	echo run "openocd -f mgmt/openocd.cfg" in background

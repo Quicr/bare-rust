@@ -13,4 +13,3 @@ bsp = { path = "../bsp", features = ["board-hactar12"] }
 
 [features]
 exit = []
-
