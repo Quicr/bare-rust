@@ -52,9 +52,6 @@ pub mod mpsc {
 
     const Q_SIZE: usize = 10;
 
-    #[cfg(feature = "std")]
-    const NUM_QUEUES: usize = 2;
-    #[cfg(not(feature = "std"))]
     const NUM_QUEUES: usize = 2;
 
     static mut Q: [VecMsg<Q_SIZE>; NUM_QUEUES] = [{ VecMsg::new() }, { VecMsg::new() }];
@@ -152,40 +149,3 @@ pub mod mpsc {
     }
 }
 
-#[cfg(feature = "std")]
-#[test]
-pub fn test_channel() {
-    #[allow(unused_mut)]
-    let (mut tx, rx): (mpsc::Sender<Msg>, mpsc::Receiver<Msg>) = mpsc::channel();
-
-    //tx.send(Msg::AiButton(true));
-    tx.send(Msg::PttButton(false));
-    //tx.send(Msg::Keyboard { key: 'a' });
-    //tx.send(Msg::MoqObject {
-    //    name: 1,
-    //    group: 2,
-    //    id: 3,
-    //});
-    //tx.send(Msg::Shutdown);
-
-    loop {
-        let msg = rx.recv();
-        if msg == Msg::None {
-            break;
-        }
-        match msg {
-            Msg::None => std::println!("None"),
-
-            Msg::PttButton(b) => std::println!("PttButton: {}", b),
-            Msg::Keyboard { key } => std::println!("Keyboard: {}", key),
-            Msg::TextInput { .. } => std::println!("TextInput "),
-            Msg::TxtMsgOut { .. } => std::println!("TxtMsg"),
-
-            _ => {
-                std::println!("Unhandled message");
-            }
-        }
-    }
-
-    mpsc::init(); // clean up after test
-}

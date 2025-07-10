@@ -5,8 +5,6 @@
 
 extern crate bsp;
 
-#[cfg(feature = "std")]
-extern crate std;
 
 use crate::channel::mpsc;
 use crate::{msg, tasks};

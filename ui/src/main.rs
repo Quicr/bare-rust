@@ -1,10 +1,8 @@
 //! Application main loop and entry point
 
 #![no_std]
-#![cfg_attr(not(feature = "std"), no_main)]
+#![no_main]
 
-#[cfg(feature = "std")]
-extern crate std;
 
 extern crate bsp;
 extern crate hal;
@@ -30,21 +28,13 @@ mod vec;
 pub use msg::Msg;
 //use crate::tasks::text_edit_task;
 
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 #[inline(never)]
-/// Entry point for the application when the `std` feature is not enabled.
+/// Entry point for the application.
 pub extern "C" fn main() -> ! {
     my_main();
 
     loop {}
-}
-
-#[cfg(feature = "std")]
-/// Entry point for the application when the `std` feature is enabled.
-fn main() {
-    led::set(Color::Blue);
-    my_main();
 }
 
 //#[link_section = ".data"]
@@ -57,20 +47,6 @@ fn alloc_task_data() -> &'static mut tasks::TaskData {
     }
 }
 
-#[cfg(feature = "std")]
-fn print_memory_sizes() {
-    use crate::tasks::*;
-
-    std::println!("Size of Msg enum: {}", std::mem::size_of::<Msg>());
-    std::println!(
-        "Size of tasks::TaskData: {}",
-        std::mem::size_of::<tasks::TaskData>()
-    );
-    std::println!(
-        "Size of text_edit_task::Data: {}",
-        std::mem::size_of::<text_edit_task::Data>()
-    );
-}
 
 const TEST_PRINT_DATA: &[u8; 4] = b"1234";
 
@@ -84,7 +60,6 @@ fn my_main() {
     bsp.init();
 
     //#[cfg(debug_assertions)]
-    #[cfg(not(feature = "std"))]
     bsp.validate();
 
     //let stuff : [u8;1] = [ 0b0101_0101 ];
@@ -98,23 +73,19 @@ fn my_main() {
 
     // TODO remove - just testing
     if false {
-        if cfg!(not(feature = "std")) {
-            b"  Pre  DMA\r\n".print_console();
-            //let data = b"TEST DMA \r\n";
-            //let static const test_print_data = b"1234";
-            #[allow(unused_unsafe)]
-            unsafe {
-                // TODO remove unsafe
-                hal::uart::write1_dma(TEST_PRINT_DATA);
-            }
-
-            fib::fib_test();
-            b"  Post  DMA\r\n".print_console();
+        b"  Pre  DMA\r\n".print_console();
+        //let data = b"TEST DMA \r\n";
+        //let static const test_print_data = b"1234";
+        #[allow(unused_unsafe)]
+        unsafe {
+            // TODO remove unsafe
+            hal::uart::write1_dma(TEST_PRINT_DATA);
         }
+
+        fib::fib_test();
+        b"  Post  DMA\r\n".print_console();
     }
 
-    #[cfg(feature = "std")]
-    print_memory_sizes();
 
     let (mut sender, receiver): (mpsc::Sender<msg::Msg>, mpsc::Receiver<msg::Msg>) =
         mpsc::channel();
@@ -162,19 +133,17 @@ fn my_main() {
     led::set(Color::Green);
 
     let (stack_usage, stack_current, stack_reserved) = stack::usage(false);
-    if cfg!(not(feature = "std")) {
-        b"  Starting stack usage: ".print_console();
-        (stack_usage as u32).print_console();
-        b" bytes\r\n".print_console();
+    b"  Starting stack usage: ".print_console();
+    (stack_usage as u32).print_console();
+    b" bytes\r\n".print_console();
 
-        b"  Starting stack current: ".print_console();
-        (stack_current as u32).print_console();
-        b" bytes\r\n".print_console();
+    b"  Starting stack current: ".print_console();
+    (stack_current as u32).print_console();
+    b" bytes\r\n".print_console();
 
-        b"  Starting stack reserved: ".print_console();
-        (stack_reserved as u32).print_console();
-        b" bytes\r\n".print_console();
-    }
+    b"  Starting stack reserved: ".print_console();
+    (stack_reserved as u32).print_console();
+    b" bytes\r\n".print_console();
 
     // fib::fib_test();
     #[cfg(feature = "exit")]
@@ -187,10 +156,7 @@ fn my_main() {
         #[cfg(feature = "exit")]
         {
             b"Stopping\r\n".print_console();
-            #[cfg(not(feature = "std"))]
             hal::semihost::exit(0);
-            #[cfg(feature = "std")]
-            break;
         }
         #[cfg(test)]
         #[allow(unreachable_code)]

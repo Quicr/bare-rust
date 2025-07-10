@@ -1,8 +1,6 @@
 //! This module contains the definition of the `Msg` enumeration, which represent
 //! different types of messages that can be sent between tasks.
 
-#[cfg(feature = "std")]
-extern crate std;
 
 use crate::vec::VecByte;
 

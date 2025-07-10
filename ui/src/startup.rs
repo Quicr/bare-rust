@@ -18,34 +18,24 @@
 //! script in the `linker.ld` file.
 //!
 
-#[cfg(not(feature = "std"))]
 use crate::semihost;
-
-#[cfg(not(feature = "std"))]
 use core::ptr;
-
-#[cfg(not(feature = "std"))]
 use super::stack::STACK_PAINT_BYTE;
 
-#[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use bsp::led;
 
-#[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use bsp::led::Color;
 
-#[cfg(not(feature = "std"))]
 extern "C" {
     fn main() -> !;
 }
 
-#[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use core::panic::PanicInfo;
 
 #[cfg(target_arch = "arm")]
-#[cfg(not(feature = "std"))]
 #[inline(never)]
 #[panic_handler]
 fn panic(_panic: &PanicInfo) -> ! {
@@ -66,7 +56,6 @@ extern "C" {
     static mut _heap_start: u8;
 }
 
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 #[inline(never)]
 #[allow(static_mut_refs)]
@@ -92,7 +81,6 @@ pub extern "C" fn Reset_Handler() -> ! {
 }
 
 #[cfg(target_arch = "arm")]
-#[cfg(not(feature = "std"))]
 #[inline(never)]
 #[no_mangle]
 pub extern "C" fn Default_Handler() {
@@ -105,15 +93,7 @@ pub extern "C" fn Default_Handler() {
     }
 }
 
-#[cfg(feature = "std")]
-#[no_mangle]
-pub extern "C" fn Default_Handler() {
-    #[cfg(not(test))]
-    panic!("Default_Handler should never be called in simulation");
-}
-
 #[cfg(target_arch = "arm")]
-#[cfg(not(feature = "std"))]
 #[inline(never)]
 #[no_mangle]
 pub extern "C" fn Dma_Uart1_Handler() {
@@ -121,90 +101,70 @@ pub extern "C" fn Dma_Uart1_Handler() {
     hal::uart::dma_uart1_irq();
 }
 
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_HandlerA() {
     Default_Handler();
 }
 
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_HandlerB() {
     Default_Handler();
 }
 
-#[cfg(not(feature = "std"))]
 #[no_mangle]
-
 pub extern "C" fn Default_HandlerC() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
-
 pub extern "C" fn Default_HandlerD() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
-
 pub extern "C" fn Default_HandlerE() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
-
 pub extern "C" fn Default_HandlerF() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_HandlerG() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_HandlerH() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_Handler1() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_Handler2() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_Handler3() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_Handler4() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_Handler5() {
     Default_Handler();
 }
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn Default_Handler6() {
     Default_Handler();
 }
 
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn TIM1_UP_TIM10_IRQHandler() {
     //hal::timer::handle_tim1_irq();
 }
 
-#[cfg(not(feature = "std"))]
 #[no_mangle]
 pub extern "C" fn TIM2_IRQHandler() {
     hal::timer::handle_tim2_irq();
@@ -503,13 +463,3 @@ pub static Exceptions: [IrqVector; 14 + 82] = [
     }, // FPU
 ];
 
-#[cfg(test)]
-mod tests {
-
-    #[cfg(feature = "std")]
-    #[test]
-    fn test_default_handler() {
-        use super::Default_Handler;
-        Default_Handler();
-    }
-}

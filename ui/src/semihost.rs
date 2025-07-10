@@ -15,8 +15,6 @@
 //! It provides direct access to hardware registers, which can lead to undefined behavior if used incorrectly.
 //!
 
-#[cfg(feature = "std")]
-extern crate std;
 
 #[cfg(target_arch = "arm")]
 use core::arch::asm;
@@ -65,13 +63,8 @@ pub fn exit(ret: i32) -> ! {
     loop {}
 }
 
-//#[cfg(feature = "std")]
-//pub fn exit(ret: i32) -> ! {
-//    std::process::exit(ret);
-//}
 
 #[cfg(target_arch = "arm")]
-#[cfg(not(feature = "std"))]
 #[allow(dead_code)]
 fn broken_print(s: &[u8]) {
     // THIS DOES NOT WORK ON QEMU

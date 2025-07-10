@@ -1,7 +1,5 @@
 //! A simple Fibonacci function.
 
-#[cfg(feature = "std")]
-extern crate std;
 
 extern crate bsp;
 

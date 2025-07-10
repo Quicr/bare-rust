@@ -19,8 +19,6 @@ use crate::msg::Msg;
 use crate::stack;
 use bsp::console::Print;
 
-#[cfg(feature = "std")]
-extern crate std;
 
 extern crate bsp;
 

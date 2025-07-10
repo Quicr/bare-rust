@@ -8,21 +8,9 @@ repository = "git@github.com:fluffy/bare-rust.git"
 license = "BSD-2-Clause"
 
 [dependencies]
-#std = {  optional = true }
-#hal = { path = "../hal" , features = ["stm32f405"] }
-hal = { path = "../hal"  }
-#bsp = { path = "../bsp" , features = ["board-hactar12"] }
-bsp = { path = "../bsp"  }
-
-
-[[bin]]
-name = "ui"
-test = false
-bench = false
-
+hal = { path = "../hal", features = ["stm32f405"] }
+bsp = { path = "../bsp", features = ["board-hactar12"] }
 
 [features]
-#default = [ "bsp/board-hactar12","hal/stm32f405" ]
-std = []
 exit = []
 
