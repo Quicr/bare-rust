@@ -31,6 +31,8 @@ doc:
 	cargo doc --workspace --no-default-features --features bsp/board-sim,hal/stm32f405,hal/std,ui/std,ui/exit
 
 clean:
+	cd hal && cargo clean
+	cd bsp && cargo clean
 	cd mgmt && cargo clean
 	cd ui && cargo clean
 
