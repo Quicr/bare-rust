@@ -6,16 +6,14 @@ all: build build-mgmt test doc
 build:
 	cd ui && cargo build
 
-# XXX(RLB): I have not verified that this actually works
 flash:
-	cd ui && cargo flash --release --chip STM32F405RGTx --connect-under-reset
+	cd ui && cargo flash --release --chip STM32F405RGTx
 
 build-mgmt:
 	cd mgmt && cargo build
 
-# XXX(RLB): I have not verified that this actually works
 flash-mgmt:
-	cd mgmt && cargo flash --release --chip STM32F072CBTx  --connect-under-reset
+	cd mgmt && cargo flash --release --chip STM32F072CBTx
 
 run-mgmt:
 	echo run "openocd -f mgmt/openocd.cfg" in background
