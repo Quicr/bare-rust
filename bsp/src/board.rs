@@ -7,8 +7,6 @@
 //! ## Supported Boards
 //!
 //! - `board-hactar12`: Configuration for the Hactar V12 board.
-//! - `board-blinkA`: Configuration for the Blink Rev A board.
-//! - `board-qemu`: Configuration for the QEMU emulator.
 //! - `board-sim`: Configuration for the simulation of the board.
 //!
 //! ## Usage
@@ -38,8 +36,6 @@
 
 #[cfg(not(any(
     feature = "board-hactar12",
-    feature = "board-blinkA",
-    feature = "board-qemu",
     feature = "board-sim"
 )))]
 compile_error!(
@@ -51,15 +47,6 @@ compile_error!(
     "Must specify only a single board as a feature. Try --no-default-features --features=board-sim"
 );
 
-#[cfg(all(feature = "board-blinkA", feature = "board-sim"))]
-compile_error!(
-    "Must specify only a single board as a feature. Try --no-default-features --features=board-sim"
-);
-
-#[cfg(all(feature = "board-qemu", feature = "board-sim"))]
-compile_error!(
-    "Must specify only a single board as a feature. Try --no-default-features --features=board-sim"
-);
 
 #[cfg(feature = "board-hactar12")]
 pub mod info {
@@ -99,59 +86,7 @@ pub mod info {
     pub const DISP_SPI_FREQ: u32 = 10_000_000; // must be slower if reading
 }
 
-#[cfg(feature = "board-blinkA")]
-pub mod info {
-    use hal::cpu;
-    use hal::gpio;
 
-    pub const CLOCK_HSE_FREQ: u32 = 16_000_000; // set to 0 for simulation
-
-    pub const NUM_DEBUG_PINS: usize = 1;
-    pub const DEBUG1_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 8);
-
-    pub const LEDS_INVERTED: bool = false;
-    pub const LED_RED_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 12);
-    pub const LED_GREEN_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 11);
-    pub const LED_BLUE_PIN: gpio::Pin = gpio::Pin(cpu::GPIOB, 7);
-
-    pub const HAS_PTT_BUTTON: bool = true;
-    pub const PTT_BUTTON: gpio::Pin = gpio::Pin(cpu::GPIOC, 13);
-    pub const PTT_BUTTON_PULL_UP: bool = false;
-
-    pub const HAS_AI_BUTTON: bool = false;
-    pub const AI_BUTTON: gpio::Pin = gpio::Pin(cpu::GPIOC, 13);
-    pub const AI_BUTTON_PULL_UP: bool = false;
-
-    pub const CONSOLE_TX: gpio::Pin = gpio::Pin(cpu::GPIOA, 9);
-    pub const CONSOLE_RX: gpio::Pin = gpio::Pin(cpu::GPIOA, 10);
-}
-
-#[cfg(feature = "board-qemu")]
-pub mod info {
-    use hal::cpu;
-    use hal::gpio;
-
-    pub const CLOCK_HSE_FREQ: u32 = 16_000_000; // set to 0 for simulation
-
-    pub const NUM_DEBUG_PINS: usize = 1;
-    pub const DEBUG1_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 11);
-
-    pub const LEDS_INVERTED: bool = false;
-    pub const LED_RED_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 6);
-    pub const LED_GREEN_PIN: gpio::Pin = gpio::Pin(cpu::GPIOC, 5);
-    pub const LED_BLUE_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 1);
-
-    pub const HAS_PTT_BUTTON: bool = false;
-    pub const PTT_BUTTON: gpio::Pin = gpio::Pin(cpu::GPIOC, 0);
-    pub const PTT_BUTTON_PULL_UP: bool = true;
-
-    pub const HAS_AI_BUTTON: bool = false;
-    pub const AI_BUTTON: gpio::Pin = gpio::Pin(cpu::GPIOC, 1);
-    pub const AI_BUTTON_PULL_UP: bool = true;
-
-    pub const CONSOLE_TX: gpio::Pin = gpio::Pin(cpu::GPIOA, 9);
-    pub const CONSOLE_RX: gpio::Pin = gpio::Pin(cpu::GPIOA, 10);
-}
 
 #[cfg(feature = "board-sim")]
 pub mod info {

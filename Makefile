@@ -1,7 +1,7 @@
 
-.PHONY: build flash build-mgmt run-mgmt test doc clean cov all
+.PHONY: build flash build-mgmt flash-mgmt run-mgmt test doc clean cov all
 
-all: build build-mgmt test doc 
+all: build build-mgmt test
 
 build:
 	cd ui && cargo build

@@ -11,11 +11,8 @@ license = "BSD-2-Clause"
 hal = { path = "../hal" }
 
 [features]
-#default = [ "board-blinkA" ]
 #default = [ "board-hactar12" ]
 #default = [ "board-sim" ]
 std = []
-board-hactar12 = []
-board-blinkA = []
-board-qemu = [ ]
-board-sim = [ "std" ]
+board-hactar12 = ["hal/stm32f405"]
+board-sim = ["std"]
