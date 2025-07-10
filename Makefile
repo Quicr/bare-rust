@@ -8,32 +8,32 @@ run-sim:
 
 
 build:
-	cd crates/ui ; cargo build --bin ui --no-default-features --features bsp/board-hactar12,hal/stm32f405 --target=thumbv7em-none-eabihf --verbose
+	cd ui ; cargo build --bin ui --no-default-features --features bsp/board-hactar12,hal/stm32f405 --target=thumbv7em-none-eabihf --verbose
 
 build-A:
-	cd crates/ui ; cargo build --bin ui --no-default-features --features bsp/board-blinkA,hal/stm32f405 --target=thumbv7em-none-eabihf --verbose
+	cd ui ; cargo build --bin ui --no-default-features --features bsp/board-blinkA,hal/stm32f405 --target=thumbv7em-none-eabihf --verbose
 
 
 flash:
-	cd crates/ui ; cargo flash --chip STM32F405RGTx --bin ui --no-default-features --connect-under-reset --features bsp/board-hactar12,hal/stm32f405 --target=thumbv7em-none-eabihf
+	cd ui ; cargo flash --chip STM32F405RGTx --bin ui --no-default-features --connect-under-reset --features bsp/board-hactar12,hal/stm32f405 --target=thumbv7em-none-eabihf
 
 
 flash-A:
-	cd crates/ui ; cargo flash --chip STM32F405RGTx --bin ui --no-default-features --features bsp/board-blinkA,hal/stm32f405 --target=thumbv7em-none-eabihf
+	cd ui ; cargo flash --chip STM32F405RGTx --bin ui --no-default-features --features bsp/board-blinkA,hal/stm32f405 --target=thumbv7em-none-eabihf
 
 
 build-mgmt:
-	cd crates/mgmt; cargo build --bin mgmt --no-default-features --features hal/stm32f072 --target=thumbv6m-none-eabi  --verbose
+	cd mgmt; cargo build --bin mgmt --no-default-features --features hal/stm32f072 --target=thumbv6m-none-eabi  --verbose
 
 
 flash-mgmt:
-	cd crates/mgmt; cargo flash --chip STM32F072CBTx --bin mgmt --no-default-features --features hal/stm32f072 --target=thumbv6m-none-eabi --release
+	cd mgmt; cargo flash --chip STM32F072CBTx --bin mgmt --no-default-features --features hal/stm32f072 --target=thumbv6m-none-eabi --release
 
 
 run-mgmt:
-	echo run "openocd -f crates/mgmt/openocd.cfg" in background
+	echo run "openocd -f mgmt/openocd.cfg" in background
 	echo run something like "screen /dev/tty.usbserial-120 115200" in another window
-	echo do "cd crates/mgmt; cargo run --bin mgmt --features hal/stm32f072 --target=thumbv6m-none-eabi  --verbose"
+	echo do "cd mgmt; cargo run --bin mgmt --features hal/stm32f072 --target=thumbv6m-none-eabi  --verbose"
 
 
 test:
