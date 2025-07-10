@@ -20,8 +20,6 @@ jobs:
         run: rustup target add thumbv6m-none-eabi
       - name: Install Coretex-M4 dependencies
         run: rustup target add thumbv7em-none-eabihf
-      - name: Build x86 and run-sim
-        run: make run-sim
       - name: Build arm hactar12
         run: make build
       - name: Build arm hactar12 mgmt
