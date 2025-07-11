@@ -26,7 +26,6 @@ mod tasks;
 mod vec;
 
 pub use msg::Msg;
-//use crate::tasks::text_edit_task;
 
 #[no_mangle]
 #[inline(never)]
@@ -37,7 +36,6 @@ pub extern "C" fn main() -> ! {
     loop {}
 }
 
-//#[link_section = ".data"]
 static mut HEAP_TASK_DATA: tasks::TaskData = tasks::TaskData::new();
 
 fn alloc_task_data() -> &'static mut tasks::TaskData {
@@ -48,43 +46,21 @@ fn alloc_task_data() -> &'static mut tasks::TaskData {
 }
 
 
-const TEST_PRINT_DATA: &[u8; 4] = b"1234";
-
 #[inline(never)]
 /// Main function that initializes the system and runs the task manager.
 fn my_main() {
-    //msg::test_msg();
 
     let mut bsp = bsp::BSP::new();
 
     bsp.init();
 
-    //#[cfg(debug_assertions)]
     bsp.validate();
 
-    //let stuff : [u8;1] = [ 0b0101_0101 ];
-    //stuff.print_console();
-    //led::set(Color::Black);
-    //loop {};
 
     led::set(Color::Blue);
 
     b"Starting\r\n".print_console();
 
-    // TODO remove - just testing
-    if false {
-        b"  Pre  DMA\r\n".print_console();
-        //let data = b"TEST DMA \r\n";
-        //let static const test_print_data = b"1234";
-        #[allow(unused_unsafe)]
-        unsafe {
-            // TODO remove unsafe
-            hal::uart::write1_dma(TEST_PRINT_DATA);
-        }
-
-        fib::fib_test();
-        b"  Post  DMA\r\n".print_console();
-    }
 
 
     let (mut sender, receiver): (mpsc::Sender<msg::Msg>, mpsc::Receiver<msg::Msg>) =
@@ -96,15 +72,9 @@ fn my_main() {
 
     data.junk_data[0] = 1;
 
-    //let mut data2 = tasks::TaskData {
-    //    text_edit: tasks::text_edit_task::Data::new(),
-    //};
 
     let mut task_mgr = tasks::TaskMgr::new(&mut sender, &mut bsp, &mut data, &mut metrics);
 
-    // this is removed for now as using button for mock keyboard
-    //let button_task = tasks::buttons_task::ButtonTask {};
-    //task_mgr.add_task(&button_task);
 
     let chat_task = tasks::chat_task::ChatTask {};
     task_mgr.add_task(&chat_task);
@@ -127,8 +97,6 @@ fn my_main() {
     let text_edit_task = tasks::text_edit_task::TextEditTask {};
     task_mgr.add_task(&text_edit_task);
 
-    //let fib_task = tasks::fib_task::FibTask {};
-    //task_mgr.add_task(&fib_task);
 
     led::set(Color::Green);
 
@@ -145,7 +113,6 @@ fn my_main() {
     (stack_reserved as u32).print_console();
     b" bytes\r\n".print_console();
 
-    // fib::fib_test();
     #[cfg(feature = "exit")]
     task_mgr.sender.send(Msg::Keyboard { key: '\r' });
 
@@ -169,12 +136,6 @@ fn my_main() {
 #[cfg(test)]
 mod tests {
     use crate::*;
-    //use super::*;
-
-    //#[test]
-    //fn test_main() {
-    //    main();
-    //}
 
     #[test]
     fn test_tasks() {
@@ -220,8 +181,6 @@ mod tests {
 
         let fib_task = tasks::fib_task::FibTask {};
         task_mgr.add_task(&fib_task);
-
-        crate::fib::fib_test();
 
         for i in 0..100 {
             task_mgr.run();

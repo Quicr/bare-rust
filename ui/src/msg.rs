@@ -58,9 +58,6 @@ pub enum Msg {
     PrintInputMsg {
         text: VecByte<160>,
     },
-    //Shutdown,
-    //AiButton(bool),
-    //MoqObject { name: u128, group: u64, id: u64 },
 }
 
 impl Default for Msg {

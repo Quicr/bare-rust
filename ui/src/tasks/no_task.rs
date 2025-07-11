@@ -31,7 +31,6 @@ impl Task for NoTask {
     }
 
     /// Returns the information about the NoTask.
-    #[allow(dead_code)]
     fn info(&self) -> &'static TaskInfo {
         &NO_TASK_INFO
     }

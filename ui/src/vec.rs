@@ -74,11 +74,6 @@ impl<const N: usize> VecMsg<N> {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn capacity(&self) -> usize {
-        self.data.len()
-    }
-
     pub fn len(&self) -> usize {
         self.len
     }
@@ -99,9 +94,5 @@ impl<const N: usize> VecMsg<N> {
         } else {
             panic!("pop: empty vector");
         }
-    }
-
-    pub fn clear(&mut self) {
-        self.len = 0;
     }
 }

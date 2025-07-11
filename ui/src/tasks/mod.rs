@@ -25,7 +25,6 @@ extern crate bsp;
 /// Structure containing information about a task.
 pub struct TaskInfo {
     /// The name of the task.
-    //pub name: &'static str,
     pub name: &'static [u8; 8],
     /// The interval at which the task should run, in microseconds.
     pub run_every_us: u32,
@@ -168,7 +167,6 @@ impl<'a> TaskMgr<'a> {
                 b" us\r\n".print_console();
 
                 b"Task overran time budget".print_console();
-                //TODO panic!("Task {} overran time budget", i);
             }
 
             let stack_usage = end_stack_usage - base_stack_usage;
@@ -176,7 +174,6 @@ impl<'a> TaskMgr<'a> {
                 b"Exceeded memory budget\r\n  usage==".print_console();
                 (stack_usage as u64).print_console();
                 b"\r\n".print_console();
-                //TODO panic!("Task {} overran memory budget", i);
             }
 
             // Update metrics
