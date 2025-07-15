@@ -1,0 +1,18 @@
+[package]
+authors = ["Cullen Jennings <fluffy@iii.ca>"]
+edition = "2021"
+readme = "README.md"
+name = "bsp"
+version = "0.1.1"
+repository = "git@github.com:fluffy/bare-rust.git"
+license = "BSD-2-Clause"
+
+[dependencies]
+hal = { path = "../hal" }
+
+[features]
+#default = [ "board-hactar12" ]
+#default = [ "board-sim" ]
+std = []
+board-hactar12 = ["hal/stm32f405"]
+board-sim = ["std"]

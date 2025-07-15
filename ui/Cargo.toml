@@ -1,0 +1,15 @@
+[package]
+authors = ["Cullen Jennings <fluffy@iii.ca>"]
+edition = "2021"
+readme = "README.md"
+name = "ui"
+version = "0.1.1"
+repository = "git@github.com:fluffy/bare-rust.git"
+license = "BSD-2-Clause"
+
+[dependencies]
+hal = { path = "../hal", features = ["stm32f405"] }
+bsp = { path = "../bsp", features = ["board-hactar12"] }
+
+[features]
+exit = []
