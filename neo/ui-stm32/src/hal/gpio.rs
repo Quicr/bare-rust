@@ -99,6 +99,14 @@ where
         }
     }
 
+    pub fn set(&self, high: bool) {
+        if high {
+            self.set_high()
+        } else {
+            self.set_low()
+        }
+    }
+
     pub fn set_low(&self) {
         F::BR::write(true);
     }
@@ -122,7 +130,15 @@ where
         }
     }
 
-    fn read(&self) -> bool {
+    pub fn pull_up(&self) {
+        F::PUPDR::write(0b10);
+    }
+
+    pub fn pull_down(&self) {
+        F::PUPDR::write(0b01);
+    }
+
+    pub fn read(&self) -> bool {
         F::IDR::read()
     }
 }
@@ -132,7 +148,7 @@ use paste::paste;
 macro_rules! pin {
     ($name:expr, $pin:literal) => {
         paste! {
-            struct [<P $name $pin>];
+            pub struct [<P $name $pin>];
 
             impl Fields for [<P $name $pin>] {
                 type MODER = [<GPIO $name>]::MODER::[<MODER $pin>];
@@ -151,7 +167,7 @@ macro_rules! pin {
 macro_rules! bus {
     ($name:expr) => {
         paste! {
-            mod [<gpio $name:lower>] {
+            pub mod [<gpio $name:lower>] {
                 use paste::paste;
                 use super::Fields;
                 use crate::svd::[<GPIO $name>];
@@ -178,3 +194,4 @@ macro_rules! bus {
 }
 
 bus! { A }
+bus! { C }

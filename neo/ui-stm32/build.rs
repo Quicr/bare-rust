@@ -9,6 +9,7 @@ fn main() {
         .include("RCC")
         .include("FLASH")
         .include("GPIOA")
+        .include("GPIOC")
         .build()
         .expect("Unable to parse SVD file");
 
