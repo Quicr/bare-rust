@@ -13,7 +13,9 @@ extern "C" {
     static _stack_reserve_end: u8;
 }
 
+#[allow(dead_code)]
 const STACK_PAINT: u32 = 0xc5c5c5c5;
+#[allow(dead_code)]
 pub const STACK_PAINT_BYTE: u8 = 0xc5; // this is used by startup
 
 #[cfg(target_arch = "arm")]

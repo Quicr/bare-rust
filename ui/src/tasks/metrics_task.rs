@@ -43,6 +43,7 @@ impl Task for MetricsTask {
             }
 
             b"Task ".print_console();
+            //(i as u64).print_console();
             metrics.task_name[i].print_console();
             b": ".print_console();
             print_pad(metrics.task_run_count[i], 4);
@@ -64,6 +65,7 @@ impl Task for MetricsTask {
     }
 
     /// Returns the information about the metrics task.
+    #[allow(dead_code)]
     fn info(&self) -> &'static TaskInfo {
         &METRICS_TASK_INFO
     }
