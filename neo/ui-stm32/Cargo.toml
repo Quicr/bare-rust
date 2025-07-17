@@ -7,3 +7,4 @@ edition = "2024"
 svdgen = { path = "../svdgen" }
 
 [dependencies]
+paste = "1.0.15"

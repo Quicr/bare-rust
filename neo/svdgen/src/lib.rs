@@ -113,10 +113,16 @@ struct Field {
     name: String,
     bit_offset: usize,
     bit_width: usize,
+    access: Option<Access>,
 }
 
-impl Field {
-    fn to_tokens(&self, access: Access) -> TokenStream {
+impl ToTokens for Field {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Some(access) = self.access else {
+            eprintln!("Skipping field {}: Missing access", self.name);
+            return;
+        };
+
         let name = format_ident!("{}", self.name);
         let bit_offset = self.bit_offset;
         let bit_width = self.bit_width;
@@ -129,9 +135,9 @@ impl Field {
             _ => return Default::default(),
         };
 
-        quote! {
+        tokens.extend(quote! {
             pub type #name = Field<#access_type, { ADDR }, #bit_offset, #bit_width, #access>;
-        }
+        })
     }
 }
 
@@ -147,17 +153,15 @@ struct Register {
     name: String,
     address_offset: U32,
     // size: Usize, // TODO: Do something with this
-    #[serde(default)]
-    access: Access,
+    access: Option<Access>,
     fields: Fields,
 }
 
 impl ToTokens for Register {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let name = format_ident!("{}", self.name);
-        let access = self.access;
         let address_offset = self.address_offset.0;
-        let fields = self.fields.fields.iter().map(|f| f.to_tokens(access));
+        let fields = self.fields.fields.iter();
 
         tokens.extend(quote! {
             pub mod #name {
@@ -255,9 +259,10 @@ impl Device {
             .expect(&format!("Unknown peripheral: {}", name))
     }
 
-    fn derive(&mut self) {
+    fn normalize(&mut self) {
         use std::collections::HashMap;
 
+        // Follow derivedFrom relationships
         let rewrite: HashMap<String, Peripheral> = self
             .peripherals
             .peripherals
@@ -272,6 +277,15 @@ impl Device {
 
         for p in self.peripherals.peripherals.iter_mut() {
             rewrite.get(&p.name).map(|q| p.rebase(q));
+        }
+
+        // Apply access rules from registers down to fields
+        for p in self.peripherals.peripherals.iter_mut() {
+            for r in p.registers.as_mut().unwrap().registers.iter_mut() {
+                for f in r.fields.fields.iter_mut() {
+                    f.access = f.access.or(r.access);
+                }
+            }
         }
     }
 
@@ -307,6 +321,14 @@ impl FromU32 for u16 {
     fn from_u32(x: u32) -> Self { x as Self }
 }
 
+pub trait Read<T> {
+    fn read() -> T;
+}
+
+pub trait Write<T> {
+    fn write(t: T);
+}
+
 #[derive(Default)]
 pub struct Field<T, const ADDR: u32, const OFF: usize, const W: usize, A>(
     core::marker::PhantomData<(T, A)>,
@@ -319,21 +341,31 @@ impl<T, const ADDR: u32, const OFF: usize, const W: usize, A> Field<T, ADDR, OFF
     const OFFSET: usize = OFF;
 }
 
-impl<T, const ADDR: u32, const OFF: usize, const W: usize> Field<T, ADDR, OFF, { W }, ReadOnly>
+impl<T, const ADDR: u32, const OFF: usize, const W: usize> Read<T> for Field<T, ADDR, OFF, { W }, ReadOnly>
 where
     T: FromU32,
 {
-    pub fn read() -> T {
+    fn read() -> T {
         let raw = unsafe { Self::ADDRESS.read_volatile() };
         T::from_u32((raw & Self::MASK) >> Self::OFFSET)
     }
 }
 
-impl<T, const ADDR: u32, const OFF: usize, const W: usize> Field<T, ADDR, OFF, { W }, WriteOnly>
+impl<T, const ADDR: u32, const OFF: usize, const W: usize> Read<T> for Field<T, ADDR, OFF, { W }, ReadWrite>
+where
+    T: FromU32,
+{
+    fn read() -> T {
+        let raw = unsafe { Self::ADDRESS.read_volatile() };
+        T::from_u32((raw & Self::MASK) >> Self::OFFSET)
+    }
+}
+
+impl<T, const ADDR: u32, const OFF: usize, const W: usize> Write<T> for Field<T, ADDR, OFF, { W }, WriteOnly>
 where
     u32: From<T>,
 {
-    pub fn write(t: T) {
+    fn write(t: T) {
         // TODO: Enforce a critical section around this
         let v = u32::from(t) << Self::OFFSET;
         let curr = unsafe { Self::ADDRESS.read_volatile() };
@@ -342,17 +374,12 @@ where
     }
 }
 
-impl<T, const ADDR: u32, const OFF: usize, const W: usize> Field<T, ADDR, OFF, { W }, ReadWrite>
+impl<T, const ADDR: u32, const OFF: usize, const W: usize> Write<T> for Field<T, ADDR, OFF, { W }, ReadWrite>
 where
     T: FromU32,
     u32: From<T>,
 {
-    pub fn read() -> T {
-        let raw = unsafe { Self::ADDRESS.read_volatile() };
-        T::from_u32((raw & Self::MASK) >> Self::OFFSET)
-    }
-
-    pub fn write(t: T) {
+    fn write(t: T) {
         // TODO: Enforce a critical section around this
         let v = u32::from(t) << Self::OFFSET;
         let curr = unsafe { Self::ADDRESS.read_volatile() };
@@ -403,7 +430,7 @@ impl Builder {
         let reader = BufReader::new(file);
 
         let mut device: Device = serde_xml_rs::from_reader(reader)?;
-        device.derive();
+        device.normalize();
         device.filter(&self.options.only);
 
         Ok(DeviceDescription { device })

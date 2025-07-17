@@ -7,6 +7,7 @@ fn main() {
     let bindings = svdgen::Builder::default()
         .svd_file("STM32F405.svd")
         .include("RCC")
+        .include("FLASH")
         .include("GPIOA")
         .build()
         .expect("Unable to parse SVD file");
