@@ -162,6 +162,7 @@ pub extern "C" fn Default_Handler6() {
 
 #[no_mangle]
 pub extern "C" fn TIM1_UP_TIM10_IRQHandler() {
+    //hal::timer::handle_tim1_irq();
 }
 
 #[no_mangle]
@@ -169,6 +170,7 @@ pub extern "C" fn TIM2_IRQHandler() {
     hal::timer::handle_tim2_irq();
 }
 
+#[allow(dead_code)]
 pub union IrqVector {
     not_used: u32,
     handler: unsafe extern "C" fn(),

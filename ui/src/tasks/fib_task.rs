@@ -34,6 +34,7 @@ impl Task for FibTask {
     }
 
     /// Returns the information about the Fibonacci task.
+    #[allow(dead_code)]
     fn info(&self) -> &'static TaskInfo {
         &FIB_TASK_INFO
     }
