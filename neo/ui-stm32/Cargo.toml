@@ -1,0 +1,9 @@
+[package]
+name = "ui-stm32"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+svdgen = { path = "../svdgen" }
+
+[dependencies]
