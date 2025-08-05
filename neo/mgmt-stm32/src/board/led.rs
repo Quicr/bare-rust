@@ -27,13 +27,13 @@ impl Color {
     }
 }
 
-pub struct Led<R, G, B> {
+pub struct Led<R, G, B, const INVERT: bool = false> {
     r: gpio::Output<R>,
     g: gpio::Output<G>,
     b: gpio::Output<B>,
 }
 
-impl<R, G, B> Default for Led<R, G, B>
+impl<R, G, B, const INVERT: bool> Default for Led<R, G, B, INVERT>
 where
     R: gpio::Fields,
     G: gpio::Fields,
@@ -52,7 +52,7 @@ where
     }
 }
 
-impl<R, G, B> Led<R, G, B>
+impl<R, G, B, const INVERT: bool> Led<R, G, B, INVERT>
 where
     R: gpio::Fields,
     G: gpio::Fields,
@@ -60,8 +60,8 @@ where
 {
     pub fn set(&self, c: Color) {
         let (r, g, b) = c.rgb();
-        self.r.set(r);
-        self.g.set(g);
-        self.b.set(b);
+        self.r.set(r ^ INVERT);
+        self.g.set(g ^ INVERT);
+        self.b.set(b ^ INVERT);
     }
 }

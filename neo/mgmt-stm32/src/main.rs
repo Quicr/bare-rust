@@ -15,8 +15,8 @@ pub extern "C" fn main() -> ! {
     // XXX(RLB): Lazy static?
     let board = Board::new(16_000_000);
 
-    board.led_a.set(Color::Purple);
-    board.led_b.set(Color::Teal);
+    board.led_a.set(Color::Red);
+    board.led_b.set(Color::Red);
 
     // TODO
     loop {}

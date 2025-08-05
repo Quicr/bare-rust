@@ -18,8 +18,8 @@ mod led_b {
 }
 
 pub struct Board {
-    pub led_a: Led<led_a::RedPin, led_a::GreenPin, led_a::BluePin>,
-    pub led_b: Led<led_b::RedPin, led_b::GreenPin, led_b::BluePin>,
+    pub led_a: Led<led_a::RedPin, led_a::GreenPin, led_a::BluePin, true>,
+    pub led_b: Led<led_b::RedPin, led_b::GreenPin, led_b::BluePin, true>,
 }
 
 impl Board {
