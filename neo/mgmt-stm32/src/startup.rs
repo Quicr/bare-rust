@@ -39,6 +39,10 @@ use core::panic::PanicInfo;
 // OnceCell so that we could initialize it at runtime.  Or we could cheat and make the default
 // value uninitialized + init() method, but that would have the unpleasant side effect of exposing
 // an uninitialized value.
+//
+// ANS(RLB)
+// * Need to loop{}, can never come out of panic
+// * Can't do serial or anything
 #[panic_handler]
 fn panic(_panic: &PanicInfo) -> ! {
     /*
@@ -69,11 +73,14 @@ unsafe extern "C" {
 
 // XXX(RLB) Under what circumstances is this called?  It doesn't look like there's a comparable
 // method defined in the C firmware for the mgmt chip.
+//
+// ANS(RLB): It's the first thing that is called on startup.  Probably in ASM in the C version.
 #[unsafe(no_mangle)]
 #[allow(static_mut_refs)]
 pub extern "C" fn Reset_Handler() -> ! {
     unsafe {
         // XXX(RLB) Why do we care about the initial contents of this section?
+        // ANS(RLB) Makes it easier to debug.
 
         // initialize the BSS section with zeros
         let count = &_ebss as *const u8 as usize - &_sbss as *const u8 as usize;
@@ -81,6 +88,8 @@ pub extern "C" fn Reset_Handler() -> ! {
     }
     unsafe {
         // XXX(RLB) What function does this serve?
+        // ANS(RLB) Compiler/linker act as if the data are in memory (in the DATA section), but in
+        // our binary, they are actually in the FLASH section.
 
         // initialize the DATA section with the data from the flash
         let count = &_edata as *const u8 as usize - &_sdata as *const u8 as usize;
@@ -89,6 +98,8 @@ pub extern "C" fn Reset_Handler() -> ! {
     unsafe {
         // XXX(RLB) If we're not doing stack painting for stack usage measurements, do we need to
         // do this?
+        // ANS(RLB) Only for stack painting.  Nice to have a clean stack when in debugger.
+        // ANS(RLB) The magic "100" is to keep it clear of this function's stack usage.
 
         // initialize the heap and stack to 0xC1
         // leave 100 bytes free for this function
@@ -231,6 +242,8 @@ pub extern "C" fn TIM2_IRQHandler() {
 
 // XXX(RLB) Why do we need a union here?  On a 32-bit system, the `fn` pointer will be 32 bits, so
 // this ends up being the same size.
+//
+// ANS(RLB) Cullen is mystified by this as well
 #[allow(dead_code)]
 pub union IrqVector {
     not_used: u32,
@@ -239,6 +252,9 @@ pub union IrqVector {
 
 // XXX(RLB) It would be a little nicer to just define this as an `extern "C" fn`.  Is there a
 // reason for it to be a pointer variable like this?
+//
+// ANS(RLB): This needs to be a function pointer, not the function itself.  There might still be a
+// nicer way to express it.
 #[unsafe(link_section = ".vector_table.reset_vector")]
 #[unsafe(no_mangle)]
 pub static Reset_Vector: extern "C" fn() -> ! = Reset_Handler;
@@ -266,6 +282,11 @@ pub static Reset_Vector: extern "C" fn() -> ! = Reset_Handler;
 //
 // So maybe we could hard-code the first 5 enteries, then generate the rest of the struct/table
 // from <interrupt> objects in the SVD?
+//
+// ANS(RLB): All the Default_Handler functions are for debugging, so you can put a breakpoint in
+// them.  Can be simplified.
+//
+// ANS(RLB): Struct should work, check ASM to make sure it comes out the same.
 #[unsafe(link_section = ".vector_table.exceptions")]
 #[unsafe(no_mangle)]
 pub static Exceptions: [IrqVector; 5 + 81] = [
