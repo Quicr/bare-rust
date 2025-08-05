@@ -33,12 +33,12 @@ SECTIONS
     *(.rodata .rodata.*);
    } > FLASH
 
-   .data : ALIGN(4) /* AT(ADDR(.rodata) + SIZEOF(.rodata)) */
+   .data : ALIGN(4)
    {
      _sdata = .;
      *(.data .data.*);
      _edata = .;
-   }  > RAM AT > FLASH
+   } > RAM AT > FLASH
 
    _sidata = LOADADDR(.data);
 
@@ -49,16 +49,10 @@ SECTIONS
       _ebss = .;
    } > RAM
 
-   .heap_start :
-   {
-    _heap_start = .;
-    . = ALIGN(4);
-    . = . + _Heap_Size;
-    _stack_reserve_start = .;
-    . = . + _Stack_Size;
-    _stack_reserve_end = .;
-    . = ALIGN(4);
-   } > RAM
+   /* Heap and stack symbols defined without creating sections */
+   _heap_start = .;
+   _stack_reserve_start = _heap_start + _Heap_Size;
+   _stack_reserve_end = _stack_reserve_start + _Stack_Size;
 
    .stack_sizes (INFO) :
    {
