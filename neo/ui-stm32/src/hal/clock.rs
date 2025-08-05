@@ -81,14 +81,6 @@ pub fn init(hse_clk_freq: u32) {
         _ => unreachable!("Invalid HSE clock frequency {hse_clk_freq}"),
     };
 
-    // XXX(rlb): These fields are read-only (?)
-    // RCC::CFGR::SWS1::write(true);
-    // RCC::CFGR::SWS0::write(false);
-    // RCC::CR::PLLRDY::write(true);
-    // RCC::CR::HSERDY::write(true);
-    RCC::PLLCFGR::PLLSRC::write(true);
-    write_pll_m(pll_m);
-
     // Setup flash wait states and cache
     // XXX(fluffy): If voltage is changed, need to change this
     FLASH::ACR::LATENCY::write(5);
