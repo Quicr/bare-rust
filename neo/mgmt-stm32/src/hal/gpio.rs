@@ -37,6 +37,18 @@ pub trait Fields: Sized {
     type BS: Write<bool>;
     type AFR: Write<u8>;
 
+    fn alt_fun(af_mode: u8, fast: bool) -> AltFun<Self> {
+        Self::MODER::write(0b10); // Set mode to output
+        Self::ODR::write(false); // Set output to low
+        Self::OTYPER::write(false); // Set as push-pull
+        Self::PUPDR::write(0b00); // Set no pull up; no pull down
+
+        Self::OSPEEDR::write(if fast { 0b10 } else { 0b00 });
+        Self::AFR::write(af_mode);
+
+        AltFun::new()
+    }
+
     fn output() -> Output<Self> {
         Self::MODER::write(0b01); // mode = output
         Self::ODR::write(false); // output = low
@@ -52,6 +64,21 @@ pub trait Fields: Sized {
         Self::PUPDR::write(0b10); // pull down
 
         Input::new()
+    }
+}
+
+pub struct AltFun<F> {
+    _phantom: core::marker::PhantomData<F>,
+}
+
+impl<F> AltFun<F>
+where
+    F: Fields,
+{
+    pub fn new() -> Self {
+        Self {
+            _phantom: core::marker::PhantomData,
+        }
     }
 }
 
@@ -83,6 +110,14 @@ where
 
     pub fn set_high(&self) {
         F::BS::write(true);
+    }
+
+    pub fn open_drain(&self) {
+        F::OTYPER::write(true); // Set output type to open-drain
+        F::ODR::write(false); // Set output to low
+                              // XXX(RLB) Comment says "high" in bare-rust
+        F::PUPDR::write(0b01); // Set pull up
+        F::OSPEEDR::write(0b00); // Set speed to slow
     }
 }
 

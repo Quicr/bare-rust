@@ -10,6 +10,8 @@ fn main() {
         .include("FLASH")
         .include("GPIOA")
         .include("GPIOB")
+        .include("USART1")
+        .include("USART2")
         .build()
         .expect("Unable to parse SVD file");
 
