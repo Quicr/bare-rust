@@ -49,11 +49,15 @@ pub trait Fields: Sized {
         let _rx_pin = Rx::alt_fun(1, false); // AF1 work for USART1 to 3
 
         // Set the baud rate
-        // XXX(RLB) bare-rust writes directly to the register as a u32, but this seems like it
-        // results in the same thing.
+        // XXX(RLB) The bare-rust equivalent of this code writes directly to the BRR register, but
+        // the SVD file exposes only Mantissa and Fraction fields.  The Fraction field is 4 bits
+        // wide, so this should be equivalent.
+        const FRACTION_WIDTH: usize = 4;
+        const FRACTION_MASK: u32 = (1 << FRACTION_WIDTH) - 1;
+
         let div = Self::APB_FREQ / baud_rate;
-        Self::DIV_MANTISSA::write((div >> 8) as u16);
-        Self::DIV_FRACTION::write((div & 0xff) as u8);
+        Self::DIV_MANTISSA::write((div >> FRACTION_WIDTH) as u16);
+        Self::DIV_FRACTION::write((div & FRACTION_MASK) as u8);
 
         // Set no parity
         Self::PCE::write(false); // No parity
@@ -100,8 +104,29 @@ where
         }
     }
 
-    pub fn read_exact(&self, mut buffer: impl AsMut<[u8]>) {
-        buffer.as_mut().fill_with(|| self.read_byte());
+    pub fn read_exact(&self, buffer: &mut [u8]) {
+        buffer.fill_with(|| self.read_byte());
+    }
+
+    pub fn read_until<'a>(&self, delim: char, buffer: &'a mut [u8]) -> &'a [u8] {
+        let mut utf8 = [0_u8; 1];
+        delim.encode_utf8(&mut utf8);
+
+        let mut len = 0;
+        let mut done = false;
+        buffer.fill_with(|| {
+            if done {
+                return 0;
+            }
+
+            let c = self.read_byte();
+            done = c == utf8[0];
+            len += 1;
+
+            c
+        });
+
+        &buffer[..len]
     }
 }
 

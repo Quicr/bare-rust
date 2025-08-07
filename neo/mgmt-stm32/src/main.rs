@@ -18,10 +18,13 @@ pub extern "C" fn main() -> ! {
     board.led_a.set(Color::Red);
     board.led_b.set(Color::Blue);
 
-    // let mut buffer = [0u8; 100];
+    let mut buffer = [0u8; 100];
     board.console.write("hello!");
     loop {
-        board.console.write_byte(board.console.read_byte());
+        let line = board.console.read_until('\x0d', &mut buffer);
+        board.console.write("ack: ");
+        board.console.write(line);
+        board.console.write("\x0d\x0a");
     }
 }
 
