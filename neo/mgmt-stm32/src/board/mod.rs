@@ -42,6 +42,19 @@ mod ui {
     pub type ResetPin = gpiob::PB3;
 }
 
+mod net {
+    use crate::hal::gpio::gpiob;
+    use crate::hal::uart;
+
+    pub type Tx = gpiob::PB10;
+    pub type Rx = gpiob::PB11;
+    pub type Usart = uart::USART2;
+    pub const BAUD_RATE: u32 = 115_200;
+
+    pub type BootPin = gpiob::PB5;
+    pub type ResetPin = gpiob::PB4;
+}
+
 pub struct Board {
     pub led_a: Led<led_a::RedPin, led_a::GreenPin, led_a::BluePin, true>,
     pub led_b: Led<led_b::RedPin, led_b::GreenPin, led_b::BluePin, true>,
@@ -64,6 +77,14 @@ impl Board {
 
         let ui_reset = ui::ResetPin::output();
         ui_reset.open_drain();
+        ui_reset.pull_up();
+
+        let net_boot = net::BootPin::output();
+        net_boot.set_low();
+
+        let net_reset = net::ResetPin::output();
+        net_reset.open_drain();
+        net_reset.pull_up();
 
         Self {
             led_a: Default::default(),

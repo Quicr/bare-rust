@@ -88,13 +88,21 @@ where
         }
     }
 
+    pub fn write_ready(&self) -> bool {
+        !F::TXE::read()
+    }
+
+    pub fn read_ready(&self) -> bool {
+        !F::RXNE::read()
+    }
+
     pub fn write_byte(&self, byte: u8) {
-        while !F::TXE::read() {}
+        while !self.write_ready() {}
         F::TDR::write(byte.into())
     }
 
     pub fn read_byte(&self) -> u8 {
-        while !F::RXNE::read() {}
+        while !self.read_ready() {}
         F::RDR::read() as u8
     }
 

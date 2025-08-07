@@ -112,6 +112,10 @@ where
         F::BS::write(true);
     }
 
+    pub fn pull_up(&self) {
+        F::PUPDR::write(0b10);
+    }
+
     pub fn open_drain(&self) {
         F::OTYPER::write(true); // Set output type to open-drain
         F::ODR::write(false); // Set output to low
