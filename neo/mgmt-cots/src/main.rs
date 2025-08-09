@@ -41,17 +41,15 @@ fn main() -> ! {
     // Instantiate the app
     let mut app = App::default();
 
-    // Configure the LEDs
+    // Set up board capabilities
     board.led_a.set(Color::Blue);
     board.led_b.set(Color::Red);
+    let (mut tx, mut rx) = board.console.split();
 
     // Make shared resources available to interrupts
     cortex_m::interrupt::free(move |cs| {
         *GINT.borrow(cs).borrow_mut() = Some(board.timer);
     });
-
-    // Working buffer for the line we are building
-    let (mut tx, mut rx) = board.console.split();
 
     loop {
         // Poll inputs that don't come in asynchronously
