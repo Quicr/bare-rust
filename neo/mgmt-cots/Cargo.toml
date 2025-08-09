@@ -1,0 +1,13 @@
+[package]
+name = "mgmt-cots"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cortex-m      = "0.7"
+cortex-m-rt   = "0.7"
+panic-halt    = "0.2"
+stm32f0xx-hal = { version = "0.18", features = ["stm32f072", "rt"] }
+embedded-dma  = "0.2"
+nb            = "1"
+heapless      = { version = "0.8", features = ["portable-atomic-unsafe-assume-single-core"] }

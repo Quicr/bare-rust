@@ -23,4 +23,5 @@ Cargo.lock
 .DS_Store
 *~
 
-
+# Vim temporary files
+*.swp
