@@ -49,6 +49,13 @@ In `main.rs`, the board and app are instantiated, as well as a queue of events.
 ISRs asynchronously add events to the queue, and the main loop polls for
 synchronous events and triggers the app to process events from the queue.
 
+The idea is that ultimately, the app could be pulled out into a separate crate,
+and instantiated on different hardware.  The app crate would define
+hardware-independent interfaces and logic.  The device-specific crate would
+have the app crate as a dependency.  It would implement the required interfaces
+(as the `board` module does here) and instantiate the app with inputs from the
+board (as the `main` module does here).
+
 ## What it actually does
 
 Right now, the firmware does two things, blink and echo.
