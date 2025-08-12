@@ -8,35 +8,77 @@ use stm32f0xx_hal::{
     timers::{Event, Timer},
 };
 
-mod led_a {
-    use stm32f0xx_hal::gpio::{gpioa, Output, PushPull};
-    pub type RedPin = gpioa::PA4<Output<PushPull>>;
-    pub type GreenPin = gpioa::PA6<Output<PushPull>>;
-    pub type BluePin = gpioa::PA7<Output<PushPull>>;
+#[cfg(feature = "ev12")]
+mod ev12 {
+    pub mod led_a {
+        use stm32f0xx_hal::gpio::{gpioa, Output, PushPull};
+        pub type RedPin = gpioa::PA4<Output<PushPull>>;
+        pub type GreenPin = gpioa::PA6<Output<PushPull>>;
+        pub type BluePin = gpioa::PA7<Output<PushPull>>;
+    }
+
+    pub mod led_b {
+        use stm32f0xx_hal::gpio::{gpiob, Output, PushPull};
+        pub type RedPin = gpiob::PB0<Output<PushPull>>;
+        pub type GreenPin = gpiob::PB14<Output<PushPull>>;
+        pub type BluePin = gpiob::PB15<Output<PushPull>>;
+    }
+
+    pub mod console {
+        use stm32f0xx_hal::{
+            gpio::{gpioa, Alternate, AF1},
+            pac,
+        };
+        pub type Tx = gpioa::PA9<Alternate<AF1>>;
+        pub type Rx = gpioa::PA10<Alternate<AF1>>;
+        pub type Usart = pac::USART1;
+        pub const BAUD_RATE: u32 = 115_200;
+    }
+
+    pub mod timer {
+        use stm32f0xx_hal::pac;
+        pub type Timer = pac::TIM7;
+    }
 }
 
-mod led_b {
-    use stm32f0xx_hal::gpio::{gpiob, Output, PushPull};
-    pub type RedPin = gpiob::PB0<Output<PushPull>>;
-    pub type GreenPin = gpiob::PB14<Output<PushPull>>;
-    pub type BluePin = gpiob::PB15<Output<PushPull>>;
+#[cfg(feature = "ev13")]
+mod ev13 {
+    pub mod led_a {
+        use stm32f0xx_hal::gpio::{gpioa, Output, PushPull};
+        pub type RedPin = gpioa::PA4<Output<PushPull>>;
+        pub type GreenPin = gpioa::PA6<Output<PushPull>>;
+        pub type BluePin = gpioa::PA7<Output<PushPull>>;
+    }
+
+    pub mod led_b {
+        use stm32f0xx_hal::gpio::{gpiob, Output, PushPull};
+        pub type RedPin = gpiob::PB0<Output<PushPull>>;
+        pub type GreenPin = gpiob::PB6<Output<PushPull>>;
+        pub type BluePin = gpiob::PB15<Output<PushPull>>;
+    }
+
+    pub mod console {
+        use stm32f0xx_hal::{
+            gpio::{gpioa, Alternate, AF1},
+            pac,
+        };
+        pub type Tx = gpioa::PA9<Alternate<AF1>>;
+        pub type Rx = gpioa::PA10<Alternate<AF1>>;
+        pub type Usart = pac::USART1;
+        pub const BAUD_RATE: u32 = 115_200;
+    }
+
+    pub mod timer {
+        use stm32f0xx_hal::pac;
+        pub type Timer = pac::TIM7;
+    }
 }
 
-mod console {
-    use stm32f0xx_hal::{
-        gpio::{gpioa, Alternate, AF1},
-        pac,
-    };
-    pub type Tx = gpioa::PA9<Alternate<AF1>>;
-    pub type Rx = gpioa::PA10<Alternate<AF1>>;
-    pub type Usart = pac::USART1;
-    pub const BAUD_RATE: u32 = 115_200;
-}
+#[cfg(feature = "ev12")]
+use ev12::*;
 
-mod timer {
-    use stm32f0xx_hal::pac;
-    pub type Timer = pac::TIM7;
-}
+#[cfg(feature = "ev13")]
+use ev13::*;
 
 pub type LedA = Led<led_a::RedPin, led_a::GreenPin, led_a::BluePin, true>;
 pub type LedB = Led<led_b::RedPin, led_b::GreenPin, led_b::BluePin, true>;
@@ -72,7 +114,7 @@ impl Board {
                 let led_a_g = gpioa.pa6.into_push_pull_output(cs);
                 let led_a_b = gpioa.pa7.into_push_pull_output(cs);
                 let led_b_r = gpiob.pb0.into_push_pull_output(cs);
-                let led_b_g = gpiob.pb14.into_push_pull_output(cs);
+                let led_b_g = gpiob.pb6.into_push_pull_output(cs);
                 let led_b_b = gpiob.pb15.into_push_pull_output(cs);
                 let tx_pin = gpioa.pa9.into_alternate_af1(cs);
                 let rx_pin = gpioa.pa10.into_alternate_af1(cs);

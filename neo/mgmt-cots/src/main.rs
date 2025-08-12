@@ -42,8 +42,8 @@ fn main() -> ! {
     let mut app = App::default();
 
     // Set up board capabilities
-    board.led_a.set(Color::Blue);
-    board.led_b.set(Color::Red);
+    board.led_a.set(Color::Black);
+    board.led_b.set(Color::Black);
     let (mut tx, mut rx) = board.console.split();
 
     // Make shared resources available to interrupts

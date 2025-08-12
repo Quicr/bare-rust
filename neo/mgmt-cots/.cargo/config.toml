@@ -1,4 +1,5 @@
 [target.thumbv6m-none-eabi]
+runner = "probe-rs run --chip STM32F072CBTx"
 rustflags = [
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=--nmagic",
