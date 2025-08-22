@@ -1,5 +1,6 @@
 #![no_std]
 
+#[derive(Clone)]
 pub enum Event {
     PttDown,
     PttUp,

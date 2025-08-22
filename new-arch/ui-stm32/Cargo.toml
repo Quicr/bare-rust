@@ -13,7 +13,7 @@ ui-app = { path = "../ui-app" }
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 panic-halt = "0.2"
-stm32f4xx-hal = { version = "0.21", features = ["stm32f405"] }
+stm32f4xx-hal = { version = "0.22.1", features = ["stm32f405"] }
 heapless = "0.8"
 
 [build-dependencies]

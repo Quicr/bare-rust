@@ -23,4 +23,4 @@ Cargo.lock
 .DS_Store
 *~
 
-
+.*.swp

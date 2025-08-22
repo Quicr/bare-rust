@@ -11,20 +11,32 @@ use ui_app::*;
 use panic_halt as _;
 
 use core::cell::RefCell;
-use core::fmt::Write;
+use core::sync::atomic::{AtomicBool, Ordering};
 use cortex_m::interrupt::{free, Mutex};
 use cortex_m_rt::entry;
 use heapless::mpmc::Q64;
 use stm32f4xx_hal::{
-    gpio::{PinState, Pull, Speed},
+    dma::{StreamX, StreamsTuple},
+    gpio::{self, Output, PinState, Pull, Speed},
     interrupt,
-    pac::{self, Interrupt},
+    pac::{self, Interrupt, DMA2, USART1},
     prelude::*,
-    serial::{Config as SerialConfig, Serial},
+    serial::{
+        dma::{RxDMA, SerialDma, TxDMA},
+        Config as SerialConfig, Serial,
+    },
 };
 
 static PTT_BUTTON: Mutex<RefCell<Option<PttButton>>> = Mutex::new(RefCell::new(None));
 static AI_BUTTON: Mutex<RefCell<Option<AiButton>>> = Mutex::new(RefCell::new(None));
+
+type MgmtSerial =
+    SerialDma<USART1, TxDMA<USART1, StreamX<DMA2, 7>, 4>, RxDMA<USART1, StreamX<DMA2, 5>, 4>>;
+static MGMT_SERIAL: Mutex<RefCell<Option<MgmtSerial>>> = Mutex::new(RefCell::new(None));
+static DONE: AtomicBool = AtomicBool::new(false);
+
+static BLUE_LED: Mutex<RefCell<Option<gpio::PA1<Output>>>> = Mutex::new(RefCell::new(None));
+static GREEN_LED: Mutex<RefCell<Option<gpio::PC5<Output>>>> = Mutex::new(RefCell::new(None));
 
 static EVENT_QUEUE: Q64<Event> = Q64::new();
 
@@ -65,18 +77,7 @@ fn main() -> ! {
         .use_hse(6.MHz())
         .bypass_hse_oscillator()
         .sysclk(72.MHz())
-        //.pclk1(24.MHz())
-        //.require_pll48clk()
         .freeze();
-
-    // Manual clock setup, cloned from bare-rust
-    /*
-    let rcc = unsafe { &*pac::RCC::ptr() };
-    rcc.cr().modify(|_, w| w.hseon().set_bit());
-    while rcc.cr().read().hserdy().bit_is_clear() {}
-
-    rcc.cfgr().modify(|_, w| w.pllsrc().set_bits(1));
-    */
 
     //////////
 
@@ -114,15 +115,49 @@ fn main() -> ! {
     )
     .unwrap();
 
+    // Set up DMA
+    let dma2 = StreamsTuple::new(dp.DMA2);
+
+    let mgmt_serial = serial.use_dma(dma2.7, dma2.5);
+    cortex_m::interrupt::free(|cs| {
+        GREEN_LED.borrow(cs).borrow_mut().replace(g);
+        BLUE_LED.borrow(cs).borrow_mut().replace(b);
+        MGMT_SERIAL.borrow(cs).borrow_mut().replace(mgmt_serial);
+    });
+
     // Create a timer-based delay
     let mut delay = dp.TIM5.delay_us(&mut clocks);
 
-    //////////
+    // Enable the required interrupts
+    unsafe {
+        cortex_m::peripheral::NVIC::unmask(Interrupt::EXTI0);
+        cortex_m::peripheral::NVIC::unmask(Interrupt::EXTI1);
+        cortex_m::peripheral::NVIC::unmask(pac::Interrupt::USART1);
+        cortex_m::peripheral::NVIC::unmask(pac::Interrupt::DMA1_STREAM5);
+        cortex_m::peripheral::NVIC::unmask(pac::Interrupt::DMA1_STREAM7);
+    }
 
     r.set_low();
 
     loop {
-        serial.write_str("hello world");
+        cortex_m::interrupt::free(|cs| unsafe {
+            if let Some(mgmt_serial) = MGMT_SERIAL.borrow(cs).borrow_mut().as_mut() {
+                let _ = mgmt_serial.write(b"hello world\n");
+            }
+        });
+
+        r.toggle();
+        delay.delay_ms(1000);
+
+        cortex_m::interrupt::free(|cs| unsafe {
+            if let Some(mgmt_serial) = MGMT_SERIAL.borrow(cs).borrow_mut().as_mut() {
+                let _ = mgmt_serial.write_dma(b"hello motherfucker!\n", None);
+            }
+        });
+
+        //while !DONE.load(Ordering::SeqCst) {}
+        //DONE.store(false, Ordering::SeqCst);
+
         r.toggle();
         delay.delay_ms(1000);
     }
@@ -162,4 +197,45 @@ fn EXTI0() {
     };
 
     let _ = EVENT_QUEUE.enqueue(event);
+}
+
+#[interrupt]
+fn USART2() {
+    cortex_m::interrupt::free(|cs| {
+        if let Some(g) = GREEN_LED.borrow(cs).borrow_mut().as_mut() {
+            g.toggle();
+        }
+
+        if let Some(usart2_dma) = MGMT_SERIAL.borrow(cs).borrow_mut().as_mut() {
+            usart2_dma.handle_error_interrupt();
+        }
+    });
+}
+
+#[interrupt]
+fn DMA1_STREAM5() {
+    cortex_m::interrupt::free(|cs| {
+        if let Some(b) = BLUE_LED.borrow(cs).borrow_mut().as_mut() {
+            b.toggle();
+        }
+
+        if let Some(usart2_dma) = MGMT_SERIAL.borrow(cs).borrow_mut().as_mut() {
+            usart2_dma.handle_dma_interrupt();
+            DONE.store(true, Ordering::SeqCst);
+        }
+    });
+}
+
+#[interrupt]
+fn DMA1_STREAM7() {
+    cortex_m::interrupt::free(|cs| {
+        if let Some(b) = BLUE_LED.borrow(cs).borrow_mut().as_mut() {
+            b.toggle();
+        }
+
+        if let Some(usart2_dma) = MGMT_SERIAL.borrow(cs).borrow_mut().as_mut() {
+            usart2_dma.handle_dma_interrupt();
+            DONE.store(true, Ordering::SeqCst);
+        }
+    });
 }
