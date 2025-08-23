@@ -1,14 +1,11 @@
 #![no_std]
 
-use heapless::String;
-
 #[derive(Clone)]
 pub enum Event {
     PttDown,
     PttUp,
     AiDown,
     AiUp,
-    MgmtCommand(String<128>),
 }
 
 #[allow(dead_code)]
