@@ -13,8 +13,8 @@ compile_error!("Please select only one board");
 
 // Expose the selected board
 #[allow(unused_imports)]
-#[cfg(feature = "ev13")]
-pub use ev13::*;
+#[cfg(feature = "ev12")]
+pub use ev12::*;
 
 #[allow(unused_imports)]
 #[cfg(feature = "ev13")]
