@@ -1,11 +1,14 @@
 #![no_std]
 
+use heapless::String;
+
 #[derive(Clone)]
 pub enum Event {
     PttDown,
     PttUp,
     AiDown,
     AiUp,
+    MgmtCommand(String<128>),
 }
 
 #[allow(dead_code)]
@@ -58,8 +61,13 @@ pub trait Led {
     }
 }
 
+pub trait Write {
+    fn write(&mut self, buf: &[u8]) -> usize;
+}
+
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
+    fn mgmt_tx(&mut self) -> &mut impl Write;
 }
 
 pub struct App {

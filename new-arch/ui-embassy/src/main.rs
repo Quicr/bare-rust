@@ -28,6 +28,9 @@ async fn monitor_button(mut button: Button, down: Event, up: Event, events: Even
     }
 }
 
+#[embassy_executor::task]
+async fn monitor_rx(mut rx: SerialRx, event_template: Event, events: EventSender) {}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut board = Board::new();
