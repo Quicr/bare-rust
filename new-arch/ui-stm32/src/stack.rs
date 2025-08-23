@@ -69,7 +69,7 @@ pub fn repaint() {
 #[inline(never)]
 pub fn measure<F>(f: F) -> usize
 where
-    F: FnOnce(),
+    F: Fn(),
 {
     repaint();
     let usage_before = usage();
