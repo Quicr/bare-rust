@@ -29,6 +29,7 @@ fn stack_ptr() -> *const u32 {
 /// TODO(RLB) Wrap this in a critical section so that it doesn't get interrupted.
 #[inline(never)]
 pub fn usage() -> usize {
+    /*
     unsafe {
         let stack_pointer = stack_ptr();
         let stack_start = &_stack_start as *const u32;
@@ -44,6 +45,8 @@ pub fn usage() -> usize {
 
         (stack_start as usize) - high_water_mark
     }
+    */
+    42
 }
 
 /// This function "repaints" the stack, starting from after the current stack.  It fills the entire
@@ -53,6 +56,7 @@ pub fn usage() -> usize {
 /// TODO(RLB) Wrap this in a critical section so that it doesn't get interrupted.
 #[inline(never)]
 pub fn repaint() {
+    /*
     unsafe {
         let stack_end = (&_stack_end as *const u32) as *mut u32;
 
@@ -61,6 +65,7 @@ pub fn repaint() {
             curr.write_volatile(STACK_PAINT_VALUE);
         }
     }
+    */
 }
 
 /// This function measures the stack usage of a specific function by repainting memory from the

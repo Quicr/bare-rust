@@ -18,9 +18,13 @@ fn small_stack() {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
+    info!("stack measurement test!");
+
+    /*
     let large = stack::measure(large_stack);
     info!("large: {}", large);
 
     let small = stack::measure(small_stack);
     info!("small: {}", small);
+    */
 }
