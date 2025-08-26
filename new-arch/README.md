@@ -1,8 +1,8 @@
-New Architecture
-================
+Rust on Hactar
+==============
 
 This directory contains a prototype of a new structure for Rust code on the
-Hactar UI chip.  It currently contains three crates:
+Hactar UI chip.  It currently contains three primary crates:
 
 - `ui-app`
     * The device-independent aspects of the UI chip logic
@@ -20,6 +20,16 @@ Hactar UI chip.  It currently contains three crates:
       abstraction, and routes events from ISRs to the app.
 - `ui-laptop`
     * Code to instantiate the app in a terminal window
+
+There are also a few other crates here for other purposes:
+
+- `mgmt-embassy`: An experimental MGMT chip firmware that just pipes UART data
+  back and forth to the UI chip.
+
+- `net-idf`: An experimental NET chip firmware that connects to wifi and makes a
+  websocket connection.
+
+- `cmox-sys`: A `-sys` module for the STM cryptographic library.
 
 ## Quickstart
 
