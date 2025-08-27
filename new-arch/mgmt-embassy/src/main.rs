@@ -22,12 +22,19 @@ type Tx = UartTx<'static, Async>;
 type Rx = UartRx<'static, Async>;
 type Led = Output<'static>;
 
+const DMA_BUFFER_SIZE: usize = 1024;
+
 #[embassy_executor::task(pool_size = 2)]
-async fn pipe(mut to: Tx, mut from: Rx, mut led: Led) {
-    let mut buf = [0u8; 1];
+async fn pipe(mut to: Tx, from: Rx, mut led: Led) {
+    // Configure a ring buffer on the DMA receiver
+    let mut dma_buf = [0u8; DMA_BUFFER_SIZE];
+    let mut from = from.into_ring_buffered(&mut dma_buf);
+
+    // Copy from input to output
+    let mut buf = [0u8; 4];
     loop {
-        unwrap!(from.read(&mut buf).await);
-        unwrap!(to.write(&buf).await);
+        let n = unwrap!(from.read(&mut buf).await);
+        unwrap!(to.write(&buf[..n]).await);
         led.toggle();
     }
 }
@@ -37,12 +44,12 @@ async fn main(spawner: Spawner) {
     let p = embassy_stm32::init(Default::default());
 
     // Instantiate LEDs
-    let led_a_r = Output::new(p.PA4, Level::Low, Speed::Low);
-    let led_a_g = Output::new(p.PA6, Level::Low, Speed::Low);
-    let led_a_b = Output::new(p.PA7, Level::Low, Speed::Low);
-    let led_b_r = Output::new(p.PB0, Level::Low, Speed::Low);
-    let led_b_g = Output::new(p.PB6, Level::Low, Speed::Low);
-    let led_b_b = Output::new(p.PB15, Level::Low, Speed::Low);
+    let led_a_r = Output::new(p.PA4, Level::High, Speed::Low);
+    let led_a_g = Output::new(p.PA6, Level::High, Speed::Low);
+    let led_a_b = Output::new(p.PA7, Level::High, Speed::Low);
+    let led_b_r = Output::new(p.PB0, Level::High, Speed::Low);
+    let led_b_g = Output::new(p.PB6, Level::High, Speed::Low);
+    let led_b_b = Output::new(p.PB15, Level::High, Speed::Low);
 
     // Configure USB-side UART
     let config = {
@@ -50,7 +57,7 @@ async fn main(spawner: Spawner) {
         config.baudrate = 115200;
         config.data_bits = DataBits::DataBits8;
         config.stop_bits = StopBits::STOP1;
-        config.parity = Parity::ParityEven;
+        config.parity = Parity::ParityNone;
         config
     };
     let usb_uart = Uart::new(
@@ -61,6 +68,7 @@ async fn main(spawner: Spawner) {
     let (usb_tx, usb_rx) = usb_uart.split();
 
     // Configure UI-side UART
+    /*
     let config = {
         let mut config = Config::default();
         config.baudrate = 115200;
@@ -72,8 +80,12 @@ async fn main(spawner: Spawner) {
     let ui_uart = Uart::new(p.USART2, p.PA3, p.PA2, Irqs, p.DMA1_CH4, p.DMA1_CH5, config).unwrap();
 
     let (ui_tx, ui_rx) = ui_uart.split();
+    */
+
+    // Echo the USB UART back to itself
+    unwrap!(spawner.spawn(pipe(usb_tx, usb_rx, led_b_g)));
 
     // Pipe the two UARTs together
-    unwrap!(spawner.spawn(pipe(ui_tx, usb_rx, led_a_b)));
-    unwrap!(spawner.spawn(pipe(usb_tx, ui_rx, led_b_g)));
+    // unwrap!(spawner.spawn(pipe(ui_tx, usb_rx, led_a_b)));
+    // unwrap!(spawner.spawn(pipe(usb_tx, ui_rx, led_b_g)));
 }
