@@ -30,9 +30,12 @@
 //!   - Real cryptographic operations with fault checking
 
 use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::hash::sm3::Sm3;
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
+use digest::Digest;
+use rand_core::{RngCore, CryptoRng};
 
 /// Supported elliptic curves
 #[derive(Copy, Clone, Debug)]
@@ -234,7 +237,14 @@ impl EcdsaSigningKey {
     }
 
     /// Sign a message digest using ECDSA
-    pub fn sign_digest(&self, digest: &[u8]) -> Result<EcdsaSignature> {
+    /// 
+    /// # Arguments
+    /// * `digest` - The message digest to sign
+    /// * `rng` - Cryptographically secure random number generator for generating k value
+    pub fn sign_digest<R>(&self, digest: &[u8], rng: &mut R) -> Result<EcdsaSignature> 
+    where 
+        R: RngCore + CryptoRng,
+    {
         ensure_initialized()?;
 
         // Create ECC context with working buffer
@@ -256,19 +266,9 @@ impl EcdsaSigningKey {
         let mut signature_buf = [0u8; 132];
         let mut sig_len = signature_len;
         
-        // Generate proper random bytes for k value using CMOX RNG
+        // Generate cryptographically secure random bytes for k value
         let mut random_k = [0u8; 64];
-        let result = unsafe {
-            crate::utils::generate_random_bytes(&mut random_k)?;
-        };
-        // If RNG fails, fall back to deterministic generation for compatibility
-        if result.is_err() {
-            for (i, item) in random_k.iter_mut().enumerate() {
-                *item = digest.get(i % digest.len()).unwrap_or(&0)
-                       ^ self.private_key.get(i % self.private_key_len).unwrap_or(&0)
-                       ^ (i as u8);
-            }
-        }
+        rng.fill_bytes(&mut random_k);
         
         // Call CMOX ECDSA sign
         let result = unsafe {
@@ -697,28 +697,46 @@ impl Sm2SigningKey {
     }
 
     /// Sign a message using SM2
-    /// Note: SM2 requires computing ZA + message digest before signing
-    pub fn sign_message(&self, message: &[u8]) -> Result<Sm2Signature> {
+    /// 
+    /// This function implements the full SM2 signature process:
+    /// 1. Computes ZA value from user identity and curve parameters
+    /// 2. Computes SM3(ZA || message) digest per SM2 specification
+    /// 3. Signs the resulting digest using SM2 algorithm
+    /// 
+    /// # Arguments
+    /// * `message` - The message to sign
+    /// * `rng` - Cryptographically secure random number generator for generating k value
+    pub fn sign_message<R>(&self, message: &[u8], rng: &mut R) -> Result<Sm2Signature> 
+    where 
+        R: RngCore + CryptoRng,
+    {
         ensure_initialized()?;
 
         // First compute ZA
         let za = self.compute_za()?;
 
-        // Compute SM3 hash of ZA || message
-        // For simplicity, we'll assume the caller provides the final digest
-        // In a real implementation, you'd use SM3 hash: Hash(ZA || message)
-        let mut digest = [0u8; 32];
+        // Compute SM3 hash of ZA || message (per SM2 specification)
+        let mut hasher = Sm3::new();
+        Digest::update(&mut hasher, &za);         // Add ZA value
+        Digest::update(&mut hasher, message);     // Add message
+        let digest_output = hasher.finalize();
         
-        // Simple combination for demo - in practice use SM3
-        for i in 0..32 {
-            digest[i] = za[i] ^ message.get(i % message.len()).copied().unwrap_or(0);
-        }
+        // Convert to byte array for signing
+        let mut digest = [0u8; 32];
+        digest.copy_from_slice(&digest_output);
 
-        self.sign_digest(&digest)
+        self.sign_digest(&digest, rng)
     }
 
     /// Sign a pre-computed digest using SM2
-    pub fn sign_digest(&self, digest: &[u8]) -> Result<Sm2Signature> {
+    /// 
+    /// # Arguments
+    /// * `digest` - The message digest to sign
+    /// * `rng` - Cryptographically secure random number generator for generating k value
+    pub fn sign_digest<R>(&self, digest: &[u8], rng: &mut R) -> Result<Sm2Signature> 
+    where 
+        R: RngCore + CryptoRng,
+    {
         ensure_initialized()?;
 
         // Create ECC context with working buffer
@@ -738,13 +756,9 @@ impl Sm2SigningKey {
         let mut signature_buf = [0u8; 64];
         let mut sig_len = 64;
         
-        // Generate some deterministic "random" bytes for k value
+        // Generate cryptographically secure random bytes for k value
         let mut random_k = [0u8; 32];
-        for (i, item) in random_k.iter_mut().enumerate() {
-            *item = digest.get(i % digest.len()).unwrap_or(&0)
-                   ^ self.private_key.get(i).unwrap_or(&0)
-                   ^ (i as u8);
-        }
+        rng.fill_bytes(&mut random_k);
         
         // Call CMOX SM2 sign
         let result = unsafe {
@@ -856,7 +870,7 @@ impl Sm2VerifyingKey {
     }
 }
 
-/// RSA signature (simplified placeholder)
+/// RSA signature using PKCS#1 v1.5 signature scheme
 #[derive(Clone, Debug)]
 pub struct RsaSignature {
     signature: [u8; 512], // Max RSA-4096 signature size

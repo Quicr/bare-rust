@@ -1,10 +1,34 @@
 //! Digital signature examples using CMOX library
 //! 
 //! This example demonstrates the usage of ECDSA, EdDSA, RSA, and SM2 digital signatures
-//! with the CMOX library, including error handling and usage patterns.
+//! with the CMOX library, including proper cryptographic hash computation and usage patterns.
+//! 
+//! ## Features Demonstrated:
+//! - Real SHA-256, SHA-384, and SHA-512 hash computation for message digests
+//! - ECDSA signatures with P-256, P-384, and P-521 curves  
+//! - RSA signatures with PKCS#1 v1.5 and proper hash algorithms
+//! - SM2 signatures with proper SM3(ZA || message) computation
+//! - Cryptographically secure random number generation for signatures
 
 #![no_std]
 #![no_main]
+
+use core::alloc::{GlobalAlloc, Layout};
+
+struct DummyAllocator;
+
+unsafe impl GlobalAlloc for DummyAllocator {
+    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+    
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+        // Do nothing
+    }
+}
+
+#[global_allocator]
+static GLOBAL: DummyAllocator = DummyAllocator;
 
 use cmox::{
     initialize,
@@ -14,8 +38,11 @@ use cmox::{
         RsaSigningKey, RsaVerifyingKey, RsaSignature, RsaKeySize, RsaHashAlgorithm,
         Sm2Curve, Sm2SigningKey, Sm2VerifyingKey, Sm2Signature
     },
+    rng::CtrDrbg,
+    hash::{sm3::Sm3, sha2::{Sha256, Sha384, Sha512}},
     CmoxError
 };
+use digest::Digest;
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -27,17 +54,23 @@ pub extern "C" fn main() {
     // Initialize CMOX library
     initialize().expect("Failed to initialize CMOX");
 
+    // Initialize RNG for signature examples
+    let entropy = [0x42; 32]; // In practice, use real entropy
+    let nonce = [0x01; 16];
+    let mut rng = CtrDrbg::new_default(&entropy, &nonce)
+        .expect("Failed to initialize RNG");
+
     // Run signature examples
-    ecdsa_signature_example();
-    eddsa_signature_example();
-    rsa_signature_example();
-    sm2_signature_example();
-    signature_error_handling_example();
-    signature_usage_patterns();
+    ecdsa_signature_example(&mut rng);
+    eddsa_signature_example(); // EdDSA doesn't need RNG
+    rsa_signature_example();   // RSA PKCS#1 v1.5 is deterministic
+    sm2_signature_example(&mut rng);
+    signature_error_handling_example(&mut rng);
+    signature_usage_patterns(&mut rng);
 }
 
 /// Example using ECDSA signatures with different curves
-fn ecdsa_signature_example() {
+fn ecdsa_signature_example(rng: &mut CtrDrbg) {
     // ECDSA P-256 Example
     {
         let private_key = [0x01; 32]; // 256-bit private key
@@ -49,14 +82,17 @@ fn ecdsa_signature_example() {
             EcdsaVerifyingKey::new(&public_key, CurveType::P256)
         ) {
             (Ok(signing_key), Ok(verifying_key)) => {
-                // Message to sign (usually a hash)
-                let message_digest = b"Hello, ECDSA P-256!";
+                // Message to sign - compute proper SHA-256 hash
+                let message = b"Hello, ECDSA P-256!";
+                let mut hasher = Sha256::new();
+                Digest::update(&mut hasher, message);
+                let message_digest = hasher.finalize();
                 
                 // Sign the message digest
-                match signing_key.sign_digest(message_digest) {
+                match signing_key.sign_digest(&message_digest, rng) {
                     Ok(signature) => {
                         // Verify the signature
-                        match verifying_key.verify_digest(message_digest, &signature) {
+                        match verifying_key.verify_digest(&message_digest, &signature) {
                             Ok(()) => {
                                 // Signature verified successfully
                             },
@@ -98,14 +134,18 @@ fn ecdsa_signature_example() {
             EcdsaVerifyingKey::new(&public_key, CurveType::P384)
         ) {
             (Ok(signing_key), Ok(verifying_key)) => {
-                let message_digest = b"ECDSA P-384 signature test";
+                // Message to sign - compute proper SHA-384 hash
+                let message = b"ECDSA P-384 signature test";
+                let mut hasher = Sha384::new();
+                Digest::update(&mut hasher, message);
+                let message_digest = hasher.finalize();
                 
-                match signing_key.sign_digest(message_digest) {
+                match signing_key.sign_digest(&message_digest, rng) {
                     Ok(signature) => {
                         // P-384 signatures should be 96 bytes (48 bytes r + 48 bytes s)
                         assert!(signature.len() == 96);
                         
-                        match verifying_key.verify_digest(message_digest, &signature) {
+                        match verifying_key.verify_digest(&message_digest, &signature) {
                             Ok(()) => {
                                 // Success
                             },
@@ -135,14 +175,18 @@ fn ecdsa_signature_example() {
             EcdsaVerifyingKey::new(&public_key, CurveType::P521)
         ) {
             (Ok(signing_key), Ok(verifying_key)) => {
-                let message_digest = b"ECDSA P-521 signature test with longer message";
+                // Message to sign - compute proper SHA-512 hash  
+                let message = b"ECDSA P-521 signature test with longer message";
+                let mut hasher = Sha512::new();
+                Digest::update(&mut hasher, message);
+                let message_digest = hasher.finalize();
                 
-                match signing_key.sign_digest(message_digest) {
+                match signing_key.sign_digest(&message_digest, rng) {
                     Ok(signature) => {
                         // P-521 signatures should be 132 bytes (66 bytes r + 66 bytes s)
                         assert!(signature.len() == 132);
                         
-                        match verifying_key.verify_digest(message_digest, &signature) {
+                        match verifying_key.verify_digest(&message_digest, &signature) {
                             Ok(()) => {
                                 // Success
                             },
@@ -315,14 +359,18 @@ fn rsa_signature_example() {
             RsaVerifyingKey::new(&modulus, &public_exponent, RsaKeySize::Rsa2048)
         ) {
             (Ok(signing_key), Ok(verifying_key)) => {
-                let message_digest = b"RSA-2048 signature test";
+                // Message to sign - compute proper SHA-256 hash
+                let message = b"RSA-2048 signature test";
+                let mut hasher = Sha256::new();
+                Digest::update(&mut hasher, message);
+                let message_digest = hasher.finalize();
                 
-                match signing_key.sign_digest(message_digest, RsaHashAlgorithm::Sha256) {
+                match signing_key.sign_digest(&message_digest, RsaHashAlgorithm::Sha256) {
                     Ok(signature) => {
                         // RSA-2048 signatures should be 256 bytes
                         assert!(signature.len() == 256);
                         
-                        match verifying_key.verify_digest(message_digest, &signature, RsaHashAlgorithm::Sha256) {
+                        match verifying_key.verify_digest(&message_digest, &signature, RsaHashAlgorithm::Sha256) {
                             Ok(()) => {
                                 // Success
                             },
@@ -364,14 +412,18 @@ fn rsa_signature_example() {
             RsaVerifyingKey::new(&modulus, &public_exponent, RsaKeySize::Rsa4096)
         ) {
             (Ok(signing_key), Ok(verifying_key)) => {
-                let message_digest = b"RSA-4096 signature test with longer data";
+                // Message to sign - compute proper SHA-512 hash
+                let message = b"RSA-4096 signature test with longer data";
+                let mut hasher = Sha512::new();
+                Digest::update(&mut hasher, message);
+                let message_digest = hasher.finalize();
                 
-                match signing_key.sign_digest(message_digest, RsaHashAlgorithm::Sha512) {
+                match signing_key.sign_digest(&message_digest, RsaHashAlgorithm::Sha512) {
                     Ok(signature) => {
                         // RSA-4096 signatures should be 512 bytes
                         assert!(signature.len() == 512);
                         
-                        match verifying_key.verify_digest(message_digest, &signature, RsaHashAlgorithm::Sha512) {
+                        match verifying_key.verify_digest(&message_digest, &signature, RsaHashAlgorithm::Sha512) {
                             Ok(()) => {
                                 // Success
                             },
@@ -393,7 +445,7 @@ fn rsa_signature_example() {
 }
 
 /// Example using SM2 signatures (Chinese national standard)
-fn sm2_signature_example() {
+fn sm2_signature_example(rng: &mut CtrDrbg) {
     // SM2 production curve example
     {
         let private_key = [0x30; 32]; // SM2 private key (32 bytes)
@@ -408,7 +460,7 @@ fn sm2_signature_example() {
                 let message = b"SM2 signature test message";
                 
                 // Sign the message
-                match signing_key.sign_message(message) {
+                match signing_key.sign_message(message, rng) {
                     Ok(signature) => {
                         // SM2 signatures should be 64 bytes
                         assert!(signature.len() == 64);
@@ -416,10 +468,14 @@ fn sm2_signature_example() {
                         // For verification, we need the same digest that was signed
                         // The signing key computes ZA internally, so we need to replicate this
                         if let Ok(za) = signing_key.compute_za() {
+                            // Compute SM3 hash of ZA || message (same as in signing)
+                            let mut hasher = Sm3::new();
+                            Digest::update(&mut hasher, &za);
+                            Digest::update(&mut hasher, message);
+                            let digest_output = hasher.finalize();
+                            
                             let mut digest = [0u8; 32];
-                            for i in 0..32 {
-                                digest[i] = za[i] ^ message.get(i % message.len()).copied().unwrap_or(0);
-                            }
+                            digest.copy_from_slice(&digest_output);
                             
                             match verifying_key.verify_digest(&digest, &signature) {
                                 Ok(()) => {
@@ -466,18 +522,21 @@ fn sm2_signature_example() {
             (Ok(signing_key), Ok(verifying_key)) => {
                 let message = b"SM2 test curve signature";
                 
-                match signing_key.sign_message(message) {
+                match signing_key.sign_message(message, rng) {
                     Ok(signature) => {
                         // Test ZA computation
                         if let Ok(za) = signing_key.compute_za() {
-                            // ZA should be 32 bytes (SHA-256 output)
+                            // ZA should be 32 bytes (SM3 output)
                             assert!(za.len() == 32);
                             
                             // Compute the digest that was actually signed
+                            let mut hasher = Sm3::new();
+                            Digest::update(&mut hasher, &za);
+                            Digest::update(&mut hasher, message);
+                            let digest_output = hasher.finalize();
+                            
                             let mut digest = [0u8; 32];
-                            for i in 0..32 {
-                                digest[i] = za[i] ^ message.get(i % message.len()).copied().unwrap_or(0);
-                            }
+                            digest.copy_from_slice(&digest_output);
                             
                             match verifying_key.verify_digest(&digest, &signature) {
                                 Ok(()) => {
@@ -501,11 +560,11 @@ fn sm2_signature_example() {
     }
 
     // Test different user IDs
-    sm2_user_id_examples();
+    sm2_user_id_examples(rng);
 }
 
 /// Example showing SM2 user ID features
-fn sm2_user_id_examples() {
+fn sm2_user_id_examples(rng: &mut CtrDrbg) {
     let private_key = [0x34; 32];
     let public_key = [0x35; 64];
     
@@ -525,7 +584,7 @@ fn sm2_user_id_examples() {
                 
                 // Sign a message
                 let message = b"Common message for all users";
-                if let Ok(signature) = signing_key.sign_message(message) {
+                if let Ok(signature) = signing_key.sign_message(message, rng) {
                     // Each user will produce a different signature for the same message
                     // because ZA is different
                     assert!(signature.len() == 64);
@@ -536,7 +595,7 @@ fn sm2_user_id_examples() {
 }
 
 /// Example showing signature error handling patterns
-fn signature_error_handling_example() {
+fn signature_error_handling_example(_rng: &mut CtrDrbg) {
     // Test invalid key sizes for ECDSA
     {
         let wrong_private_key = [0x01; 31]; // Wrong size for P-256 (should be 32)
@@ -668,7 +727,7 @@ fn signature_error_handling_example() {
 }
 
 /// Example showing different signature use patterns
-fn signature_usage_patterns() {
+fn signature_usage_patterns(rng: &mut CtrDrbg) {
     // Pattern 1: Sign and verify with same keys
     let private_key = [0x42; 32];
     let public_key = [0x43; 64];
@@ -679,7 +738,7 @@ fn signature_usage_patterns() {
     ) {
         let message = b"Important document to sign";
         
-        if let Ok(signature) = signer.sign_digest(message) {
+        if let Ok(signature) = signer.sign_digest(message, rng) {
             // Signature can be stored or transmitted
             let signature_bytes = signature.to_bytes();
             
@@ -704,7 +763,7 @@ fn signature_usage_patterns() {
         
         // Sign all messages
         for (i, message) in messages.iter().enumerate() {
-            if let Ok(sig) = signer.sign_digest(message) {
+            if let Ok(sig) = signer.sign_digest(message, rng) {
                 signatures[i] = Some(sig);
             }
         }

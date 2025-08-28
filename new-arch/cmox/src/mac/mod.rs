@@ -170,8 +170,10 @@ impl Mac for HmacSha256 {
     }
 
     fn finalize_reset(&mut self) -> CtOutput<Self> {
-        // Not supported by CMOX API - would need to store key and reinitialize
-        unimplemented!("finalize_reset not supported by CMOX API")
+        // CMOX API doesn't directly support finalize_reset pattern
+        // We'd need to store the key to reinitialize after finalization
+        // For now, return an error via panic since the trait doesn't allow Result
+        panic!("finalize_reset not supported by CMOX HMAC implementation - use finalize() + new() instead");
     }
 
     fn reset(&mut self) {
@@ -198,7 +200,8 @@ impl Mac for HmacSha256 {
         &mut self,
         _tag: &GenericArray<u8, Self::OutputSize>,
     ) -> core::result::Result<(), MacError> {
-        unimplemented!("verify_reset not supported")
+        // Not supported by CMOX - would need key storage for reset
+        Err(MacError)
     }
 
     fn verify_slice(self, tag: &[u8]) -> core::result::Result<(), MacError> {
@@ -211,7 +214,8 @@ impl Mac for HmacSha256 {
     }
 
     fn verify_slice_reset(&mut self, _tag: &[u8]) -> core::result::Result<(), MacError> {
-        unimplemented!("verify_slice_reset not supported")
+        // Not supported by CMOX - would need key storage for reset  
+        Err(MacError)
     }
 
     fn verify_truncated_left(self, tag: &[u8]) -> core::result::Result<(), MacError> {
@@ -419,7 +423,9 @@ impl Mac for AesCmac {
     }
 
     fn finalize_reset(&mut self) -> CtOutput<Self> {
-        unimplemented!("finalize_reset not supported")
+        // CMOX API doesn't directly support finalize_reset pattern
+        // We'd need to store the key to reinitialize after finalization  
+        panic!("finalize_reset not supported by CMOX CMAC implementation - use finalize() + new() instead");
     }
 
     fn reset(&mut self) {
@@ -445,7 +451,8 @@ impl Mac for AesCmac {
         &mut self,
         _tag: &GenericArray<u8, Self::OutputSize>,
     ) -> core::result::Result<(), MacError> {
-        unimplemented!("verify_reset not supported")
+        // Not supported by CMOX - would need key storage for reset
+        Err(MacError)
     }
 
     fn verify_slice(self, tag: &[u8]) -> core::result::Result<(), MacError> {
@@ -458,7 +465,8 @@ impl Mac for AesCmac {
     }
 
     fn verify_slice_reset(&mut self, _tag: &[u8]) -> core::result::Result<(), MacError> {
-        unimplemented!("verify_slice_reset not supported")
+        // Not supported by CMOX - would need key storage for reset  
+        Err(MacError)
     }
 
     fn verify_truncated_left(self, tag: &[u8]) -> core::result::Result<(), MacError> {

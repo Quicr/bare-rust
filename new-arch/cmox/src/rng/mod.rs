@@ -20,6 +20,8 @@ use crate::{utils::ensure_initialized, CmoxError, Result};
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
+use core::num::NonZeroU32;
+use rand_core::{RngCore, CryptoRng};
 
 /// CTR-DRBG algorithm variants
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -301,6 +303,29 @@ impl Drop for CtrDrbg {
         }
     }
 }
+
+impl RngCore for CtrDrbg {
+    fn next_u32(&mut self) -> u32 {
+        CtrDrbg::next_u32(self).unwrap_or(0)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        CtrDrbg::next_u64(self).unwrap_or(0)
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        let _ = self.generate_bytes(dest);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> core::result::Result<(), rand_core::Error> {
+        match self.generate_bytes(dest) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(rand_core::Error::from(NonZeroU32::new(1).unwrap())),
+        }
+    }
+}
+
+impl CryptoRng for CtrDrbg {}
 
 impl fmt::Debug for CtrDrbg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

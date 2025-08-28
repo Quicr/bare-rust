@@ -1,4 +1,8 @@
-//! AES-GCM AEAD implementations (simplified)
+//! AES-GCM AEAD implementations using CMOX library
+//!
+//! This module provides full AES-GCM (Galois/Counter Mode) AEAD cipher implementations
+//! using the STM32 CMOX cryptographic library. Both AES-128-GCM and AES-256-GCM are supported
+//! with complete encryption, decryption, and authentication tag generation/verification.
 
 use crate::{utils::ensure_initialized, CmoxError, Result};
 use cmox_sys::*;
@@ -103,7 +107,12 @@ macro_rules! impl_aes_gcm {
                 Ok(())
             }
 
-            /// Encrypt data with associated data using GCM (simplified native API)
+            /// Encrypt data with associated data using AES-GCM
+            /// 
+            /// This method provides the complete GCM encryption process using CMOX:
+            /// - Encrypts the buffer in-place using AES-GCM
+            /// - Authenticates both the encrypted data and associated data
+            /// - Returns the authentication tag for verification during decryption
             pub fn encrypt_inplace(
                 &mut self,
                 nonce: &[u8; 12],
@@ -114,15 +123,80 @@ macro_rules! impl_aes_gcm {
                     return Err(CmoxError::NotInitialized);
                 }
 
-                // For now, return a placeholder implementation
-                // TODO: Implement full GCM encryption using correct CMOX API sequence
-                let _ = (nonce, associated_data, buffer);
-                
-                // Return a dummy tag for now
-                Ok([0u8; 16])
+                // Set nonce/IV
+                let result = unsafe {
+                    cmox_cipher_setIV(
+                        self.cipher_handle,
+                        nonce.as_ptr(),
+                        nonce.len(),
+                    )
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Set payload length
+                let result = unsafe {
+                    cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len())
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Set AAD length
+                let result = unsafe {
+                    cmox_cipher_setADLen(self.cipher_handle, associated_data.len())
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Set tag length
+                let result = unsafe {
+                    cmox_cipher_setTagLen(self.cipher_handle, 16) // 128-bit tag
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Process AAD
+                if !associated_data.is_empty() {
+                    let result = unsafe {
+                        cmox_cipher_appendAD(
+                            self.cipher_handle,
+                            associated_data.as_ptr(),
+                            associated_data.len(),
+                        )
+                    };
+                    CmoxError::from_cipher_retval(result)?;
+                }
+
+                // Encrypt payload
+                let mut output_len = buffer.len();
+                let result = unsafe {
+                    cmox_cipher_append(
+                        self.cipher_handle,
+                        buffer.as_ptr(),
+                        buffer.len(),
+                        buffer.as_mut_ptr(),
+                        &mut output_len,
+                    )
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Generate authentication tag
+                let mut tag = [0u8; 16];
+                let mut tag_len = 16;
+                let result = unsafe {
+                    cmox_cipher_generateTag(
+                        self.cipher_handle,
+                        tag.as_mut_ptr(),
+                        &mut tag_len,
+                    )
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                Ok(tag)
             }
 
-            /// Decrypt data with associated data using GCM (simplified native API)
+            /// Decrypt and verify data with associated data using AES-GCM
+            /// 
+            /// This method provides the complete GCM decryption and verification process using CMOX:
+            /// - Verifies the authentication tag against the encrypted data and associated data
+            /// - Decrypts the buffer in-place using AES-GCM
+            /// - Returns an error if authentication fails, ensuring data integrity
             pub fn decrypt_inplace(
                 &mut self,
                 nonce: &[u8; 12],
@@ -134,10 +208,107 @@ macro_rules! impl_aes_gcm {
                     return Err(CmoxError::NotInitialized);
                 }
 
-                // For now, return a placeholder implementation
-                // TODO: Implement full GCM decryption using correct CMOX API sequence
-                let _ = (nonce, associated_data, buffer, tag);
-                
+                // For decryption, we need to reinitialize with decryption implementation
+                // Clean up current handle
+                unsafe {
+                    cmox_cipher_cleanup(self.cipher_handle);
+                }
+
+                // Construct GCM handle for decryption
+                self.cipher_handle = unsafe {
+                    cmox_gcmFast_construct(&mut self.handle as *mut _, CMOX_AESFAST_GCMFAST_DEC)
+                };
+
+                if self.cipher_handle.is_null() {
+                    return Err(CmoxError::InitializationFailed);
+                }
+
+                // Initialize cipher
+                let result = unsafe {
+                    cmox_cipher_init(self.cipher_handle)
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Set key
+                let result = unsafe {
+                    cmox_cipher_setKey(
+                        self.cipher_handle,
+                        self.key.as_ptr(),
+                        self.key.len(),
+                    )
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Set nonce/IV
+                let result = unsafe {
+                    cmox_cipher_setIV(
+                        self.cipher_handle,
+                        nonce.as_ptr(),
+                        nonce.len(),
+                    )
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Set payload length
+                let result = unsafe {
+                    cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len())
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Set AAD length
+                let result = unsafe {
+                    cmox_cipher_setADLen(self.cipher_handle, associated_data.len())
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Set tag length
+                let result = unsafe {
+                    cmox_cipher_setTagLen(self.cipher_handle, tag.len())
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Process AAD
+                if !associated_data.is_empty() {
+                    let result = unsafe {
+                        cmox_cipher_appendAD(
+                            self.cipher_handle,
+                            associated_data.as_ptr(),
+                            associated_data.len(),
+                        )
+                    };
+                    CmoxError::from_cipher_retval(result)?;
+                }
+
+                // Decrypt payload
+                let mut output_len = buffer.len();
+                let result = unsafe {
+                    cmox_cipher_append(
+                        self.cipher_handle,
+                        buffer.as_ptr(),
+                        buffer.len(),
+                        buffer.as_mut_ptr(),
+                        &mut output_len,
+                    )
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Verify authentication tag
+                let mut tag_len = tag.len() as u32;
+                let result = unsafe {
+                    cmox_cipher_verifyTag(
+                        self.cipher_handle,
+                        tag.as_ptr(),
+                        &mut tag_len as *mut u32,
+                    )
+                };
+                CmoxError::from_cipher_retval(result)?;
+
+                // Switch back to encryption mode for future operations
+                unsafe {
+                    cmox_cipher_cleanup(self.cipher_handle);
+                }
+                self.init_with_stored_key()?;
+
                 Ok(())
             }
 

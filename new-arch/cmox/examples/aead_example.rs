@@ -1,6 +1,7 @@
 //! AEAD (Authenticated Encryption with Associated Data) examples using CMOX library
 //! 
-//! This example demonstrates the usage of AES-GCM AEAD ciphers with the CMOX library.
+//! This example demonstrates the usage of AES-GCM AEAD ciphers with the CMOX library,
+//! including both native API usage and standard Rust Crypto trait compatibility.
 
 #![no_std]
 #![no_main]
@@ -22,8 +23,8 @@ pub extern "C" fn main() {
     aead_usage_patterns();
     error_handling_example();
     
-    // Examples for trait-based API would go here when fully implemented
-    // aes_gcm_trait_example();
+    // Examples using standard Rust Crypto AEAD traits
+    aes_gcm_trait_example();
 }
 
 /// Example using native AES-GCM API
@@ -46,9 +47,8 @@ fn aes_gcm_native_api_example() {
                 // Encrypt the data
                 match cipher.encrypt_inplace(&nonce, associated_data, &mut ciphertext) {
                     Ok(tag) => {
-                        // In a real implementation, ciphertext would be encrypted
-                        // and tag would contain the authentication tag
-                        // For now, this is a placeholder implementation
+                        // Ciphertext is now encrypted using real CMOX operations
+                        // and tag contains the authentication tag from CMOX GCM
                         
                         // Decrypt the data
                         let mut decrypted = ciphertext;
@@ -182,32 +182,71 @@ fn error_handling_example() {
     }
 }
 
-// TODO: Add trait-based examples when AeadInPlace trait implementation is complete
-// 
-// fn aes_gcm_trait_example() {
-//     use aead::{Aead, KeyInit, Nonce};
-//     
-//     let key = [0x42; 16];
-//     let cipher = Aes128Gcm::new(&key.into());
-//     
-//     let nonce = Nonce::from_slice(&[0x01; 12]);
-//     let plaintext = b"Hello, AEAD!";
-//     
-//     // Encrypt
-//     match cipher.encrypt(nonce, plaintext.as_ref()) {
-//         Ok(ciphertext) => {
-//             // Decrypt
-//             match cipher.decrypt(nonce, ciphertext.as_ref()) {
-//                 Ok(recovered_plaintext) => {
-//                     // Success: recovered_plaintext == plaintext
-//                 },
-//                 Err(_) => {
-//                     // Decryption failed
-//                 }
-//             }
-//         },
-//         Err(_) => {
-//             // Encryption failed
-//         }
-//     }
-// }
+/// Example using standard AEAD traits (AeadInPlace)
+fn aes_gcm_trait_example() {
+    use aead::{AeadInPlace, KeyInit};
+    
+    // AES-128-GCM trait-based example
+    {
+        let key = [0x42; 16];
+        let cipher = Aes128Gcm::new(&key.into());
+        
+        let nonce_bytes = [0x01; 12];
+        let nonce = aead::Nonce::<Aes128Gcm>::from_slice(&nonce_bytes);
+        let aad = b"trait-based associated data";
+        
+        // Test in-place encryption
+        let mut buffer = *b"Hello, AEAD trait!"; // Must be exact size for in-place
+        let _original = buffer; // Store original for potential verification
+        
+        match cipher.encrypt_in_place_detached(nonce, aad, &mut buffer) {
+            Ok(tag) => {
+                // Buffer now contains ciphertext
+                // Tag contains authentication tag
+                
+                // Decrypt back to verify
+                match cipher.decrypt_in_place_detached(nonce, aad, &mut buffer, &tag) {
+                    Ok(()) => {
+                        // Buffer should now contain original plaintext
+                        // In practice, verify buffer == original
+                    },
+                    Err(_) => {
+                        // Decryption or authentication failed
+                    }
+                }
+            },
+            Err(_) => {
+                // Encryption failed
+            }
+        }
+    }
+
+    // AES-256-GCM trait-based example
+    {
+        let key = [0x84; 32]; // 256-bit key
+        let cipher = Aes256Gcm::new(&key.into());
+        
+        let nonce_bytes = [0x02; 12];
+        let nonce = aead::Nonce::<Aes256Gcm>::from_slice(&nonce_bytes);
+        let aad = b"AES-256 trait example";
+        
+        let mut buffer = *b"AES-256-GCM with traits works great!"; 
+        
+        match cipher.encrypt_in_place_detached(nonce, aad, &mut buffer) {
+            Ok(tag) => {
+                // Test that we can decrypt successfully
+                match cipher.decrypt_in_place_detached(nonce, aad, &mut buffer, &tag) {
+                    Ok(()) => {
+                        // Success - demonstrates trait compatibility
+                    },
+                    Err(_) => {
+                        // Authentication failed
+                    }
+                }
+            },
+            Err(_) => {
+                // Encryption failed  
+            }
+        }
+    }
+}
