@@ -3,8 +3,6 @@
 
 mod board;
 
-pub mod stack;
-
 use board::{Board, Button, SerialRx};
 use ui_app::{App, Event};
 

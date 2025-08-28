@@ -2,6 +2,8 @@
 #![no_main]
 #![allow(unused_variables)]
 
+use core::arch::asm;
+
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::{
@@ -39,19 +41,62 @@ async fn pipe(mut to: Tx, from: Rx, mut led: Led) {
     }
 }
 
+#[inline(always)]
+fn stack_ptr() -> *const u32 {
+    let x: *const u32;
+    unsafe {
+        asm!(
+            "mov {0}, sp" ,
+            out(reg) x,
+            options(pure, nomem, nostack),
+        );
+    }
+    x
+}
+
+#[inline(never)]
+fn large_stack() -> u32 {
+    info!("large_stack: {}", stack_ptr());
+    let x = [1_u32; 512];
+    info!("ptr: {}", x.as_ptr());
+    x.iter().sum()
+}
+
+#[inline(never)]
+fn small_stack() -> u32 {
+    info!("small_stack: {}", stack_ptr());
+    let x = [1_u32; 32];
+    info!("ptr: {}", x.as_ptr());
+    x.iter().sum()
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    info!("main       : {}", stack_ptr());
+    small_stack(); // => main - 168  = 4 * 32 + 40
+    large_stack(); // => main - 2096 = 4 * 512 + 48
+
     let p = embassy_stm32::init(Default::default());
 
     // Instantiate LEDs
-    let led_a_r = Output::new(p.PA4, Level::High, Speed::Low);
-    let led_a_g = Output::new(p.PA6, Level::High, Speed::Low);
-    let led_a_b = Output::new(p.PA7, Level::High, Speed::Low);
-    let led_b_r = Output::new(p.PB0, Level::High, Speed::Low);
-    let led_b_g = Output::new(p.PB6, Level::High, Speed::Low);
-    let led_b_b = Output::new(p.PB15, Level::High, Speed::Low);
+    let mut led_a_r = Output::new(p.PA4, Level::High, Speed::Low);
+    let mut led_a_g = Output::new(p.PA6, Level::High, Speed::Low);
+    let mut led_a_b = Output::new(p.PA7, Level::High, Speed::Low);
+    let mut led_b_r = Output::new(p.PB0, Level::High, Speed::Low);
+    let mut led_b_g = Output::new(p.PB6, Level::High, Speed::Low);
+    let mut led_b_b = Output::new(p.PB15, Level::High, Speed::Low);
+
+    // Grab the UI Boot and Reset pins
+    let ui_nrst = Output::new(p.PB3, Level::High, Speed::Low);
+
+    led_b_r.set_low();
+    led_b_b.set_low();
+    led_a_r.set_high();
+    led_a_g.set_low();
+    loop {}
 
     // Configure USB-side UART
+    /*
     let config = {
         let mut config = Config::default();
         config.baudrate = 115200;
@@ -66,6 +111,10 @@ async fn main(spawner: Spawner) {
     .unwrap();
 
     let (usb_tx, usb_rx) = usb_uart.split();
+    */
+
+    // Echo the USB UART back to itself
+    // unwrap!(spawner.spawn(pipe(usb_tx, usb_rx, led_b_g)));
 
     // Configure UI-side UART
     /*
@@ -81,9 +130,6 @@ async fn main(spawner: Spawner) {
 
     let (ui_tx, ui_rx) = ui_uart.split();
     */
-
-    // Echo the USB UART back to itself
-    unwrap!(spawner.spawn(pipe(usb_tx, usb_rx, led_b_g)));
 
     // Pipe the two UARTs together
     // unwrap!(spawner.spawn(pipe(ui_tx, usb_rx, led_a_b)));

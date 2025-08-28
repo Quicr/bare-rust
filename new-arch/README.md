@@ -23,7 +23,8 @@ Hactar UI chip.  It currently contains three primary crates:
 
 There are also a few other crates here for other purposes:
 
-- `mgmt-embassy`: An experimental MGMT chip firmware that just pipes UART data
+- `mgmt-embassy`: An experimental MGMT chip firmware that just echos UART data
+  to demonstrate how to do UART+DMA.  It also has logic to pipes UART data
   back and forth to the UI chip.
 
 - `net-idf`: An experimental NET chip firmware that connects to wifi and makes a

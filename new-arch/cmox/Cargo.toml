@@ -1,0 +1,30 @@
+[package]
+name = "cmox"
+version = "0.1.0"
+edition = "2021"
+authors = ["Rich Barnet"]
+description = "Idiomatic Rust bindings to STM32 CMOX cryptographic library"
+repository = "https://github.com/your-repo/cmox"
+license = "MIT OR Apache-2.0"
+keywords = ["cryptography", "stm32", "cmox", "no-std", "embedded"]
+categories = ["cryptography", "embedded", "no-std"]
+
+[dependencies]
+cmox-sys = { path = "../cmox-sys" }
+
+# Rust Crypto traits
+digest = { version = "0.10", default-features = false, features = ["mac", "core-api"] }
+cipher = { version = "0.4", default-features = false }
+aead = { version = "0.5", default-features = false }
+signature = { version = "2.2", default-features = false }
+elliptic-curve = { version = "0.13", default-features = false }
+
+# Utility crates
+rand_core = { version = "0.6", default-features = false }
+zeroize = { version = "1.8", default-features = false, features = ["derive"] }
+subtle = { version = "2.6", default-features = false }
+heapless = { version = "0.8", default-features = false }
+hybrid-array = { version = "0.2", default-features = false }
+
+[dev-dependencies]
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
