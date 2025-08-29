@@ -4,12 +4,13 @@
 //! using the STM32 CMOX cryptographic library. Both AES-128-GCM and AES-256-GCM are supported
 //! with complete encryption, decryption, and authentication tag generation/verification.
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
-use cmox_sys::*;
+use crate::ensure_initialized;
+use crate::error::{CipherResult, FromRetval};
 use aead::{
     consts::{U12, U16, U24, U32},
     AeadCore, AeadInPlace, Key, KeyInit, KeySizeUser, Nonce, Tag,
 };
+use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
 
@@ -46,7 +47,7 @@ macro_rules! impl_aes_gcm {
 
         impl AeadCore for $name {
             type NonceSize = U12; // GCM standard nonce size is 96 bits
-            type TagSize = U16;   // GCM standard tag size is 128 bits
+            type TagSize = U16; // GCM standard tag size is 128 bits
             type CiphertextOverhead = U16;
         }
 
@@ -58,7 +59,7 @@ macro_rules! impl_aes_gcm {
 
         impl $name {
             /// Create a new AES-GCM cipher with the given key
-            pub fn new_with_key(key: &[u8]) -> Result<Self> {
+            pub fn new_with_key(key: &[u8]) -> crate::Result<Self> {
                 let mut cipher = Self {
                     handle: unsafe { MaybeUninit::zeroed().assume_init() },
                     cipher_handle: core::ptr::null_mut(),
@@ -75,7 +76,7 @@ macro_rules! impl_aes_gcm {
                 Ok(cipher)
             }
 
-            fn init_with_stored_key(&mut self) -> Result<()> {
+            fn init_with_stored_key(&mut self) -> crate::Result<()> {
                 ensure_initialized()?;
 
                 // Initialize GCM handle for encryption by default
@@ -84,31 +85,25 @@ macro_rules! impl_aes_gcm {
                 };
 
                 if self.cipher_handle.is_null() {
-                    return Err(CmoxError::InitializationFailed);
+                    return Err(crate::error::CipherError::Internal.into());
                 }
 
                 // Initialize cipher
-                let result = unsafe {
-                    cmox_cipher_init(self.cipher_handle)
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_init(self.cipher_handle) };
+                CipherResult::from_rv(result)?;
 
                 // Set key
                 let result = unsafe {
-                    cmox_cipher_setKey(
-                        self.cipher_handle,
-                        self.key.as_ptr(),
-                        self.key.len(),
-                    )
+                    cmox_cipher_setKey(self.cipher_handle, self.key.as_ptr(), self.key.len())
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 self.initialized = true;
                 Ok(())
             }
 
             /// Encrypt data with associated data using AES-GCM
-            /// 
+            ///
             /// This method provides the complete GCM encryption process using CMOX:
             /// - Encrypts the buffer in-place using AES-GCM
             /// - Authenticates both the encrypted data and associated data
@@ -118,38 +113,30 @@ macro_rules! impl_aes_gcm {
                 nonce: &[u8; 12],
                 associated_data: &[u8],
                 buffer: &mut [u8],
-            ) -> Result<[u8; 16]> {
+            ) -> crate::Result<[u8; 16]> {
                 if !self.initialized {
-                    return Err(CmoxError::NotInitialized);
+                    return Err(crate::error::CoreError::InitFail.into());
                 }
 
                 // Set nonce/IV
-                let result = unsafe {
-                    cmox_cipher_setIV(
-                        self.cipher_handle,
-                        nonce.as_ptr(),
-                        nonce.len(),
-                    )
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result =
+                    unsafe { cmox_cipher_setIV(self.cipher_handle, nonce.as_ptr(), nonce.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set payload length
-                let result = unsafe {
-                    cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set AAD length
-                let result = unsafe {
-                    cmox_cipher_setADLen(self.cipher_handle, associated_data.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result =
+                    unsafe { cmox_cipher_setADLen(self.cipher_handle, associated_data.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set tag length
                 let result = unsafe {
                     cmox_cipher_setTagLen(self.cipher_handle, 16) // 128-bit tag
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Process AAD
                 if !associated_data.is_empty() {
@@ -160,7 +147,7 @@ macro_rules! impl_aes_gcm {
                             associated_data.len(),
                         )
                     };
-                    CmoxError::from_cipher_retval(result)?;
+                    CipherResult::from_rv(result)?;
                 }
 
                 // Encrypt payload
@@ -174,25 +161,21 @@ macro_rules! impl_aes_gcm {
                         &mut output_len,
                     )
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Generate authentication tag
                 let mut tag = [0u8; 16];
                 let mut tag_len = 16;
                 let result = unsafe {
-                    cmox_cipher_generateTag(
-                        self.cipher_handle,
-                        tag.as_mut_ptr(),
-                        &mut tag_len,
-                    )
+                    cmox_cipher_generateTag(self.cipher_handle, tag.as_mut_ptr(), &mut tag_len)
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 Ok(tag)
             }
 
             /// Decrypt and verify data with associated data using AES-GCM
-            /// 
+            ///
             /// This method provides the complete GCM decryption and verification process using CMOX:
             /// - Verifies the authentication tag against the encrypted data and associated data
             /// - Decrypts the buffer in-place using AES-GCM
@@ -203,9 +186,9 @@ macro_rules! impl_aes_gcm {
                 associated_data: &[u8],
                 buffer: &mut [u8],
                 tag: &[u8; 16],
-            ) -> Result<()> {
+            ) -> crate::Result<()> {
                 if !self.initialized {
-                    return Err(CmoxError::NotInitialized);
+                    return Err(crate::error::CoreError::InitFail.into());
                 }
 
                 // For decryption, we need to reinitialize with decryption implementation
@@ -220,52 +203,36 @@ macro_rules! impl_aes_gcm {
                 };
 
                 if self.cipher_handle.is_null() {
-                    return Err(CmoxError::InitializationFailed);
+                    return Err(crate::error::CipherError::Internal.into());
                 }
 
                 // Initialize cipher
-                let result = unsafe {
-                    cmox_cipher_init(self.cipher_handle)
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_init(self.cipher_handle) };
+                CipherResult::from_rv(result)?;
 
                 // Set key
                 let result = unsafe {
-                    cmox_cipher_setKey(
-                        self.cipher_handle,
-                        self.key.as_ptr(),
-                        self.key.len(),
-                    )
+                    cmox_cipher_setKey(self.cipher_handle, self.key.as_ptr(), self.key.len())
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Set nonce/IV
-                let result = unsafe {
-                    cmox_cipher_setIV(
-                        self.cipher_handle,
-                        nonce.as_ptr(),
-                        nonce.len(),
-                    )
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result =
+                    unsafe { cmox_cipher_setIV(self.cipher_handle, nonce.as_ptr(), nonce.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set payload length
-                let result = unsafe {
-                    cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set AAD length
-                let result = unsafe {
-                    cmox_cipher_setADLen(self.cipher_handle, associated_data.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result =
+                    unsafe { cmox_cipher_setADLen(self.cipher_handle, associated_data.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set tag length
-                let result = unsafe {
-                    cmox_cipher_setTagLen(self.cipher_handle, tag.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_setTagLen(self.cipher_handle, tag.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Process AAD
                 if !associated_data.is_empty() {
@@ -276,7 +243,7 @@ macro_rules! impl_aes_gcm {
                             associated_data.len(),
                         )
                     };
-                    CmoxError::from_cipher_retval(result)?;
+                    CipherResult::from_rv(result)?;
                 }
 
                 // Decrypt payload
@@ -290,7 +257,7 @@ macro_rules! impl_aes_gcm {
                         &mut output_len,
                     )
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Verify authentication tag
                 let mut tag_len = tag.len() as u32;
@@ -301,15 +268,13 @@ macro_rules! impl_aes_gcm {
                         &mut tag_len as *mut u32,
                     )
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Switch back to encryption mode for future operations
                 unsafe {
                     cmox_cipher_cleanup(self.cipher_handle);
                 }
-                self.init_with_stored_key()?;
-
-                Ok(())
+                self.init_with_stored_key()
             }
 
             /// Encrypt and authenticate data with additional authenticated data (AAD)
@@ -318,49 +283,36 @@ macro_rules! impl_aes_gcm {
                 nonce: &Nonce<Self>,
                 aad: &[u8],
                 buffer: &mut [u8],
-            ) -> Result<Tag<Self>> {
+            ) -> crate::Result<Tag<Self>> {
                 if !self.initialized {
-                    return Err(CmoxError::NotInitialized);
+                    return Err(crate::error::CoreError::InitFail.into());
                 }
 
                 // Set nonce/IV
-                let result = unsafe {
-                    cmox_cipher_setIV(
-                        self.cipher_handle,
-                        nonce.as_ptr(),
-                        nonce.len(),
-                    )
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result =
+                    unsafe { cmox_cipher_setIV(self.cipher_handle, nonce.as_ptr(), nonce.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set payload length
-                let result = unsafe {
-                    cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set AAD length
-                let result = unsafe {
-                    cmox_cipher_setADLen(self.cipher_handle, aad.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_setADLen(self.cipher_handle, aad.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set tag length
                 let result = unsafe {
                     cmox_cipher_setTagLen(self.cipher_handle, 16) // 128-bit tag
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Process AAD
                 if !aad.is_empty() {
                     let result = unsafe {
-                        cmox_cipher_appendAD(
-                            self.cipher_handle,
-                            aad.as_ptr(),
-                            aad.len(),
-                        )
+                        cmox_cipher_appendAD(self.cipher_handle, aad.as_ptr(), aad.len())
                     };
-                    CmoxError::from_cipher_retval(result)?;
+                    CipherResult::from_rv(result)?;
                 }
 
                 // Encrypt payload
@@ -374,19 +326,15 @@ macro_rules! impl_aes_gcm {
                         &mut output_len,
                     )
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Generate authentication tag
                 let mut tag = Tag::<Self>::default();
                 let mut tag_len = tag.len();
                 let result = unsafe {
-                    cmox_cipher_generateTag(
-                        self.cipher_handle,
-                        tag.as_mut_ptr(),
-                        &mut tag_len,
-                    )
+                    cmox_cipher_generateTag(self.cipher_handle, tag.as_mut_ptr(), &mut tag_len)
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 Ok(tag)
             }
@@ -398,9 +346,9 @@ macro_rules! impl_aes_gcm {
                 aad: &[u8],
                 buffer: &mut [u8],
                 tag: &Tag<Self>,
-            ) -> Result<()> {
+            ) -> crate::Result<()> {
                 if !self.initialized {
-                    return Err(CmoxError::NotInitialized);
+                    return Err(crate::error::CoreError::InitFail.into());
                 }
 
                 // For decryption, we need to reinitialize with decryption implementation
@@ -415,63 +363,42 @@ macro_rules! impl_aes_gcm {
                 };
 
                 if self.cipher_handle.is_null() {
-                    return Err(CmoxError::InitializationFailed);
+                    return Err(crate::error::CipherError::Internal.into());
                 }
 
                 // Initialize cipher
-                let result = unsafe {
-                    cmox_cipher_init(self.cipher_handle)
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_init(self.cipher_handle) };
+                CipherResult::from_rv(result)?;
 
                 // Set key
                 let result = unsafe {
-                    cmox_cipher_setKey(
-                        self.cipher_handle,
-                        self.key.as_ptr(),
-                        self.key.len(),
-                    )
+                    cmox_cipher_setKey(self.cipher_handle, self.key.as_ptr(), self.key.len())
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Set nonce/IV
-                let result = unsafe {
-                    cmox_cipher_setIV(
-                        self.cipher_handle,
-                        nonce.as_ptr(),
-                        nonce.len(),
-                    )
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result =
+                    unsafe { cmox_cipher_setIV(self.cipher_handle, nonce.as_ptr(), nonce.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set payload length
-                let result = unsafe {
-                    cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set AAD length
-                let result = unsafe {
-                    cmox_cipher_setADLen(self.cipher_handle, aad.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_setADLen(self.cipher_handle, aad.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Set tag length
-                let result = unsafe {
-                    cmox_cipher_setTagLen(self.cipher_handle, tag.len())
-                };
-                CmoxError::from_cipher_retval(result)?;
+                let result = unsafe { cmox_cipher_setTagLen(self.cipher_handle, tag.len()) };
+                CipherResult::from_rv(result)?;
 
                 // Process AAD
                 if !aad.is_empty() {
                     let result = unsafe {
-                        cmox_cipher_appendAD(
-                            self.cipher_handle,
-                            aad.as_ptr(),
-                            aad.len(),
-                        )
+                        cmox_cipher_appendAD(self.cipher_handle, aad.as_ptr(), aad.len())
                     };
-                    CmoxError::from_cipher_retval(result)?;
+                    CipherResult::from_rv(result)?;
                 }
 
                 // Decrypt payload
@@ -485,7 +412,7 @@ macro_rules! impl_aes_gcm {
                         &mut output_len,
                     )
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Verify authentication tag
                 let mut tag_len = tag.len() as u32;
@@ -496,15 +423,13 @@ macro_rules! impl_aes_gcm {
                         &mut tag_len as *mut u32,
                     )
                 };
-                CmoxError::from_cipher_retval(result)?;
+                CipherResult::from_rv(result)?;
 
                 // Switch back to encryption mode for future operations
                 unsafe {
                     cmox_cipher_cleanup(self.cipher_handle);
                 }
-                self.init_with_stored_key()?;
-
-                Ok(())
+                self.init_with_stored_key()
             }
         }
 
@@ -517,7 +442,8 @@ macro_rules! impl_aes_gcm {
             ) -> aead::Result<Tag<Self>> {
                 // Create a mutable copy for CMOX operations which require mutable state
                 let mut cipher = self.clone();
-                cipher.encrypt_in_place_detached_mut(nonce, associated_data, buffer)
+                cipher
+                    .encrypt_in_place_detached_mut(nonce, associated_data, buffer)
                     .map_err(|_| aead::Error)
             }
 
@@ -530,7 +456,8 @@ macro_rules! impl_aes_gcm {
             ) -> aead::Result<()> {
                 // Create a mutable copy for CMOX operations which require mutable state
                 let mut cipher = self.clone();
-                cipher.decrypt_in_place_detached_mut(nonce, associated_data, buffer, tag)
+                cipher
+                    .decrypt_in_place_detached_mut(nonce, associated_data, buffer, tag)
                     .map_err(|_| aead::Error)
             }
         }

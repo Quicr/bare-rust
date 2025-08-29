@@ -10,18 +10,19 @@
 //! - **AES-based**: Uses AES-128 or AES-256 in counter mode for security
 //! - **Proper Seeding**: Supports entropy input, nonce, and personalization string
 //! - **Reseeding**: Periodic reseeding for long-running applications
-//! - **Security Features**: 
+//! - **Security Features**:
 //!   - Cryptographically secure output
 //!   - Proper state management
 //!   - Prediction resistance when reseeded
 //!   - Memory-safe operations
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::ensure_initialized;
+use crate::error::{DrbgResult, FromRetval};
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
 use core::num::NonZeroU32;
-use rand_core::{RngCore, CryptoRng};
+use rand_core::{CryptoRng, RngCore};
 
 /// CTR-DRBG algorithm variants
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -57,14 +58,14 @@ impl CtrDrbgVariant {
     /// Get recommended nonce length for this variant
     pub fn recommended_nonce_len(self) -> usize {
         match self {
-            CtrDrbgVariant::Aes128Fast | CtrDrbgVariant::Aes128Small => 8,  // 8 bytes nonce
+            CtrDrbgVariant::Aes128Fast | CtrDrbgVariant::Aes128Small => 8, // 8 bytes nonce
             CtrDrbgVariant::Aes256Fast | CtrDrbgVariant::Aes256Small => 16, // 16 bytes nonce
         }
     }
 }
 
 /// CTR-DRBG (Counter mode Deterministic Random Bit Generator)
-/// 
+///
 /// A cryptographically secure random number generator based on AES in counter mode
 /// as specified in NIST SP 800-90A.
 pub struct CtrDrbg {
@@ -76,7 +77,7 @@ pub struct CtrDrbg {
 
 impl CtrDrbg {
     /// Create a new CTR-DRBG instance with specified algorithm variant
-    /// 
+    ///
     /// # Arguments
     /// * `variant` - The CTR-DRBG algorithm variant to use
     /// * `entropy` - Entropy input (seed material) - must meet minimum length requirements
@@ -84,13 +85,13 @@ impl CtrDrbg {
     /// * `personalization` - Optional personalization string for domain separation
     pub fn new(
         variant: CtrDrbgVariant,
-        entropy: &[u8], 
-        nonce: &[u8], 
-        personalization: Option<&[u8]>
-    ) -> Result<Self> {
+        entropy: &[u8],
+        nonce: &[u8],
+        personalization: Option<&[u8]>,
+    ) -> crate::Result<Self> {
         // Validate entropy length
         if entropy.len() < variant.min_entropy_len() {
-            return Err(CmoxError::InvalidEntropySize);
+            return Err(crate::error::DrbgError::BadEntropySize.into());
         }
 
         let mut drbg = Self {
@@ -105,24 +106,28 @@ impl CtrDrbg {
     }
 
     /// Create a CTR-DRBG with reasonable defaults (AES-256, fast implementation)
-    /// 
+    ///
     /// # Arguments
     /// * `entropy` - Entropy input (must be at least 32 bytes for AES-256)
     /// * `nonce` - Nonce value (recommended 16 bytes)
-    pub fn new_default(entropy: &[u8], nonce: &[u8]) -> Result<Self> {
+    pub fn new_default(entropy: &[u8], nonce: &[u8]) -> crate::Result<Self> {
         Self::new(CtrDrbgVariant::Aes256Fast, entropy, nonce, None)
     }
 
-    fn init(&mut self, entropy: &[u8], nonce: &[u8], personalization: Option<&[u8]>) -> Result<()> {
+    fn init(
+        &mut self,
+        entropy: &[u8],
+        nonce: &[u8],
+        personalization: Option<&[u8]>,
+    ) -> crate::Result<()> {
         ensure_initialized()?;
 
         // Construct CTR-DRBG handle
-        self.drbg_handle = unsafe {
-            cmox_ctr_drbg_construct(&mut self.handle, self.variant.to_cmox_impl())
-        };
+        self.drbg_handle =
+            unsafe { cmox_ctr_drbg_construct(&mut self.handle, self.variant.to_cmox_impl()) };
 
         if self.drbg_handle.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(crate::error::DrbgError::Internal.into());
         }
 
         // Initialize DRBG with entropy, personalization, and nonce
@@ -143,20 +148,24 @@ impl CtrDrbg {
                 nonce.len(),
             )
         };
-        CmoxError::from_drbg_retval(result)?;
+        DrbgResult::from_rv(result)?;
 
         self.initialized = true;
         Ok(())
     }
 
     /// Generate random bytes
-    /// 
+    ///
     /// # Arguments
     /// * `output` - Buffer to fill with random bytes
     /// * `additional_input` - Optional additional input for prediction resistance
-    pub fn generate(&mut self, output: &mut [u8], additional_input: Option<&[u8]>) -> Result<()> {
+    pub fn generate(
+        &mut self,
+        output: &mut [u8],
+        additional_input: Option<&[u8]>,
+    ) -> crate::Result<()> {
         if !self.initialized {
-            return Err(CmoxError::UninitializedState);
+            return Err(crate::error::DrbgError::UninitializedState.into());
         }
 
         if output.is_empty() {
@@ -179,61 +188,63 @@ impl CtrDrbg {
             )
         };
 
-        CmoxError::from_drbg_retval(result)
+        Ok(DrbgResult::from_rv(result)?)
     }
 
     /// Generate random bytes without additional input
-    /// 
+    ///
     /// This is a convenience method that calls `generate` with no additional input.
-    pub fn generate_bytes(&mut self, output: &mut [u8]) -> Result<()> {
+    pub fn generate_bytes(&mut self, output: &mut [u8]) -> crate::Result<()> {
         self.generate(output, None)
     }
 
     /// Generate a fixed amount of random bytes and return them
-    /// 
+    ///
     /// # Arguments
     /// * `len` - Number of bytes to generate (max 512 bytes per call)
-    pub fn generate_vec(&mut self, len: usize) -> Result<heapless::Vec<u8, 512>> {
+    pub fn generate_vec(&mut self, len: usize) -> crate::Result<heapless::Vec<u8, 512>> {
         if len > 512 {
-            return Err(CmoxError::InvalidRequest);
+            return Err(crate::error::DrbgError::Internal.into());
         }
 
         let mut output = heapless::Vec::new();
-        output.resize_default(len).map_err(|_| CmoxError::MemoryFailure)?;
+        output
+            .resize_default(len)
+            .map_err(|_| crate::error::DrbgError::Internal)?;
         self.generate_bytes(&mut output)?;
         Ok(output)
     }
 
     /// Generate a random u32
-    pub fn next_u32(&mut self) -> Result<u32> {
+    pub fn next_u32(&mut self) -> crate::Result<u32> {
         let mut bytes = [0u8; 4];
         self.generate_bytes(&mut bytes)?;
         Ok(u32::from_le_bytes(bytes))
     }
 
     /// Generate a random u64
-    pub fn next_u64(&mut self) -> Result<u64> {
+    pub fn next_u64(&mut self) -> crate::Result<u64> {
         let mut bytes = [0u8; 8];
         self.generate_bytes(&mut bytes)?;
         Ok(u64::from_le_bytes(bytes))
     }
 
     /// Reseed the DRBG with additional entropy
-    /// 
+    ///
     /// This should be called periodically for long-running applications to maintain
     /// security properties and handle potential state compromise.
-    /// 
+    ///
     /// # Arguments
     /// * `entropy` - Fresh entropy input (must meet minimum length requirements)
     /// * `additional_input` - Optional additional input for domain separation
-    pub fn reseed(&mut self, entropy: &[u8], additional_input: Option<&[u8]>) -> Result<()> {
+    pub fn reseed(&mut self, entropy: &[u8], additional_input: Option<&[u8]>) -> crate::Result<()> {
         if !self.initialized {
-            return Err(CmoxError::UninitializedState);
+            return Err(crate::error::DrbgError::UninitializedState.into());
         }
 
         // Validate entropy length
         if entropy.len() < self.variant.min_entropy_len() {
-            return Err(CmoxError::InvalidEntropySize);
+            return Err(crate::error::DrbgError::BadEntropySize.into());
         }
 
         let (add_ptr, add_len) = if let Some(additional) = additional_input {
@@ -252,7 +263,7 @@ impl CtrDrbg {
             )
         };
 
-        CmoxError::from_drbg_retval(result)
+        Ok(DrbgResult::from_rv(result)?)
     }
 
     /// Get the algorithm variant used by this DRBG
@@ -267,29 +278,29 @@ impl CtrDrbg {
 }
 
 /// A simple helper for creating a CTR-DRBG for testing purposes
-/// 
+///
 /// **Warning**: This uses deterministic "entropy" and should NEVER be used in production.
 /// It's only suitable for testing and deterministic applications.
 impl CtrDrbg {
     /// Create a CTR-DRBG with deterministic entropy for testing
-    /// 
+    ///
     /// **SECURITY WARNING**: This function uses predictable entropy and should
     /// NEVER be used in production code. It's only suitable for testing.
-    pub fn new_deterministic_for_testing(seed: u64) -> Result<Self> {
+    pub fn new_deterministic_for_testing(seed: u64) -> crate::Result<Self> {
         let mut entropy = [0u8; 32];
         let mut nonce = [0u8; 16];
-        
+
         // Create deterministic but varied entropy from seed
         for i in 0..4 {
             let seed_part = seed.wrapping_add(i as u64);
-            entropy[i*8..(i+1)*8].copy_from_slice(&seed_part.to_le_bytes());
+            entropy[i * 8..(i + 1) * 8].copy_from_slice(&seed_part.to_le_bytes());
         }
-        
+
         // Create deterministic nonce
         let nonce_seed = seed.wrapping_mul(0x9E3779B97F4A7C15); // Golden ratio hash
         nonce[..8].copy_from_slice(&nonce_seed.to_le_bytes());
         nonce[8..].copy_from_slice(&nonce_seed.wrapping_add(1).to_le_bytes());
-        
+
         Self::new_default(&entropy, &nonce)
     }
 }

@@ -1,13 +1,11 @@
 //! SHA-1 hash function implementation
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::ensure_initialized;
+use crate::error::{FromRetval, HashError, HashResult, Result};
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
-use digest::{
-    consts::U20,
-    FixedOutput, HashMarker, Output, OutputSizeUser, Reset, Update,
-};
+use digest::{consts::U20, FixedOutput, HashMarker, Output, OutputSizeUser, Reset, Update};
 
 /// SHA-1 hash output type
 pub type Sha1Hash = Output<Sha1>;
@@ -27,28 +25,24 @@ impl Sha1 {
             hash_handle: core::ptr::null_mut(),
             initialized: false,
         };
-        
+
         hasher.init_hash().expect("Failed to initialize SHA-1 hash");
         hasher
     }
 
     fn init_hash(&mut self) -> Result<()> {
         ensure_initialized()?;
-        
+
         // Use the CMOX constructor to set up the handle properly
-        self.hash_handle = unsafe { 
-            cmox_sha1_construct(&mut self.handle as *mut _)
-        };
-        
+        self.hash_handle = unsafe { cmox_sha1_construct(&mut self.handle as *mut _) };
+
         if self.hash_handle.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(HashError::Internal.into());
         }
 
-        let result = unsafe {
-            cmox_hash_init(self.hash_handle)
-        };
-        
-        CmoxError::from_hash_retval(result)?;
+        let result = unsafe { cmox_hash_init(self.hash_handle) };
+
+        HashResult::from_rv(result)?;
         self.initialized = true;
         Ok(())
     }
@@ -71,20 +65,14 @@ impl Update for Sha1 {
         if !self.initialized {
             panic!("Hash not initialized");
         }
-        
+
         if data.is_empty() {
             return;
         }
-        
-        let result = unsafe {
-            cmox_hash_append(
-                self.hash_handle,
-                data.as_ptr(),
-                data.len(),
-            )
-        };
-        
-        CmoxError::from_hash_retval(result).expect("Hash update failed");
+
+        let result = unsafe { cmox_hash_append(self.hash_handle, data.as_ptr(), data.len()) };
+
+        HashResult::from_rv(result).expect("Hash update failed");
     }
 }
 
@@ -93,7 +81,7 @@ impl FixedOutput for Sha1 {
         if !self.initialized {
             panic!("Hash not initialized");
         }
-        
+
         let mut digest_len = out.len();
         let result = unsafe {
             cmox_hash_generateTag(
@@ -102,9 +90,9 @@ impl FixedOutput for Sha1 {
                 &mut digest_len as *mut usize,
             )
         };
-        
-        CmoxError::from_hash_retval(result).expect("Hash finalization failed");
-        
+
+        HashResult::from_rv(result).expect("Hash finalization failed");
+
         // Clean up the handle
         unsafe {
             cmox_hash_cleanup(self.hash_handle);
@@ -120,7 +108,7 @@ impl Reset for Sha1 {
                 cmox_hash_cleanup(self.hash_handle);
             }
         }
-        
+
         self.init_hash().expect("Hash reset failed");
     }
 }

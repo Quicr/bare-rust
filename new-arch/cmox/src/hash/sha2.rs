@@ -1,6 +1,7 @@
 //! SHA-2 hash function implementations
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::error::{FromRetval, HashResult};
+use crate::{ensure_initialized, HashError, Result};
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -71,21 +72,17 @@ macro_rules! impl_sha2 {
         impl $name {
             fn init_hash(&mut self) -> Result<()> {
                 ensure_initialized()?;
-                
+
                 // Use the CMOX constructor to set up the handle properly
-                self.hash_handle = unsafe { 
-                    $cmox_construct(&mut self.handle as *mut _)
-                };
-                
+                self.hash_handle = unsafe { $cmox_construct(&mut self.handle as *mut _) };
+
                 if self.hash_handle.is_null() {
-                    return Err(CmoxError::InitializationFailed);
+                    return Err(HashError::Internal.into());
                 }
 
-                let result = unsafe {
-                    cmox_hash_init(self.hash_handle)
-                };
-                
-                CmoxError::from_hash_retval(result)?;
+                let result = unsafe { cmox_hash_init(self.hash_handle) };
+
+                HashResult::from_rv(result)?;
                 self.initialized = true;
                 Ok(())
             }
@@ -105,7 +102,7 @@ macro_rules! impl_sha2 {
                     hash_handle: core::ptr::null_mut(),
                     initialized: false,
                 };
-                
+
                 // Initialize during construction - panic if it fails since this
                 // indicates a programming error (library not initialized)
                 hasher.init_hash().expect("Failed to initialize hash");
@@ -124,20 +121,15 @@ macro_rules! impl_sha2 {
                 if !self.initialized {
                     panic!("Hash not initialized");
                 }
-                
+
                 if data.is_empty() {
                     return;
                 }
-                
-                let result = unsafe {
-                    cmox_hash_append(
-                        self.hash_handle,
-                        data.as_ptr(),
-                        data.len(),
-                    )
-                };
-                
-                CmoxError::from_hash_retval(result).expect("Hash update failed");
+
+                let result =
+                    unsafe { cmox_hash_append(self.hash_handle, data.as_ptr(), data.len()) };
+
+                HashResult::from_rv(result).expect("Hash update failed");
             }
         }
 
@@ -146,7 +138,7 @@ macro_rules! impl_sha2 {
                 if !self.initialized {
                     panic!("Hash not initialized");
                 }
-                
+
                 let mut digest_len = out.len();
                 let result = unsafe {
                     cmox_hash_generateTag(
@@ -155,9 +147,9 @@ macro_rules! impl_sha2 {
                         &mut digest_len as *mut usize,
                     )
                 };
-                
-                CmoxError::from_hash_retval(result).expect("Hash finalization failed");
-                
+
+                HashResult::from_rv(result).expect("Hash finalization failed");
+
                 // Clean up the handle
                 unsafe {
                     cmox_hash_cleanup(self.hash_handle);
@@ -173,7 +165,7 @@ macro_rules! impl_sha2 {
                         cmox_hash_cleanup(self.hash_handle);
                     }
                 }
-                
+
                 self.init_hash().expect("Hash reset failed");
             }
         }
@@ -201,7 +193,7 @@ macro_rules! impl_sha2 {
 
 // Implement all SHA-2 variants
 impl_sha2!(Sha224, U28, cmox_sha224_construct, 28);
-impl_sha2!(Sha256, U32, cmox_sha256_construct, 32); 
+impl_sha2!(Sha256, U32, cmox_sha256_construct, 32);
 impl_sha2!(Sha384, U48, cmox_sha384_construct, 48);
 impl_sha2!(Sha512, U64, cmox_sha512_construct, 64);
 impl_sha2!(Sha512_224, U28, cmox_sha512_224_construct, 28);
@@ -267,4 +259,3 @@ impl Drop for Sha512_256 {
         }
     }
 }
-

@@ -8,8 +8,8 @@ pub use sha1::{Sha1, Sha1Hash};
 
 pub mod sha2;
 pub use sha2::{
-    Sha224, Sha224Hash, Sha256, Sha256Hash, Sha384, Sha384Hash, Sha512, Sha512Hash,
-    Sha512_224, Sha512_224Hash, Sha512_256, Sha512_256Hash,
+    Sha224, Sha224Hash, Sha256, Sha256Hash, Sha384, Sha384Hash, Sha512, Sha512Hash, Sha512_224,
+    Sha512_224Hash, Sha512_256, Sha512_256Hash,
 };
 
 pub mod sha3;

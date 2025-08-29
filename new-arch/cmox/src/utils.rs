@@ -1,36 +1,25 @@
 //! Utility functions for the CMOX crate
 
-use crate::{CmoxError, Result};
+use crate::error::{FromRetval, Result, UtilsError, UtilsResult};
+use cmox_sys::cmox_utils_compare;
 
-/// Ensure CMOX library is initialized before calling cryptographic functions
-pub(crate) fn ensure_initialized() -> Result<()> {
-    if crate::is_initialized() {
-        Ok(())
-    } else {
-        Err(CmoxError::NotInitialized)
-    }
-}
+/// Compares two buffers in a fault-secure way
+pub fn constant_time_eq(buf1: &[u8], buf2: &[u8]) -> Result<()> {
+    let mut fault = 0xffffffff;
 
-/// Constant-time comparison using CMOX utilities
-/// 
-/// This function provides constant-time comparison of two byte slices
-/// to prevent timing attacks when comparing cryptographic values.
-/// 
-/// # Arguments
-/// 
-/// * `a` - First byte slice
-/// * `b` - Second byte slice
-/// 
-/// # Returns
-/// 
-/// `true` if the slices are equal, `false` otherwise
-/// 
-/// # Note
-/// 
-/// This function will return `false` if the slices have different lengths.
-pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    use subtle::ConstantTimeEq;
-    a.ct_eq(b).into()
+    unsafe {
+        UtilsResult::from_rv(cmox_utils_compare(
+            buf1.as_ptr(),
+            buf1.len() as u32,
+            buf2.as_ptr(),
+            buf2.len() as u32,
+            &mut fault,
+        ))?;
+    };
+
+    (fault != cmox_sys::CMOX_UTILS_AUTH_SUCCESS)
+        .then_some(())
+        .ok_or(UtilsError::AuthFail.into())
 }
 
 #[cfg(test)]

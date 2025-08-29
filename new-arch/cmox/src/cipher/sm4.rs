@@ -1,11 +1,9 @@
 //! SM4 block cipher implementation
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::ensure_initialized;
+use crate::error::{CipherResult, FromRetval};
+use cipher::{consts::U16, Block, BlockSizeUser, Key, KeyInit, KeySizeUser};
 use cmox_sys::*;
-use cipher::{
-    consts::U16,
-    Block, BlockSizeUser, Key, KeyInit, KeySizeUser,
-};
 use core::fmt;
 use core::mem::MaybeUninit;
 
@@ -36,14 +34,16 @@ impl KeyInit for Sm4 {
             initialized: false,
         };
 
-        cipher.init_with_key(key).expect("Failed to initialize SM4 cipher");
+        cipher
+            .init_with_key(key)
+            .expect("Failed to initialize SM4 cipher");
         cipher
     }
 }
 
 impl Sm4 {
     /// Create a new SM4 cipher with the given key
-    pub fn new_with_key(key: &[u8]) -> Result<Self> {
+    pub fn new_with_key(key: &[u8]) -> crate::Result<Self> {
         let mut cipher = Self {
             enc_handle: unsafe { MaybeUninit::zeroed().assume_init() },
             dec_handle: unsafe { MaybeUninit::zeroed().assume_init() },
@@ -56,67 +56,49 @@ impl Sm4 {
         Ok(cipher)
     }
 
-    fn init_with_key(&mut self, key: &[u8]) -> Result<()> {
+    fn init_with_key(&mut self, key: &[u8]) -> crate::Result<()> {
         ensure_initialized()?;
 
         // Initialize encryption handle
-        self.enc_cipher = unsafe {
-            cmox_ecb_construct(&mut self.enc_handle as *mut _, CMOX_SM4_ECB_ENC)
-        };
+        self.enc_cipher =
+            unsafe { cmox_ecb_construct(&mut self.enc_handle as *mut _, CMOX_SM4_ECB_ENC) };
 
         if self.enc_cipher.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(crate::error::CipherError::Internal.into());
         }
 
         // Initialize decryption handle
-        self.dec_cipher = unsafe {
-            cmox_ecb_construct(&mut self.dec_handle as *mut _, CMOX_SM4_ECB_DEC)
-        };
+        self.dec_cipher =
+            unsafe { cmox_ecb_construct(&mut self.dec_handle as *mut _, CMOX_SM4_ECB_DEC) };
 
         if self.dec_cipher.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(crate::error::CipherError::Internal.into());
         }
 
         // Initialize encryption
-        let result = unsafe {
-            cmox_cipher_init(self.enc_cipher)
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_init(self.enc_cipher) };
+        CipherResult::from_rv(result)?;
 
         // Initialize decryption
-        let result = unsafe {
-            cmox_cipher_init(self.dec_cipher)
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_init(self.dec_cipher) };
+        CipherResult::from_rv(result)?;
 
         // Set encryption key
-        let result = unsafe {
-            cmox_cipher_setKey(
-                self.enc_cipher,
-                key.as_ptr(),
-                key.len(),
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setKey(self.enc_cipher, key.as_ptr(), key.len()) };
+        CipherResult::from_rv(result)?;
 
         // Set decryption key
-        let result = unsafe {
-            cmox_cipher_setKey(
-                self.dec_cipher,
-                key.as_ptr(),
-                key.len(),
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setKey(self.dec_cipher, key.as_ptr(), key.len()) };
+        CipherResult::from_rv(result)?;
 
         self.initialized = true;
         Ok(())
     }
 
     /// Encrypt a single block in-place
-    pub fn encrypt_block_inplace(&self, block: &mut Block<Self>) -> Result<()> {
+    pub fn encrypt_block_inplace(&self, block: &mut Block<Self>) -> crate::Result<()> {
         if !self.initialized {
-            return Err(CmoxError::NotInitialized);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut output_len = block.len();
@@ -129,14 +111,14 @@ impl Sm4 {
                 &mut output_len,
             )
         };
-        
-        CmoxError::from_cipher_retval(result)
+
+        Ok(CipherResult::from_rv(result)?)
     }
 
     /// Decrypt a single block in-place
-    pub fn decrypt_block_inplace(&self, block: &mut Block<Self>) -> Result<()> {
+    pub fn decrypt_block_inplace(&self, block: &mut Block<Self>) -> crate::Result<()> {
         if !self.initialized {
-            return Err(CmoxError::NotInitialized);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut output_len = block.len();
@@ -149,19 +131,19 @@ impl Sm4 {
                 &mut output_len,
             )
         };
-        
-        CmoxError::from_cipher_retval(result)
+
+        Ok(CipherResult::from_rv(result)?)
     }
 
     /// Encrypt a single block
-    pub fn encrypt_block(&self, input: &Block<Self>) -> Result<Block<Self>> {
+    pub fn encrypt_block(&self, input: &Block<Self>) -> crate::Result<Block<Self>> {
         let mut output = *input;
         self.encrypt_block_inplace(&mut output)?;
         Ok(output)
     }
 
     /// Decrypt a single block
-    pub fn decrypt_block(&self, input: &Block<Self>) -> Result<Block<Self>> {
+    pub fn decrypt_block(&self, input: &Block<Self>) -> crate::Result<Block<Self>> {
         let mut output = *input;
         self.decrypt_block_inplace(&mut output)?;
         Ok(output)

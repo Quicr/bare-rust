@@ -1,6 +1,6 @@
 //! CMAC (Cipher-based Message Authentication Code) implementation
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::{utils::ensure_initialized, CipherError, CmoxError, CoreError, HashError, Result};
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -45,7 +45,7 @@ macro_rules! impl_cmac {
                 };
 
                 if self.mac_handle.is_null() {
-                    return Err(CmoxError::InitializationFailed);
+                    return Err(CmoxError::Cipher(CipherError::InternalError));
                 }
 
                 // Initialize MAC

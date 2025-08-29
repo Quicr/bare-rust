@@ -4,12 +4,13 @@
 //! cipher combining the ChaCha20 stream cipher for confidentiality with the Poly1305
 //! authenticator for integrity and authentication.
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
-use cmox_sys::*;
+use crate::ensure_initialized;
+use crate::error::{CipherResult, FromRetval};
 use aead::{
     consts::{U12, U16, U32},
     AeadCore, AeadInPlace, Key, KeyInit, KeySizeUser, Nonce, Tag,
 };
+use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
 
@@ -27,7 +28,7 @@ impl KeySizeUser for ChaCha20Poly1305 {
 
 impl AeadCore for ChaCha20Poly1305 {
     type NonceSize = U12; // ChaCha20-Poly1305 uses 96-bit nonces
-    type TagSize = U16;   // Poly1305 produces 128-bit tags
+    type TagSize = U16; // Poly1305 produces 128-bit tags
     type CiphertextOverhead = U16;
 }
 
@@ -41,16 +42,18 @@ impl KeyInit for ChaCha20Poly1305 {
         };
 
         cipher.key.copy_from_slice(key.as_slice());
-        cipher.init().expect("Failed to initialize ChaCha20-Poly1305");
+        cipher
+            .init()
+            .expect("Failed to initialize ChaCha20-Poly1305");
         cipher
     }
 }
 
 impl ChaCha20Poly1305 {
     /// Create a new ChaCha20-Poly1305 cipher with the given key
-    pub fn new_with_key(key: &[u8]) -> Result<Self> {
+    pub fn new_with_key(key: &[u8]) -> crate::Result<Self> {
         if key.len() != 32 {
-            return Err(CmoxError::InvalidInputSize);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut cipher = Self {
@@ -65,7 +68,7 @@ impl ChaCha20Poly1305 {
         Ok(cipher)
     }
 
-    fn init(&mut self) -> Result<()> {
+    fn init(&mut self) -> crate::Result<()> {
         ensure_initialized()?;
 
         // Construct ChaCha20-Poly1305 handle
@@ -77,24 +80,17 @@ impl ChaCha20Poly1305 {
         };
 
         if self.cipher_handle.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(crate::error::CipherError::Internal.into());
         }
 
         // Initialize cipher
-        let result = unsafe {
-            cmox_cipher_init(self.cipher_handle)
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_init(self.cipher_handle) };
+        CipherResult::from_rv(result)?;
 
         // Set key
-        let result = unsafe {
-            cmox_cipher_setKey(
-                self.cipher_handle,
-                self.key.as_ptr(),
-                self.key.len(),
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result =
+            unsafe { cmox_cipher_setKey(self.cipher_handle, self.key.as_ptr(), self.key.len()) };
+        CipherResult::from_rv(result)?;
 
         self.initialized = true;
         Ok(())
@@ -106,49 +102,34 @@ impl ChaCha20Poly1305 {
         nonce: &Nonce<Self>,
         aad: &[u8],
         buffer: &mut [u8],
-    ) -> Result<Tag<Self>> {
+    ) -> crate::Result<Tag<Self>> {
         if !self.initialized {
-            return Err(CmoxError::NotInitialized);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         // Set nonce/IV
-        let result = unsafe {
-            cmox_cipher_setIV(
-                self.cipher_handle,
-                nonce.as_ptr(),
-                nonce.len(),
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setIV(self.cipher_handle, nonce.as_ptr(), nonce.len()) };
+        CipherResult::from_rv(result)?;
 
         // Set payload length
-        let result = unsafe {
-            cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len())
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len()) };
+        CipherResult::from_rv(result)?;
 
         // Set AAD length
-        let result = unsafe {
-            cmox_cipher_setADLen(self.cipher_handle, aad.len())
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setADLen(self.cipher_handle, aad.len()) };
+        CipherResult::from_rv(result)?;
 
         // Set tag length
         let result = unsafe {
             cmox_cipher_setTagLen(self.cipher_handle, 16) // 128-bit tag
         };
-        CmoxError::from_cipher_retval(result)?;
+        CipherResult::from_rv(result)?;
 
         // Process AAD
         if !aad.is_empty() {
-            let result = unsafe {
-                cmox_cipher_appendAD(
-                    self.cipher_handle,
-                    aad.as_ptr(),
-                    aad.len(),
-                )
-            };
-            CmoxError::from_cipher_retval(result)?;
+            let result =
+                unsafe { cmox_cipher_appendAD(self.cipher_handle, aad.as_ptr(), aad.len()) };
+            CipherResult::from_rv(result)?;
         }
 
         // Encrypt payload
@@ -162,19 +143,14 @@ impl ChaCha20Poly1305 {
                 &mut output_len,
             )
         };
-        CmoxError::from_cipher_retval(result)?;
+        CipherResult::from_rv(result)?;
 
         // Generate authentication tag
         let mut tag = Tag::<Self>::default();
         let mut tag_len = tag.len();
-        let result = unsafe {
-            cmox_cipher_generateTag(
-                self.cipher_handle,
-                tag.as_mut_ptr(),
-                &mut tag_len,
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result =
+            unsafe { cmox_cipher_generateTag(self.cipher_handle, tag.as_mut_ptr(), &mut tag_len) };
+        CipherResult::from_rv(result)?;
 
         Ok(tag)
     }
@@ -186,9 +162,9 @@ impl ChaCha20Poly1305 {
         aad: &[u8],
         buffer: &mut [u8],
         tag: &Tag<Self>,
-    ) -> Result<()> {
+    ) -> crate::Result<()> {
         if !self.initialized {
-            return Err(CmoxError::NotInitialized);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         // For decryption, we need to reinitialize with decryption implementation
@@ -206,63 +182,39 @@ impl ChaCha20Poly1305 {
         };
 
         if self.cipher_handle.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(crate::error::CipherError::Internal.into());
         }
 
         // Initialize cipher
-        let result = unsafe {
-            cmox_cipher_init(self.cipher_handle)
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_init(self.cipher_handle) };
+        CipherResult::from_rv(result)?;
 
         // Set key
-        let result = unsafe {
-            cmox_cipher_setKey(
-                self.cipher_handle,
-                self.key.as_ptr(),
-                self.key.len(),
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result =
+            unsafe { cmox_cipher_setKey(self.cipher_handle, self.key.as_ptr(), self.key.len()) };
+        CipherResult::from_rv(result)?;
 
         // Set nonce/IV
-        let result = unsafe {
-            cmox_cipher_setIV(
-                self.cipher_handle,
-                nonce.as_ptr(),
-                nonce.len(),
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setIV(self.cipher_handle, nonce.as_ptr(), nonce.len()) };
+        CipherResult::from_rv(result)?;
 
         // Set payload length
-        let result = unsafe {
-            cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len())
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setPayloadLen(self.cipher_handle, buffer.len()) };
+        CipherResult::from_rv(result)?;
 
         // Set AAD length
-        let result = unsafe {
-            cmox_cipher_setADLen(self.cipher_handle, aad.len())
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setADLen(self.cipher_handle, aad.len()) };
+        CipherResult::from_rv(result)?;
 
         // Set tag length
-        let result = unsafe {
-            cmox_cipher_setTagLen(self.cipher_handle, tag.len())
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_cipher_setTagLen(self.cipher_handle, tag.len()) };
+        CipherResult::from_rv(result)?;
 
         // Process AAD
         if !aad.is_empty() {
-            let result = unsafe {
-                cmox_cipher_appendAD(
-                    self.cipher_handle,
-                    aad.as_ptr(),
-                    aad.len(),
-                )
-            };
-            CmoxError::from_cipher_retval(result)?;
+            let result =
+                unsafe { cmox_cipher_appendAD(self.cipher_handle, aad.as_ptr(), aad.len()) };
+            CipherResult::from_rv(result)?;
         }
 
         // Decrypt payload
@@ -276,26 +228,20 @@ impl ChaCha20Poly1305 {
                 &mut output_len,
             )
         };
-        CmoxError::from_cipher_retval(result)?;
+        CipherResult::from_rv(result)?;
 
         // Verify authentication tag
         let mut tag_len = tag.len() as u32;
         let result = unsafe {
-            cmox_cipher_verifyTag(
-                self.cipher_handle,
-                tag.as_ptr(),
-                &mut tag_len as *mut u32,
-            )
+            cmox_cipher_verifyTag(self.cipher_handle, tag.as_ptr(), &mut tag_len as *mut u32)
         };
-        CmoxError::from_cipher_retval(result)?;
+        CipherResult::from_rv(result)?;
 
         // Switch back to encryption mode for future operations
         unsafe {
             cmox_cipher_cleanup(self.cipher_handle);
         }
-        self.init()?;
-
-        Ok(())
+        self.init()
     }
 }
 
@@ -308,7 +254,8 @@ impl AeadInPlace for ChaCha20Poly1305 {
     ) -> aead::Result<Tag<Self>> {
         // Need to create a mutable copy since CMOX operations require mutable state
         let mut cipher = self.clone();
-        cipher.encrypt_in_place_detached_mut(nonce, associated_data, buffer)
+        cipher
+            .encrypt_in_place_detached_mut(nonce, associated_data, buffer)
             .map_err(|_| aead::Error)
     }
 
@@ -321,7 +268,8 @@ impl AeadInPlace for ChaCha20Poly1305 {
     ) -> aead::Result<()> {
         // Need to create a mutable copy since CMOX operations require mutable state
         let mut cipher = self.clone();
-        cipher.decrypt_in_place_detached_mut(nonce, associated_data, buffer, tag)
+        cipher
+            .decrypt_in_place_detached_mut(nonce, associated_data, buffer, tag)
             .map_err(|_| aead::Error)
     }
 }
@@ -344,8 +292,10 @@ impl Clone for ChaCha20Poly1305 {
             initialized: false,
             key: self.key,
         };
-        
-        new_cipher.init().expect("Failed to clone ChaCha20-Poly1305");
+
+        new_cipher
+            .init()
+            .expect("Failed to clone ChaCha20-Poly1305");
         new_cipher
     }
 }

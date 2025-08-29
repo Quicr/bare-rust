@@ -1,6 +1,6 @@
 //! KMAC (Keccak Message Authentication Code) implementation
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::{utils::ensure_initialized, CipherError, CmoxError, CoreError, HashError, Result};
 use cmox_sys::*;
 use core::fmt;
 use core::marker::PhantomData;
@@ -83,7 +83,7 @@ macro_rules! impl_kmac {
                 };
 
                 if self.mac_handle.is_null() {
-                    return Err(CmoxError::InitializationFailed);
+                    return Err(CmoxError::Cipher(CipherError::InternalError));
                 }
 
                 // Initialize MAC
@@ -143,7 +143,7 @@ macro_rules! impl_kmac {
             /// Update the MAC with input data
             pub fn update(&mut self, data: &[u8]) -> Result<()> {
                 if !self.initialized {
-                    return Err(CmoxError::NotInitialized);
+                    return Err(CmoxError::Core(CoreError::NotInitialized));
                 }
 
                 if data.is_empty() {
@@ -164,7 +164,7 @@ macro_rules! impl_kmac {
             /// Finalize and return the MAC tag
             pub fn finalize(self) -> Result<[u8; 128]> {
                 if !self.initialized {
-                    return Err(CmoxError::NotInitialized);
+                    return Err(CmoxError::Core(CoreError::NotInitialized));
                 }
 
                 let mut output = [0u8; 128]; // Max KMAC output size
@@ -191,7 +191,7 @@ macro_rules! impl_kmac {
             /// Finalize into provided buffer
             pub fn finalize_into(self, output: &mut [u8]) -> Result<()> {
                 if !self.initialized {
-                    return Err(CmoxError::NotInitialized);
+                    return Err(CmoxError::Core(CoreError::NotInitialized));
                 }
 
                 let mut output_len = output.len();

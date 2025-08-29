@@ -1,6 +1,7 @@
 //! SHA-3 hash function implementations
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::ensure_initialized;
+use crate::error::{FromRetval, HashResult};
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -58,28 +59,24 @@ macro_rules! impl_sha3 {
                     hash_handle: core::ptr::null_mut(),
                     initialized: false,
                 };
-                
+
                 hasher.init_hash().expect("Failed to initialize hash");
                 hasher
             }
 
-            fn init_hash(&mut self) -> Result<()> {
+            fn init_hash(&mut self) -> crate::Result<()> {
                 ensure_initialized()?;
-                
+
                 // Use the CMOX constructor to set up the handle properly
-                self.hash_handle = unsafe { 
-                    $cmox_construct(&mut self.handle as *mut _)
-                };
-                
+                self.hash_handle = unsafe { $cmox_construct(&mut self.handle as *mut _) };
+
                 if self.hash_handle.is_null() {
-                    return Err(CmoxError::InitializationFailed);
+                    return Err(crate::error::HashError::Internal.into());
                 }
 
-                let result = unsafe {
-                    cmox_hash_init(self.hash_handle)
-                };
-                
-                CmoxError::from_hash_retval(result)?;
+                let result = unsafe { cmox_hash_init(self.hash_handle) };
+
+                HashResult::from_rv(result)?;
                 self.initialized = true;
                 Ok(())
             }
@@ -102,20 +99,15 @@ macro_rules! impl_sha3 {
                 if !self.initialized {
                     panic!("Hash not initialized");
                 }
-                
+
                 if data.is_empty() {
                     return;
                 }
-                
-                let result = unsafe {
-                    cmox_hash_append(
-                        self.hash_handle,
-                        data.as_ptr(),
-                        data.len(),
-                    )
-                };
-                
-                CmoxError::from_hash_retval(result).expect("Hash update failed");
+
+                let result =
+                    unsafe { cmox_hash_append(self.hash_handle, data.as_ptr(), data.len()) };
+
+                HashResult::from_rv(result).expect("Hash update failed");
             }
         }
 
@@ -124,7 +116,7 @@ macro_rules! impl_sha3 {
                 if !self.initialized {
                     panic!("Hash not initialized");
                 }
-                
+
                 let mut digest_len = out.len();
                 let result = unsafe {
                     cmox_hash_generateTag(
@@ -133,9 +125,9 @@ macro_rules! impl_sha3 {
                         &mut digest_len as *mut usize,
                     )
                 };
-                
-                CmoxError::from_hash_retval(result).expect("Hash finalization failed");
-                
+
+                HashResult::from_rv(result).expect("Hash finalization failed");
+
                 // Clean up the handle
                 unsafe {
                     cmox_hash_cleanup(self.hash_handle);
@@ -151,7 +143,7 @@ macro_rules! impl_sha3 {
                         cmox_hash_cleanup(self.hash_handle);
                     }
                 }
-                
+
                 self.init_hash().expect("Hash reset failed");
             }
         }

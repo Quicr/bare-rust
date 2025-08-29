@@ -1,6 +1,6 @@
 //! HMAC (Hash-based Message Authentication Code) implementation
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::{utils::ensure_initialized, CipherError, CmoxError, CoreError, HashError, Result};
 use cmox_sys::*;
 use core::fmt;
 use core::marker::PhantomData;
@@ -55,7 +55,7 @@ where
         };
 
         if self.mac_handle.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(CmoxError::Cipher(CipherError::InternalError));
         }
 
         // Initialize MAC

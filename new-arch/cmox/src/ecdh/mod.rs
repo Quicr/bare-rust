@@ -1,7 +1,7 @@
 //! Elliptic Curve Diffie-Hellman (ECDH) key exchange using CMOX library
 //!
 //! This module provides implementations of ECDH key exchange algorithms using the
-//! STM32 CMOX library. It supports both NIST curves (Weierstrass form) and 
+//! STM32 CMOX library. It supports both NIST curves (Weierstrass form) and
 //! Montgomery curves (X25519/X448).
 //!
 //! ## Features
@@ -26,7 +26,8 @@
 //!   - Proper memory management and cleanup
 //!   - Fault checking for enhanced security
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::ensure_initialized;
+use crate::error::{EccResult, FromRetval};
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -56,7 +57,7 @@ impl EcdhCurve {
             EcdhCurve::X448 => unsafe { CMOX_ECC_CURVE448 },
         }
     }
-    
+
     fn math_funcs(self) -> cmox_math_funcs_t {
         match self {
             EcdhCurve::P256 => unsafe { CMOX_MATH_FUNCS_SUPERFAST256 },
@@ -79,9 +80,9 @@ impl EcdhCurve {
 
     fn public_key_len(self) -> usize {
         match self {
-            EcdhCurve::P256 => 64,  // Uncompressed: 32 bytes x + 32 bytes y
-            EcdhCurve::P384 => 96,  // Uncompressed: 48 bytes x + 48 bytes y
-            EcdhCurve::P521 => 132, // Uncompressed: 66 bytes x + 66 bytes y  
+            EcdhCurve::P256 => 64,   // Uncompressed: 32 bytes x + 32 bytes y
+            EcdhCurve::P384 => 96,   // Uncompressed: 48 bytes x + 48 bytes y
+            EcdhCurve::P521 => 132,  // Uncompressed: 66 bytes x + 66 bytes y
             EcdhCurve::X25519 => 32, // Montgomery: x-coordinate only
             EcdhCurve::X448 => 56,   // Montgomery: x-coordinate only
         }
@@ -89,9 +90,9 @@ impl EcdhCurve {
 
     fn shared_secret_len(self) -> usize {
         match self {
-            EcdhCurve::P256 => 32,  // x-coordinate of shared point
-            EcdhCurve::P384 => 48,  // x-coordinate of shared point
-            EcdhCurve::P521 => 66,  // x-coordinate of shared point
+            EcdhCurve::P256 => 32,   // x-coordinate of shared point
+            EcdhCurve::P384 => 48,   // x-coordinate of shared point
+            EcdhCurve::P521 => 66,   // x-coordinate of shared point
             EcdhCurve::X25519 => 32, // Montgomery ladder result
             EcdhCurve::X448 => 56,   // Montgomery ladder result
         }
@@ -117,9 +118,9 @@ pub struct EcdhPrivateKey {
 
 impl EcdhPrivateKey {
     /// Create an ECDH private key from raw bytes
-    pub fn from_bytes(private_key: &[u8], curve: EcdhCurve) -> Result<Self> {
+    pub fn from_bytes(private_key: &[u8], curve: EcdhCurve) -> crate::Result<Self> {
         if private_key.len() != curve.private_key_len() {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut key_buf = [0u8; 66];
@@ -143,17 +144,17 @@ impl EcdhPrivateKey {
     }
 
     /// Perform ECDH key exchange with a peer's public key
-    pub fn exchange(&self, peer_public_key: &EcdhPublicKey) -> Result<SharedSecret> {
+    pub fn exchange(&self, peer_public_key: &EcdhPublicKey) -> crate::Result<SharedSecret> {
         ensure_initialized()?;
 
         if self.curve != peer_public_key.curve {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         // Create ECC context
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         unsafe {
             cmox_ecc_construct(
                 &mut ecc_ctx,
@@ -184,7 +185,7 @@ impl EcdhPrivateKey {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
-        CmoxError::from_ecc_retval(result)?;
+        EccResult::from_rv(result)?;
 
         Ok(SharedSecret {
             curve: self.curve,
@@ -197,15 +198,15 @@ impl EcdhPrivateKey {
 /// ECDH public key for key exchange operations
 pub struct EcdhPublicKey {
     curve: EcdhCurve,
-    public_key: [u8; 132], // Max size for P-521  
+    public_key: [u8; 132], // Max size for P-521
     public_key_len: usize,
 }
 
 impl EcdhPublicKey {
     /// Create an ECDH public key from raw bytes
-    pub fn from_bytes(public_key: &[u8], curve: EcdhCurve) -> Result<Self> {
+    pub fn from_bytes(public_key: &[u8], curve: EcdhCurve) -> crate::Result<Self> {
         if public_key.len() != curve.public_key_len() {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut key_buf = [0u8; 132];
@@ -261,18 +262,18 @@ pub struct EcdhKeyPair {
 
 impl EcdhKeyPair {
     /// Generate a new ECDH key pair using cryptographically secure random data
-    pub fn generate(curve: EcdhCurve, random: &[u8]) -> Result<Self> {
+    pub fn generate(curve: EcdhCurve, random: &[u8]) -> crate::Result<Self> {
         ensure_initialized()?;
 
         let expected_random_len = curve.private_key_len();
         if random.len() < expected_random_len {
-            return Err(CmoxError::WrongRandom);
+            return Err(crate::error::EccError::WrongRandom.into());
         }
 
         // Create ECC context
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         unsafe {
             cmox_ecc_construct(
                 &mut ecc_ctx,
@@ -305,7 +306,7 @@ impl EcdhKeyPair {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
-        CmoxError::from_ecc_retval(result)?;
+        EccResult::from_rv(result)?;
 
         // Create key pair
         let private_key = EcdhPrivateKey {

@@ -1,16 +1,15 @@
 //! Message Authentication Code (MAC) implementations
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::ensure_initialized;
+use crate::error::{FromRetval, MacResult};
+use cipher::KeySizeUser;
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
 use digest::{
-    generic_array::GenericArray,
-    CtOutput, MacError, MacMarker, OutputSizeUser,
-    Update, Key, Mac, KeyInit,
-    core_api::BlockSizeUser,
+    core_api::BlockSizeUser, generic_array::GenericArray, CtOutput, Key, KeyInit, Mac, MacError,
+    MacMarker, OutputSizeUser, Update,
 };
-use cipher::KeySizeUser;
 
 /// HMAC using SHA-256
 pub struct HmacSha256 {
@@ -51,7 +50,7 @@ impl KeyInit for HmacSha256 {
 
 impl HmacSha256 {
     /// Create a new HMAC-SHA256 instance with the given key
-    pub fn new_with_key(key: &[u8]) -> Result<Self> {
+    pub fn new_with_key(key: &[u8]) -> crate::Result<Self> {
         let mut hmac = Self {
             handle: unsafe { MaybeUninit::zeroed().assume_init() },
             mac_handle: core::ptr::null_mut(),
@@ -62,80 +61,57 @@ impl HmacSha256 {
         Ok(hmac)
     }
 
-    fn init_with_key(&mut self, key: &[u8]) -> Result<()> {
+    fn init_with_key(&mut self, key: &[u8]) -> crate::Result<()> {
         ensure_initialized()?;
 
         // Initialize HMAC handle with SHA-256
-        self.mac_handle = unsafe {
-            cmox_hmac_construct(
-                &mut self.handle as *mut _,
-                CMOX_HMAC_SHA256,
-            )
-        };
+        self.mac_handle =
+            unsafe { cmox_hmac_construct(&mut self.handle as *mut _, CMOX_HMAC_SHA256) };
 
         if self.mac_handle.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(crate::error::CipherError::Internal.into());
         }
 
         // Initialize MAC
-        let result = unsafe {
-            cmox_mac_init(self.mac_handle)
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_mac_init(self.mac_handle) };
+        MacResult::from_rv(result)?;
 
         // Set key
-        let result = unsafe {
-            cmox_mac_setKey(
-                self.mac_handle,
-                key.as_ptr(),
-                key.len(),
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_mac_setKey(self.mac_handle, key.as_ptr(), key.len()) };
+        MacResult::from_rv(result)?;
 
         self.initialized = true;
         Ok(())
     }
 
     /// Update the MAC with input data
-    pub fn update_internal(&mut self, data: &[u8]) -> Result<()> {
+    pub fn update_internal(&mut self, data: &[u8]) -> crate::Result<()> {
         if !self.initialized {
-            return Err(CmoxError::NotInitialized);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         if data.is_empty() {
             return Ok(());
         }
 
-        let result = unsafe {
-            cmox_mac_append(
-                self.mac_handle,
-                data.as_ptr(),
-                data.len(),
-            )
-        };
+        let result = unsafe { cmox_mac_append(self.mac_handle, data.as_ptr(), data.len()) };
 
-        CmoxError::from_cipher_retval(result)
+        Ok(MacResult::from_rv(result)?)
     }
 
     /// Finalize and return the MAC tag
-    pub fn finalize_internal(self) -> Result<[u8; 32]> {
+    pub fn finalize_internal(self) -> crate::Result<[u8; 32]> {
         if !self.initialized {
-            return Err(CmoxError::NotInitialized);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut tag = [0u8; 32];
         let mut tag_len = tag.len();
 
-        let result = unsafe {
-            cmox_mac_generateTag(
-                self.mac_handle,
-                tag.as_mut_ptr(),
-                &mut tag_len,
-            )
-        };
+        let result =
+            unsafe { cmox_mac_generateTag(self.mac_handle, tag.as_mut_ptr(), &mut tag_len) };
 
-        CmoxError::from_cipher_retval(result)?;
+        MacResult::from_rv(result)?;
 
         // Clean up
         unsafe {
@@ -160,7 +136,8 @@ impl Mac for HmacSha256 {
     }
 
     fn chain_update(mut self, data: impl AsRef<[u8]>) -> Self {
-        self.update_internal(data.as_ref()).expect("HMAC update failed");
+        self.update_internal(data.as_ref())
+            .expect("HMAC update failed");
         self
     }
 
@@ -187,7 +164,10 @@ impl Mac for HmacSha256 {
         panic!("HMAC reset requires re-initialization with key");
     }
 
-    fn verify(self, tag: &GenericArray<u8, Self::OutputSize>) -> core::result::Result<(), MacError> {
+    fn verify(
+        self,
+        tag: &GenericArray<u8, Self::OutputSize>,
+    ) -> core::result::Result<(), MacError> {
         let computed = self.finalize();
         if computed.into_bytes().eq(tag) {
             Ok(())
@@ -214,7 +194,7 @@ impl Mac for HmacSha256 {
     }
 
     fn verify_slice_reset(&mut self, _tag: &[u8]) -> core::result::Result<(), MacError> {
-        // Not supported by CMOX - would need key storage for reset  
+        // Not supported by CMOX - would need key storage for reset
         Err(MacError)
     }
 
@@ -231,8 +211,8 @@ impl Mac for HmacSha256 {
     fn verify_truncated_right(self, tag: &[u8]) -> core::result::Result<(), MacError> {
         let computed = self.finalize();
         let computed_bytes = computed.into_bytes();
-        if tag.len() <= computed_bytes.len() 
-            && computed_bytes[(computed_bytes.len() - tag.len())..].eq(tag) 
+        if tag.len() <= computed_bytes.len()
+            && computed_bytes[(computed_bytes.len() - tag.len())..].eq(tag)
         {
             Ok(())
         } else {
@@ -304,7 +284,7 @@ impl KeyInit for AesCmac {
 
 impl AesCmac {
     /// Create a new AES-CMAC instance with the given key
-    pub fn new_with_key(key: &[u8]) -> Result<Self> {
+    pub fn new_with_key(key: &[u8]) -> crate::Result<Self> {
         let mut cmac = Self {
             handle: unsafe { MaybeUninit::zeroed().assume_init() },
             mac_handle: core::ptr::null_mut(),
@@ -315,80 +295,57 @@ impl AesCmac {
         Ok(cmac)
     }
 
-    fn init_with_key(&mut self, key: &[u8]) -> Result<()> {
+    fn init_with_key(&mut self, key: &[u8]) -> crate::Result<()> {
         ensure_initialized()?;
 
         // Initialize CMAC handle with AES
-        self.mac_handle = unsafe {
-            cmox_cmac_construct(
-                &mut self.handle as *mut _,
-                CMOX_CMAC_AESFAST,
-            )
-        };
+        self.mac_handle =
+            unsafe { cmox_cmac_construct(&mut self.handle as *mut _, CMOX_CMAC_AESFAST) };
 
         if self.mac_handle.is_null() {
-            return Err(CmoxError::InitializationFailed);
+            return Err(crate::error::CipherError::Internal.into());
         }
 
         // Initialize MAC
-        let result = unsafe {
-            cmox_mac_init(self.mac_handle)
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_mac_init(self.mac_handle) };
+        MacResult::from_rv(result)?;
 
         // Set key
-        let result = unsafe {
-            cmox_mac_setKey(
-                self.mac_handle,
-                key.as_ptr(),
-                key.len(),
-            )
-        };
-        CmoxError::from_cipher_retval(result)?;
+        let result = unsafe { cmox_mac_setKey(self.mac_handle, key.as_ptr(), key.len()) };
+        MacResult::from_rv(result)?;
 
         self.initialized = true;
         Ok(())
     }
 
     /// Update the MAC with input data
-    pub fn update_internal(&mut self, data: &[u8]) -> Result<()> {
+    pub fn update_internal(&mut self, data: &[u8]) -> crate::Result<()> {
         if !self.initialized {
-            return Err(CmoxError::NotInitialized);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         if data.is_empty() {
             return Ok(());
         }
 
-        let result = unsafe {
-            cmox_mac_append(
-                self.mac_handle,
-                data.as_ptr(),
-                data.len(),
-            )
-        };
+        let result = unsafe { cmox_mac_append(self.mac_handle, data.as_ptr(), data.len()) };
 
-        CmoxError::from_cipher_retval(result)
+        Ok(MacResult::from_rv(result)?)
     }
 
     /// Finalize and return the MAC tag
-    pub fn finalize_internal(self) -> Result<[u8; 16]> {
+    pub fn finalize_internal(self) -> crate::Result<[u8; 16]> {
         if !self.initialized {
-            return Err(CmoxError::NotInitialized);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut tag = [0u8; 16];
         let mut tag_len = tag.len();
 
-        let result = unsafe {
-            cmox_mac_generateTag(
-                self.mac_handle,
-                tag.as_mut_ptr(),
-                &mut tag_len,
-            )
-        };
+        let result =
+            unsafe { cmox_mac_generateTag(self.mac_handle, tag.as_mut_ptr(), &mut tag_len) };
 
-        CmoxError::from_cipher_retval(result)?;
+        MacResult::from_rv(result)?;
 
         // Clean up
         unsafe {
@@ -413,7 +370,8 @@ impl Mac for AesCmac {
     }
 
     fn chain_update(mut self, data: impl AsRef<[u8]>) -> Self {
-        self.update_internal(data.as_ref()).expect("CMAC update failed");
+        self.update_internal(data.as_ref())
+            .expect("CMAC update failed");
         self
     }
 
@@ -424,7 +382,7 @@ impl Mac for AesCmac {
 
     fn finalize_reset(&mut self) -> CtOutput<Self> {
         // CMOX API doesn't directly support finalize_reset pattern
-        // We'd need to store the key to reinitialize after finalization  
+        // We'd need to store the key to reinitialize after finalization
         panic!("finalize_reset not supported by CMOX CMAC implementation - use finalize() + new() instead");
     }
 
@@ -438,7 +396,10 @@ impl Mac for AesCmac {
         panic!("CMAC reset requires re-initialization with key");
     }
 
-    fn verify(self, tag: &GenericArray<u8, Self::OutputSize>) -> core::result::Result<(), MacError> {
+    fn verify(
+        self,
+        tag: &GenericArray<u8, Self::OutputSize>,
+    ) -> core::result::Result<(), MacError> {
         let computed = self.finalize();
         if computed.into_bytes().eq(tag) {
             Ok(())
@@ -465,7 +426,7 @@ impl Mac for AesCmac {
     }
 
     fn verify_slice_reset(&mut self, _tag: &[u8]) -> core::result::Result<(), MacError> {
-        // Not supported by CMOX - would need key storage for reset  
+        // Not supported by CMOX - would need key storage for reset
         Err(MacError)
     }
 
@@ -482,8 +443,8 @@ impl Mac for AesCmac {
     fn verify_truncated_right(self, tag: &[u8]) -> core::result::Result<(), MacError> {
         let computed = self.finalize();
         let computed_bytes = computed.into_bytes();
-        if tag.len() <= computed_bytes.len() 
-            && computed_bytes[(computed_bytes.len() - tag.len())..].eq(tag) 
+        if tag.len() <= computed_bytes.len()
+            && computed_bytes[(computed_bytes.len() - tag.len())..].eq(tag)
         {
             Ok(())
         } else {

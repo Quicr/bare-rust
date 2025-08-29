@@ -1,7 +1,7 @@
 //! Digital signature implementations using CMOX library
 //!
 //! This module provides implementations of digital signature algorithms using the
-//! STM32 CMOX library. All operations (ECDSA, EdDSA, and RSA) use real cryptographic 
+//! STM32 CMOX library. All operations (ECDSA, EdDSA, and RSA) use real cryptographic
 //! implementations via their respective CMOX APIs.
 //!
 //! ## Features
@@ -29,13 +29,14 @@
 //!   - ZA computation for user identity integration
 //!   - Real cryptographic operations with fault checking
 
-use crate::{utils::ensure_initialized, CmoxError, Result};
+use crate::ensure_initialized;
+use crate::error::{EccResult, FromRetval, RsaResult};
 use crate::hash::sm3::Sm3;
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
 use digest::Digest;
-use rand_core::{RngCore, CryptoRng};
+use rand_core::{CryptoRng, RngCore};
 
 /// Supported elliptic curves
 #[derive(Copy, Clone, Debug)]
@@ -74,7 +75,7 @@ impl CurveType {
             CurveType::P521 => unsafe { CMOX_ECC_SECP521R1_LOWMEM },
         }
     }
-    
+
     fn math_funcs(self) -> cmox_math_funcs_t {
         match self {
             CurveType::P256 => unsafe { CMOX_MATH_FUNCS_SUPERFAST256 },
@@ -115,29 +116,29 @@ impl Sm2Curve {
             Sm2Curve::Sm2Test => unsafe { CMOX_ECC_SM2TEST_LOWMEM },
         }
     }
-    
+
     fn math_funcs(self) -> cmox_math_funcs_t {
         unsafe { CMOX_MATH_FUNCS_SUPERFAST256 } // SM2 is a 256-bit curve
     }
 
     /// Get the signature length in bytes for this SM2 curve
     pub fn signature_len(self) -> usize {
-        64  // SM2 signatures are 64 bytes (r + s, 32 bytes each)
+        64 // SM2 signatures are 64 bytes (r + s, 32 bytes each)
     }
 
     /// Get the private key length in bytes for this SM2 curve
     pub fn private_key_len(self) -> usize {
-        32  // SM2 private key is 32 bytes
+        32 // SM2 private key is 32 bytes
     }
 
     /// Get the public key length in bytes for this SM2 curve
     pub fn public_key_len(self) -> usize {
-        64  // SM2 public key is 64 bytes (x + y, 32 bytes each)
+        64 // SM2 public key is 64 bytes (x + y, 32 bytes each)
     }
 
     /// Get the ZA value length in bytes for this SM2 curve
     pub fn za_len(self) -> usize {
-        32  // ZA value is 32 bytes (SHA-256 output)
+        32 // ZA value is 32 bytes (SHA-256 output)
     }
 }
 
@@ -148,7 +149,7 @@ impl EdwardsCurve {
             EdwardsCurve::Ed448 => unsafe { CMOX_ECC_ED448_LOWMEM },
         }
     }
-    
+
     fn math_funcs(self) -> cmox_math_funcs_t {
         match self {
             EdwardsCurve::Ed25519 => unsafe { CMOX_MATH_FUNCS_FAST },
@@ -158,22 +159,22 @@ impl EdwardsCurve {
 
     fn signature_len(self) -> usize {
         match self {
-            EdwardsCurve::Ed25519 => 64,  // Ed25519 signatures are 64 bytes
-            EdwardsCurve::Ed448 => 114,   // Ed448 signatures are 114 bytes
+            EdwardsCurve::Ed25519 => 64, // Ed25519 signatures are 64 bytes
+            EdwardsCurve::Ed448 => 114,  // Ed448 signatures are 114 bytes
         }
     }
 
     fn private_key_len(self) -> usize {
         match self {
-            EdwardsCurve::Ed25519 => 64,  // Ed25519 private key is 64 bytes (secret + public)
-            EdwardsCurve::Ed448 => 114,   // Ed448 private key is 114 bytes
+            EdwardsCurve::Ed25519 => 64, // Ed25519 private key is 64 bytes (secret + public)
+            EdwardsCurve::Ed448 => 114,  // Ed448 private key is 114 bytes
         }
     }
 
     fn public_key_len(self) -> usize {
         match self {
-            EdwardsCurve::Ed25519 => 32,  // Ed25519 public key is 32 bytes
-            EdwardsCurve::Ed448 => 57,    // Ed448 public key is 57 bytes
+            EdwardsCurve::Ed25519 => 32, // Ed25519 public key is 32 bytes
+            EdwardsCurve::Ed448 => 57,   // Ed448 public key is 57 bytes
         }
     }
 }
@@ -187,14 +188,14 @@ pub struct EcdsaSignature {
 
 impl EcdsaSignature {
     /// Create signature from raw bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
         if bytes.len() > 132 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         let mut signature = [0u8; 132];
         signature[..bytes.len()].copy_from_slice(bytes);
-        
+
         Ok(Self {
             signature,
             len: bytes.len(),
@@ -221,9 +222,9 @@ pub struct EcdsaSigningKey {
 
 impl EcdsaSigningKey {
     /// Create a new ECDSA signing key
-    pub fn new(private_key: &[u8], curve: CurveType) -> Result<Self> {
+    pub fn new(private_key: &[u8], curve: CurveType) -> crate::Result<Self> {
         if private_key.len() != curve.private_key_len() {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut key_buf = [0u8; 66];
@@ -237,12 +238,12 @@ impl EcdsaSigningKey {
     }
 
     /// Sign a message digest using ECDSA
-    /// 
+    ///
     /// # Arguments
     /// * `digest` - The message digest to sign
     /// * `rng` - Cryptographically secure random number generator for generating k value
-    pub fn sign_digest<R>(&self, digest: &[u8], rng: &mut R) -> Result<EcdsaSignature> 
-    where 
+    pub fn sign_digest<R>(&self, digest: &[u8], rng: &mut R) -> crate::Result<EcdsaSignature>
+    where
         R: RngCore + CryptoRng,
     {
         ensure_initialized()?;
@@ -251,7 +252,7 @@ impl EcdsaSigningKey {
         // Buffer size needs to be sufficient for ECC operations - using 2KB for safety
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct ECC context
         unsafe {
             cmox_ecc_construct(
@@ -265,11 +266,11 @@ impl EcdsaSigningKey {
         let signature_len = self.curve.signature_len();
         let mut signature_buf = [0u8; 132];
         let mut sig_len = signature_len;
-        
+
         // Generate cryptographically secure random bytes for k value
         let mut random_k = [0u8; 64];
         rng.fill_bytes(&mut random_k);
-        
+
         // Call CMOX ECDSA sign
         let result = unsafe {
             cmox_ecdsa_sign(
@@ -285,14 +286,14 @@ impl EcdsaSigningKey {
                 &mut sig_len,
             )
         };
-        
+
         // Cleanup ECC context
         unsafe {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
         // Check result
-        CmoxError::from_ecc_retval(result)?;
+        EccResult::from_rv(result)?;
 
         Ok(EcdsaSignature {
             signature: signature_buf,
@@ -311,9 +312,9 @@ pub struct EcdsaVerifyingKey {
 
 impl EcdsaVerifyingKey {
     /// Create a new ECDSA verifying key
-    pub fn new(public_key: &[u8], curve: CurveType) -> Result<Self> {
+    pub fn new(public_key: &[u8], curve: CurveType) -> crate::Result<Self> {
         if public_key.len() != curve.public_key_len() {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut key_buf = [0u8; 132];
@@ -327,18 +328,18 @@ impl EcdsaVerifyingKey {
     }
 
     /// Verify a signature against a message digest
-    pub fn verify_digest(&self, digest: &[u8], signature: &EcdsaSignature) -> Result<()> {
+    pub fn verify_digest(&self, digest: &[u8], signature: &EcdsaSignature) -> crate::Result<()> {
         ensure_initialized()?;
 
         // Check signature length
         if signature.len() != self.curve.signature_len() {
-            return Err(CmoxError::AuthenticationFailed);
+            return Err(crate::error::EccError::BadParameter.into());
         }
 
         // Create ECC context with working buffer
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct ECC context
         unsafe {
             cmox_ecc_construct(
@@ -350,7 +351,7 @@ impl EcdsaVerifyingKey {
         }
 
         let mut fault_check: u32 = 0;
-        
+
         // Call CMOX ECDSA verify
         let result = unsafe {
             cmox_ecdsa_verify(
@@ -365,18 +366,18 @@ impl EcdsaVerifyingKey {
                 &mut fault_check,
             )
         };
-        
+
         // Cleanup ECC context
         unsafe {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
         // Check result and fault check
-        CmoxError::from_ecc_retval(result)?;
-        
+        EccResult::from_rv(result)?;
+
         // Additional fault check - both result and fault_check must indicate success
         if result != fault_check {
-            return Err(CmoxError::AuthenticationFailed);
+            return Err(crate::error::EccError::BadParameter.into());
         }
 
         Ok(())
@@ -392,14 +393,14 @@ pub struct EddsaSignature {
 
 impl EddsaSignature {
     /// Create signature from raw bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
         if bytes.len() > 114 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         let mut signature = [0u8; 114];
         signature[..bytes.len()].copy_from_slice(bytes);
-        
+
         Ok(Self {
             signature,
             len: bytes.len(),
@@ -426,9 +427,9 @@ pub struct EddsaSigningKey {
 
 impl EddsaSigningKey {
     /// Create a new EdDSA signing key
-    pub fn new(private_key: &[u8], curve: EdwardsCurve) -> Result<Self> {
+    pub fn new(private_key: &[u8], curve: EdwardsCurve) -> crate::Result<Self> {
         if private_key.len() != curve.private_key_len() {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut key_buf = [0u8; 114];
@@ -442,13 +443,13 @@ impl EddsaSigningKey {
     }
 
     /// Sign a message using EdDSA (note: EdDSA signs the full message, not just a digest)
-    pub fn sign_message(&self, message: &[u8]) -> Result<EddsaSignature> {
+    pub fn sign_message(&self, message: &[u8]) -> crate::Result<EddsaSignature> {
         ensure_initialized()?;
 
         // Create ECC context with working buffer
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct ECC context
         unsafe {
             cmox_ecc_construct(
@@ -462,7 +463,7 @@ impl EddsaSigningKey {
         let signature_len = self.curve.signature_len();
         let mut signature_buf = [0u8; 114];
         let mut sig_len = signature_len;
-        
+
         // Call CMOX EdDSA sign
         let result = unsafe {
             cmox_eddsa_sign(
@@ -476,14 +477,14 @@ impl EddsaSigningKey {
                 &mut sig_len,
             )
         };
-        
+
         // Cleanup ECC context
         unsafe {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
         // Check result
-        CmoxError::from_ecc_retval(result)?;
+        EccResult::from_rv(result)?;
 
         Ok(EddsaSignature {
             signature: signature_buf,
@@ -502,9 +503,9 @@ pub struct EddsaVerifyingKey {
 
 impl EddsaVerifyingKey {
     /// Create a new EdDSA verifying key
-    pub fn new(public_key: &[u8], curve: EdwardsCurve) -> Result<Self> {
+    pub fn new(public_key: &[u8], curve: EdwardsCurve) -> crate::Result<Self> {
         if public_key.len() != curve.public_key_len() {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut key_buf = [0u8; 57];
@@ -518,18 +519,18 @@ impl EddsaVerifyingKey {
     }
 
     /// Verify a signature against a message
-    pub fn verify_message(&self, message: &[u8], signature: &EddsaSignature) -> Result<()> {
+    pub fn verify_message(&self, message: &[u8], signature: &EddsaSignature) -> crate::Result<()> {
         ensure_initialized()?;
 
         // Check signature length
         if signature.len() != self.curve.signature_len() {
-            return Err(CmoxError::AuthenticationFailed);
+            return Err(crate::error::EccError::BadParameter.into());
         }
 
         // Create ECC context with working buffer
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct ECC context
         unsafe {
             cmox_ecc_construct(
@@ -541,7 +542,7 @@ impl EddsaVerifyingKey {
         }
 
         let mut fault_check: u32 = 0;
-        
+
         // Call CMOX EdDSA verify
         let result = unsafe {
             cmox_eddsa_verify(
@@ -556,18 +557,18 @@ impl EddsaVerifyingKey {
                 &mut fault_check,
             )
         };
-        
+
         // Cleanup ECC context
         unsafe {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
         // Check result and fault check
-        CmoxError::from_ecc_retval(result)?;
-        
+        EccResult::from_rv(result)?;
+
         // Additional fault check - both result and fault_check must indicate success
         if result != fault_check {
-            return Err(CmoxError::AuthenticationFailed);
+            return Err(crate::error::EccError::BadParameter.into());
         }
 
         Ok(())
@@ -583,18 +584,15 @@ pub struct Sm2Signature {
 
 impl Sm2Signature {
     /// Create signature from raw bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
         if bytes.len() != 64 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         let mut signature = [0u8; 64];
         signature.copy_from_slice(bytes);
-        
-        Ok(Self {
-            signature,
-            len: 64,
-        })
+
+        Ok(Self { signature, len: 64 })
     }
 
     /// Get signature as bytes  
@@ -619,23 +617,28 @@ pub struct Sm2SigningKey {
 
 impl Sm2SigningKey {
     /// Create a new SM2 signing key
-    pub fn new(private_key: &[u8], public_key: &[u8], curve: Sm2Curve, user_id: &[u8]) -> Result<Self> {
+    pub fn new(
+        private_key: &[u8],
+        public_key: &[u8],
+        curve: Sm2Curve,
+        user_id: &[u8],
+    ) -> crate::Result<Self> {
         if private_key.len() != 32 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         if public_key.len() != 64 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         if user_id.len() > 64 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut private_key_buf = [0u8; 32];
         let mut public_key_buf = [0u8; 64];
         let mut user_id_buf = [0u8; 64];
-        
+
         private_key_buf.copy_from_slice(private_key);
         public_key_buf.copy_from_slice(public_key);
         user_id_buf[..user_id.len()].copy_from_slice(user_id);
@@ -650,13 +653,13 @@ impl Sm2SigningKey {
     }
 
     /// Compute ZA value for SM2 signing
-    pub fn compute_za(&self) -> Result<[u8; 32]> {
+    pub fn compute_za(&self) -> crate::Result<[u8; 32]> {
         ensure_initialized()?;
 
         // Create ECC context with working buffer
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct ECC context
         unsafe {
             cmox_ecc_construct(
@@ -669,7 +672,7 @@ impl Sm2SigningKey {
 
         let mut za = [0u8; 32];
         let mut za_len = za.len();
-        
+
         // Call CMOX SM2 computeZA - ENTLA is user_id length in bits
         let entla = (self.user_id_len * 8) as u16;
         let result = unsafe {
@@ -684,30 +687,30 @@ impl Sm2SigningKey {
                 &mut za_len,
             )
         };
-        
+
         // Cleanup ECC context
         unsafe {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
         // Check result
-        CmoxError::from_ecc_retval(result)?;
+        EccResult::from_rv(result)?;
 
         Ok(za)
     }
 
     /// Sign a message using SM2
-    /// 
+    ///
     /// This function implements the full SM2 signature process:
     /// 1. Computes ZA value from user identity and curve parameters
     /// 2. Computes SM3(ZA || message) digest per SM2 specification
     /// 3. Signs the resulting digest using SM2 algorithm
-    /// 
+    ///
     /// # Arguments
     /// * `message` - The message to sign
     /// * `rng` - Cryptographically secure random number generator for generating k value
-    pub fn sign_message<R>(&self, message: &[u8], rng: &mut R) -> Result<Sm2Signature> 
-    where 
+    pub fn sign_message<R>(&self, message: &[u8], rng: &mut R) -> crate::Result<Sm2Signature>
+    where
         R: RngCore + CryptoRng,
     {
         ensure_initialized()?;
@@ -717,10 +720,10 @@ impl Sm2SigningKey {
 
         // Compute SM3 hash of ZA || message (per SM2 specification)
         let mut hasher = Sm3::new();
-        Digest::update(&mut hasher, &za);         // Add ZA value
-        Digest::update(&mut hasher, message);     // Add message
+        Digest::update(&mut hasher, za); // Add ZA value
+        Digest::update(&mut hasher, message); // Add message
         let digest_output = hasher.finalize();
-        
+
         // Convert to byte array for signing
         let mut digest = [0u8; 32];
         digest.copy_from_slice(&digest_output);
@@ -729,12 +732,12 @@ impl Sm2SigningKey {
     }
 
     /// Sign a pre-computed digest using SM2
-    /// 
+    ///
     /// # Arguments
     /// * `digest` - The message digest to sign
     /// * `rng` - Cryptographically secure random number generator for generating k value
-    pub fn sign_digest<R>(&self, digest: &[u8], rng: &mut R) -> Result<Sm2Signature> 
-    where 
+    pub fn sign_digest<R>(&self, digest: &[u8], rng: &mut R) -> crate::Result<Sm2Signature>
+    where
         R: RngCore + CryptoRng,
     {
         ensure_initialized()?;
@@ -742,7 +745,7 @@ impl Sm2SigningKey {
         // Create ECC context with working buffer
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct ECC context
         unsafe {
             cmox_ecc_construct(
@@ -755,11 +758,11 @@ impl Sm2SigningKey {
 
         let mut signature_buf = [0u8; 64];
         let mut sig_len = 64;
-        
+
         // Generate cryptographically secure random bytes for k value
         let mut random_k = [0u8; 32];
         rng.fill_bytes(&mut random_k);
-        
+
         // Call CMOX SM2 sign
         let result = unsafe {
             cmox_sm2_sign(
@@ -775,14 +778,14 @@ impl Sm2SigningKey {
                 &mut sig_len,
             )
         };
-        
+
         // Cleanup ECC context
         unsafe {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
         // Check result
-        CmoxError::from_ecc_retval(result)?;
+        EccResult::from_rv(result)?;
 
         Ok(Sm2Signature {
             signature: signature_buf,
@@ -799,9 +802,9 @@ pub struct Sm2VerifyingKey {
 
 impl Sm2VerifyingKey {
     /// Create a new SM2 verifying key
-    pub fn new(public_key: &[u8], curve: Sm2Curve) -> Result<Self> {
+    pub fn new(public_key: &[u8], curve: Sm2Curve) -> crate::Result<Self> {
         if public_key.len() != 64 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
 
         let mut key_buf = [0u8; 64];
@@ -814,18 +817,18 @@ impl Sm2VerifyingKey {
     }
 
     /// Verify a signature against a digest
-    pub fn verify_digest(&self, digest: &[u8], signature: &Sm2Signature) -> Result<()> {
+    pub fn verify_digest(&self, digest: &[u8], signature: &Sm2Signature) -> crate::Result<()> {
         ensure_initialized()?;
 
         // Check signature length
         if signature.len() != 64 {
-            return Err(CmoxError::AuthenticationFailed);
+            return Err(crate::error::EccError::BadParameter.into());
         }
 
         // Create ECC context with working buffer
         let mut working_buffer = [0u8; 2048];
         let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct ECC context
         unsafe {
             cmox_ecc_construct(
@@ -837,7 +840,7 @@ impl Sm2VerifyingKey {
         }
 
         let mut fault_check: u32 = 0;
-        
+
         // Call CMOX SM2 verify
         let result = unsafe {
             cmox_sm2_verify(
@@ -852,18 +855,18 @@ impl Sm2VerifyingKey {
                 &mut fault_check,
             )
         };
-        
+
         // Cleanup ECC context
         unsafe {
             cmox_ecc_cleanup(&mut ecc_ctx);
         }
 
         // Check result and fault check
-        CmoxError::from_ecc_retval(result)?;
-        
+        EccResult::from_rv(result)?;
+
         // Additional fault check - both result and fault_check must indicate success
         if result != fault_check {
-            return Err(CmoxError::AuthenticationFailed);
+            return Err(crate::error::EccError::BadParameter.into());
         }
 
         Ok(())
@@ -879,25 +882,25 @@ pub struct RsaSignature {
 
 impl RsaSignature {
     /// Create signature from raw bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
         if bytes.len() > 512 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         let mut signature = [0u8; 512];
         signature[..bytes.len()].copy_from_slice(bytes);
-        
+
         Ok(Self {
             signature,
             len: bytes.len(),
         })
     }
-    
+
     /// Get signature as bytes
     pub fn to_bytes(&self) -> &[u8] {
         &self.signature[..self.len]
     }
-    
+
     /// Get signature length
     pub fn len(&self) -> usize {
         self.len
@@ -921,7 +924,7 @@ impl RsaKeySize {
             RsaKeySize::Rsa4096 => 4096,
         }
     }
-    
+
     fn signature_len(self) -> usize {
         match self {
             RsaKeySize::Rsa2048 => 256, // 2048 bits = 256 bytes
@@ -962,24 +965,28 @@ pub struct RsaSigningKey {
 
 impl RsaSigningKey {
     /// Create new RSA signing key from modulus and private exponent
-    pub fn new(modulus: &[u8], private_exponent: &[u8], key_size: RsaKeySize) -> Result<Self> {
+    pub fn new(
+        modulus: &[u8],
+        private_exponent: &[u8],
+        key_size: RsaKeySize,
+    ) -> crate::Result<Self> {
         ensure_initialized()?;
-        
+
         let expected_mod_len = key_size.signature_len();
         if modulus.len() != expected_mod_len {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         if private_exponent.len() > expected_mod_len {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         let mut mod_buf = [0u8; 512];
         let mut key_buf = [0u8; 512];
-        
+
         mod_buf[..modulus.len()].copy_from_slice(modulus);
         key_buf[..private_exponent.len()].copy_from_slice(private_exponent);
-        
+
         Ok(Self {
             key_size,
             private_key: key_buf,
@@ -990,13 +997,17 @@ impl RsaSigningKey {
     }
 
     /// Sign a digest using RSA PKCS#1 v1.5
-    pub fn sign_digest(&self, digest: &[u8], hash_alg: RsaHashAlgorithm) -> Result<RsaSignature> {
+    pub fn sign_digest(
+        &self,
+        digest: &[u8],
+        hash_alg: RsaHashAlgorithm,
+    ) -> crate::Result<RsaSignature> {
         ensure_initialized()?;
 
         // Create RSA context with working buffer
         let mut working_buffer = [0u8; 4096]; // Larger buffer for RSA operations
         let mut rsa_ctx: cmox_rsa_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct RSA context
         unsafe {
             cmox_rsa_construct(
@@ -1019,19 +1030,20 @@ impl RsaSigningKey {
                 self.private_key_len,
             )
         };
-        
-        if result != 0x00050000 { // CMOX_RSA_SUCCESS
+
+        if result != 0x00050000 {
+            // CMOX_RSA_SUCCESS
             unsafe {
                 cmox_rsa_cleanup(&mut rsa_ctx);
             }
-            CmoxError::from_rsa_retval(result)?;
-            return Err(CmoxError::InternalError);
+            RsaResult::from_rv(result)?;
+            return Err(crate::error::RsaError::Internal.into());
         }
 
         let signature_len = self.key_size.signature_len();
         let mut signature_buf = [0u8; 512];
         let mut sig_len = signature_len;
-        
+
         // Call CMOX RSA PKCS#1 v1.5 sign
         let result = unsafe {
             cmox_rsa_pkcs1v15_sign(
@@ -1043,14 +1055,14 @@ impl RsaSigningKey {
                 &mut sig_len,
             )
         };
-        
+
         // Cleanup RSA context
         unsafe {
             cmox_rsa_cleanup(&mut rsa_ctx);
         }
 
         // Check result
-        CmoxError::from_rsa_retval(result)?;
+        RsaResult::from_rv(result)?;
 
         Ok(RsaSignature {
             signature: signature_buf,
@@ -1070,24 +1082,28 @@ pub struct RsaVerifyingKey {
 
 impl RsaVerifyingKey {
     /// Create new RSA verifying key from modulus and public exponent
-    pub fn new(modulus: &[u8], public_exponent: &[u8], key_size: RsaKeySize) -> Result<Self> {
+    pub fn new(
+        modulus: &[u8],
+        public_exponent: &[u8],
+        key_size: RsaKeySize,
+    ) -> crate::Result<Self> {
         ensure_initialized()?;
-        
+
         let expected_mod_len = key_size.signature_len();
         if modulus.len() != expected_mod_len {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         if public_exponent.len() > 8 {
-            return Err(CmoxError::InvalidInput);
+            return Err(crate::error::CoreError::InitFail.into());
         }
-        
+
         let mut mod_buf = [0u8; 512];
         let mut exp_buf = [0u8; 8];
-        
+
         mod_buf[..modulus.len()].copy_from_slice(modulus);
         exp_buf[..public_exponent.len()].copy_from_slice(public_exponent);
-        
+
         Ok(Self {
             key_size,
             modulus: mod_buf,
@@ -1098,19 +1114,24 @@ impl RsaVerifyingKey {
     }
 
     /// Verify a signature using RSA PKCS#1 v1.5
-    pub fn verify_digest(&self, digest: &[u8], signature: &RsaSignature, hash_alg: RsaHashAlgorithm) -> Result<()> {
+    pub fn verify_digest(
+        &self,
+        digest: &[u8],
+        signature: &RsaSignature,
+        hash_alg: RsaHashAlgorithm,
+    ) -> crate::Result<()> {
         ensure_initialized()?;
-        
+
         // Check signature length
         let expected_len = self.key_size.signature_len();
         if signature.len() != expected_len {
-            return Err(CmoxError::AuthenticationFailed);
+            return Err(crate::error::RsaError::BadParameter.into());
         }
 
         // Create RSA context with working buffer
         let mut working_buffer = [0u8; 4096]; // Larger buffer for RSA operations
         let mut rsa_ctx: cmox_rsa_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-        
+
         // Construct RSA context
         unsafe {
             cmox_rsa_construct(
@@ -1133,17 +1154,18 @@ impl RsaVerifyingKey {
                 self.public_exponent_len,
             )
         };
-        
-        if result != 0x00050000 { // CMOX_RSA_SUCCESS
+
+        if result != 0x00050000 {
+            // CMOX_RSA_SUCCESS
             unsafe {
                 cmox_rsa_cleanup(&mut rsa_ctx);
             }
-            CmoxError::from_rsa_retval(result)?;
-            return Err(CmoxError::InternalError);
+            RsaResult::from_rv(result)?;
+            return Err(crate::error::RsaError::Internal.into());
         }
 
         let mut fault_check: u32 = 0;
-        
+
         // Call CMOX RSA PKCS#1 v1.5 verify
         let result = unsafe {
             cmox_rsa_pkcs1v15_verify(
@@ -1156,18 +1178,18 @@ impl RsaVerifyingKey {
                 &mut fault_check,
             )
         };
-        
+
         // Cleanup RSA context
         unsafe {
             cmox_rsa_cleanup(&mut rsa_ctx);
         }
 
         // Check result and fault check
-        CmoxError::from_rsa_retval(result)?;
-        
+        RsaResult::from_rv(result)?;
+
         // Additional fault check - both result and fault_check must indicate success
         if result != fault_check {
-            return Err(CmoxError::AuthenticationFailed);
+            return Err(crate::error::RsaError::BadParameter.into());
         }
 
         Ok(())

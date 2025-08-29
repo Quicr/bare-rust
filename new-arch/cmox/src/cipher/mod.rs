@@ -6,15 +6,25 @@
 pub mod aes;
 pub use aes::{
     // ECB mode (basic block cipher interface)
-    Aes128, Aes192, Aes256,
+    Aes128,
     // CBC mode (requires IV)
-    Aes128Cbc, Aes192Cbc, Aes256Cbc,
-    // CFB mode (requires IV) 
-    Aes128Cfb, Aes192Cfb, Aes256Cfb,
+    Aes128Cbc,
+    // CFB mode (requires IV)
+    Aes128Cfb,
     // CTR mode (stream cipher mode)
-    Aes128Ctr, Aes192Ctr, Aes256Ctr,
+    Aes128Ctr,
     // OFB mode (stream cipher mode)
-    Aes128Ofb, Aes192Ofb, Aes256Ofb,
+    Aes128Ofb,
+    Aes192,
+    Aes192Cbc,
+    Aes192Cfb,
+    Aes192Ctr,
+    Aes192Ofb,
+    Aes256,
+    Aes256Cbc,
+    Aes256Cfb,
+    Aes256Ctr,
+    Aes256Ofb,
 };
 
 pub mod sm4;

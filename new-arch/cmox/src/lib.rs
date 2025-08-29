@@ -1,29 +1,92 @@
 #![no_std]
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs, rust_2018_idioms)]
+#![allow(clippy::len_without_is_empty)]
+#![allow(dead_code)] // XXX(RLB) Only while reviewing / refactoring
 
 //! # CMOX - Idiomatic Rust Cryptography using STM32 CMOX
 //!
 //! This crate provides idiomatic, type-safe Rust bindings to the STM32 CMOX
 //! (Cortex-M Optimized Crypto Stack) library. It implements standard Rust Crypto
 //! traits to ensure compatibility with the broader Rust cryptographic ecosystem.
+//!
+//! ## STM32 Family Selection
+//!
+//! By default, the crate uses `stm32-auto` which auto-detects the STM32 target.
+//! For better performance and smaller code size, enable a specific STM32 family feature:
+//!
+//! ```toml
+//! [dependencies]
+//! cmox = { version = "0.1", default-features = false, features = ["stm32h7"] }
+//! ```
+//!
+//! Available STM32 family features: `stm32f0`, `stm32f1`, `stm32f2`, `stm32f3`,
+//! `stm32f4`, `stm32f7`, `stm32g0`, `stm32g4`, `stm32h5`, `stm32h7`, `stm32h7ab`,
+//! `stm32l0`, `stm32l1`, `stm32l4`, `stm32l5`, `stm32wb`, `stm32wba`, `stm32wl`.
+//!
+//! Each feature also enables the appropriate Cortex-M core features in the underlying
+//! `cmox-sys` crate for optimal code generation.
 
-use cmox_sys::{cmox_finalize, cmox_init_arg_t, cmox_initialize, CMOX_INIT_TARGET_AUTO};
+use cmox_sys::{cmox_finalize, cmox_init_arg_t, cmox_initialize};
+
+// Conditional imports based on enabled features to avoid unused import warnings
+#[cfg(feature = "stm32-auto")]
+use cmox_sys::CMOX_INIT_TARGET_AUTO as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32f0")]
+use cmox_sys::CMOX_INIT_TARGET_F0 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32f1")]
+use cmox_sys::CMOX_INIT_TARGET_F1 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32f2")]
+use cmox_sys::CMOX_INIT_TARGET_F2 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32f3")]
+use cmox_sys::CMOX_INIT_TARGET_F3 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32f4")]
+use cmox_sys::CMOX_INIT_TARGET_F4 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32f7")]
+use cmox_sys::CMOX_INIT_TARGET_F7 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32g0")]
+use cmox_sys::CMOX_INIT_TARGET_G0 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32g4")]
+use cmox_sys::CMOX_INIT_TARGET_G4 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32h5")]
+use cmox_sys::CMOX_INIT_TARGET_H5 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32h7")]
+use cmox_sys::CMOX_INIT_TARGET_H7 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32h7ab")]
+use cmox_sys::CMOX_INIT_TARGET_H7AB as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32l0")]
+use cmox_sys::CMOX_INIT_TARGET_L0 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32l1")]
+use cmox_sys::CMOX_INIT_TARGET_L1 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32l4")]
+use cmox_sys::CMOX_INIT_TARGET_L4 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32l5")]
+use cmox_sys::CMOX_INIT_TARGET_L5 as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32wb")]
+use cmox_sys::CMOX_INIT_TARGET_WB as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32wba")]
+use cmox_sys::CMOX_INIT_TARGET_WBA as CMOX_INIT_TARGET;
+#[cfg(feature = "stm32wl")]
+use cmox_sys::CMOX_INIT_TARGET_WL as CMOX_INIT_TARGET;
+
 use core::sync::atomic::{AtomicBool, Ordering};
 
 pub mod error;
 
-pub mod cipher;
-pub mod hash;
 pub mod aead;
-pub mod mac;
-pub mod signature;
+pub mod cipher;
 pub mod ecdh;
+pub mod hash;
+pub mod mac;
 pub mod rng;
-
+pub mod signature;
 pub mod utils;
 
-pub use error::{CmoxError, Result};
+pub use error::{
+    CipherError, CmoxError, CoreError, DrbgError, EccError, HashError, Result, RsaError,
+};
+
+use error::{CoreResult, FromRetval};
 
 // Global initialization tracking
 static CMOX_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -32,6 +95,14 @@ static CMOX_INITIALIZED: AtomicBool = AtomicBool::new(false);
 ///
 /// This must be called before using any CMOX cryptographic functions.
 /// It's safe to call multiple times - subsequent calls are no-ops.
+///
+/// The initialization target is determined by the enabled Cargo features:
+/// - `stm32-auto` (default): Auto-detect the target MCU
+/// - `stm32f0`, `stm32f1`, etc.: Use specific STM32 family optimization
+///
+/// Using a specific STM32 family feature can provide better performance and smaller
+/// code size compared to auto-detection, and also enables appropriate Cortex-M
+/// core optimizations in the underlying `cmox-sys` crate.
 ///
 /// # Errors
 ///
@@ -42,18 +113,14 @@ pub fn initialize() -> Result<()> {
     }
 
     let init_arg = cmox_init_arg_t {
-        target: CMOX_INIT_TARGET_AUTO,
+        target: CMOX_INIT_TARGET,
         pArg: core::ptr::null_mut(),
     };
 
-    let result = unsafe { cmox_initialize(&init_arg as *const _ as *mut _) };
+    unsafe { CoreResult::from_rv(cmox_initialize(&init_arg as *const _ as *mut _))? };
 
-    if result == cmox_sys::CMOX_INIT_SUCCESS {
-        CMOX_INITIALIZED.store(true, Ordering::Release);
-        Ok(())
-    } else {
-        Err(CmoxError::InitializationFailed)
-    }
+    CMOX_INITIALIZED.store(true, Ordering::Release);
+    Ok(())
 }
 
 /// Finalize the CMOX library
@@ -70,14 +137,9 @@ pub fn finalize() -> Result<()> {
         return Ok(());
     }
 
-    let result = unsafe { cmox_finalize(core::ptr::null_mut()) };
-
-    if result == cmox_sys::CMOX_INIT_SUCCESS {
-        CMOX_INITIALIZED.store(false, Ordering::Release);
-        Ok(())
-    } else {
-        Err(CmoxError::FinalizationFailed)
-    }
+    unsafe { CoreResult::from_rv(cmox_finalize(core::ptr::null_mut()))? };
+    CMOX_INITIALIZED.store(false, Ordering::Release);
+    Ok(())
 }
 
 /// Check if the CMOX library is initialized
@@ -85,9 +147,17 @@ pub fn is_initialized() -> bool {
     CMOX_INITIALIZED.load(Ordering::Acquire)
 }
 
+/// Ensure CMOX library is initialized before calling cryptographic functions
+pub(crate) fn ensure_initialized() -> Result<()> {
+    crate::is_initialized()
+        .then_some(())
+        .ok_or(CoreError::InitFail.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cmox_sys::*;
 
     #[test]
     fn test_initialization() {
