@@ -1,7 +1,7 @@
 //! SHA-2 hash function implementations
 
 use crate::error::{FromRetval, HashResult};
-use crate::{ensure_initialized, HashError, Result};
+use crate::ensure_initialized;
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -28,65 +28,41 @@ pub type Sha512_256Hash = Output<Sha512_256>;
 pub struct Sha224 {
     handle: cmox_sha224_handle_t,
     hash_handle: *mut cmox_hash_handle_t,
-    initialized: bool,
 }
 
 /// SHA-256 hasher  
 pub struct Sha256 {
     handle: cmox_sha256_handle_t,
     hash_handle: *mut cmox_hash_handle_t,
-    initialized: bool,
 }
 
 /// SHA-384 hasher
 pub struct Sha384 {
     handle: cmox_sha384_handle_t,
     hash_handle: *mut cmox_hash_handle_t,
-    initialized: bool,
 }
 
 /// SHA-512 hasher
 pub struct Sha512 {
     handle: cmox_sha512_handle_t,
     hash_handle: *mut cmox_hash_handle_t,
-    initialized: bool,
 }
 
 /// SHA-512/224 hasher
 pub struct Sha512_224 {
     handle: cmox_sha512_handle_t,
     hash_handle: *mut cmox_hash_handle_t,
-    initialized: bool,
 }
 
 /// SHA-512/256 hasher
 pub struct Sha512_256 {
     handle: cmox_sha512_handle_t,
     hash_handle: *mut cmox_hash_handle_t,
-    initialized: bool,
 }
 
 // Helper macro to implement common functionality for SHA-2 variants
 macro_rules! impl_sha2 {
     ($name:ident, $size:ty, $cmox_construct:ident, $output_size:expr) => {
-        impl $name {
-            fn init_hash(&mut self) -> Result<()> {
-                ensure_initialized()?;
-
-                // Use the CMOX constructor to set up the handle properly
-                self.hash_handle = unsafe { $cmox_construct(&mut self.handle as *mut _) };
-
-                if self.hash_handle.is_null() {
-                    return Err(HashError::Internal.into());
-                }
-
-                let result = unsafe { cmox_hash_init(self.hash_handle) };
-
-                HashResult::from_rv(result)?;
-                self.initialized = true;
-                Ok(())
-            }
-        }
 
         impl Default for $name {
             fn default() -> Self {
@@ -97,16 +73,24 @@ macro_rules! impl_sha2 {
         impl $name {
             /// Create a new hasher instance
             pub fn new() -> Self {
-                let mut hasher = Self {
-                    handle: unsafe { MaybeUninit::zeroed().assume_init() },
-                    hash_handle: core::ptr::null_mut(),
-                    initialized: false,
-                };
+                ensure_initialized().expect("CMOX library not initialized");
+                
+                let mut handle = unsafe { MaybeUninit::zeroed().assume_init() };
+                let hash_handle = unsafe { $cmox_construct(&mut handle as *mut _) };
 
-                // Initialize during construction - panic if it fails since this
-                // indicates a programming error (library not initialized)
-                hasher.init_hash().expect("Failed to initialize hash");
-                hasher
+                if hash_handle.is_null() {
+                    panic!("Failed to construct hash handle");
+                }
+
+                unsafe {
+                    HashResult::from_rv(cmox_hash_init(hash_handle))
+                        .expect("Failed to initialize hash");
+                }
+
+                Self {
+                    handle,
+                    hash_handle,
+                }
             }
         }
 
@@ -118,40 +102,29 @@ macro_rules! impl_sha2 {
 
         impl Update for $name {
             fn update(&mut self, data: &[u8]) {
-                if !self.initialized {
-                    panic!("Hash not initialized");
-                }
-
                 if data.is_empty() {
                     return;
                 }
 
-                let result =
-                    unsafe { cmox_hash_append(self.hash_handle, data.as_ptr(), data.len()) };
-
-                HashResult::from_rv(result).expect("Hash update failed");
+                unsafe {
+                    HashResult::from_rv(cmox_hash_append(self.hash_handle, data.as_ptr(), data.len()))
+                        .expect("Hash update failed");
+                }
             }
         }
 
         impl FixedOutput for $name {
             fn finalize_into(self, out: &mut Output<Self>) {
-                if !self.initialized {
-                    panic!("Hash not initialized");
-                }
-
                 let mut digest_len = out.len();
-                let result = unsafe {
-                    cmox_hash_generateTag(
+                unsafe {
+                    HashResult::from_rv(cmox_hash_generateTag(
                         self.hash_handle,
                         out.as_mut_ptr(),
                         &mut digest_len as *mut usize,
-                    )
-                };
+                    ))
+                    .expect("Hash finalization failed");
 
-                HashResult::from_rv(result).expect("Hash finalization failed");
-
-                // Clean up the handle
-                unsafe {
+                    // Clean up the handle
                     cmox_hash_cleanup(self.hash_handle);
                 }
             }
@@ -159,14 +132,12 @@ macro_rules! impl_sha2 {
 
         impl Reset for $name {
             fn reset(&mut self) {
-                // Clean up current handle
-                if self.initialized {
-                    unsafe {
-                        cmox_hash_cleanup(self.hash_handle);
-                    }
+                // Clean up current handle and reinitialize
+                unsafe {
+                    cmox_hash_cleanup(self.hash_handle);
+                    HashResult::from_rv(cmox_hash_init(self.hash_handle))
+                        .expect("Hash reset failed");
                 }
-
-                self.init_hash().expect("Hash reset failed");
             }
         }
 
@@ -181,7 +152,6 @@ macro_rules! impl_sha2 {
         impl fmt::Debug for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.debug_struct(stringify!($name))
-                    .field("initialized", &self.initialized)
                     .finish()
             }
         }
@@ -202,60 +172,48 @@ impl_sha2!(Sha512_256, U32, cmox_sha512_256_construct, 32);
 // Implement Drop to ensure cleanup
 impl Drop for Sha224 {
     fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_hash_cleanup(self.hash_handle);
-            }
+        unsafe {
+            cmox_hash_cleanup(self.hash_handle);
         }
     }
 }
 
 impl Drop for Sha256 {
     fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_hash_cleanup(self.hash_handle);
-            }
+        unsafe {
+            cmox_hash_cleanup(self.hash_handle);
         }
     }
 }
 
 impl Drop for Sha384 {
     fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_hash_cleanup(self.hash_handle);
-            }
+        unsafe {
+            cmox_hash_cleanup(self.hash_handle);
         }
     }
 }
 
 impl Drop for Sha512 {
     fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_hash_cleanup(self.hash_handle);
-            }
+        unsafe {
+            cmox_hash_cleanup(self.hash_handle);
         }
     }
 }
 
 impl Drop for Sha512_224 {
     fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_hash_cleanup(self.hash_handle);
-            }
+        unsafe {
+            cmox_hash_cleanup(self.hash_handle);
         }
     }
 }
 
 impl Drop for Sha512_256 {
     fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_hash_cleanup(self.hash_handle);
-            }
+        unsafe {
+            cmox_hash_cleanup(self.hash_handle);
         }
     }
 }

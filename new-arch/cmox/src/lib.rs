@@ -72,15 +72,15 @@ use cmox_sys::CMOX_INIT_TARGET_WL as CMOX_INIT_TARGET;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 pub mod error;
+pub mod utils;
 
 pub mod aead;
 pub mod cipher;
+pub mod drbg;
 pub mod ecdh;
 pub mod hash;
 pub mod mac;
-pub mod rng;
 pub mod signature;
-pub mod utils;
 
 pub use error::{
     CipherError, CmoxError, CoreError, DrbgError, EccError, HashError, Result, RsaError,

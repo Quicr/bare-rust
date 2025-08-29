@@ -15,7 +15,6 @@ use digest::{
 pub struct HmacSha256 {
     handle: cmox_hmac_handle_t,
     mac_handle: *mut cmox_mac_handle_t,
-    initialized: bool,
 }
 
 impl MacMarker for HmacSha256 {}
@@ -51,70 +50,42 @@ impl KeyInit for HmacSha256 {
 impl HmacSha256 {
     /// Create a new HMAC-SHA256 instance with the given key
     pub fn new_with_key(key: &[u8]) -> crate::Result<Self> {
-        let mut hmac = Self {
-            handle: unsafe { MaybeUninit::zeroed().assume_init() },
-            mac_handle: core::ptr::null_mut(),
-            initialized: false,
-        };
-
-        hmac.init_with_key(key)?;
-        Ok(hmac)
-    }
-
-    fn init_with_key(&mut self, key: &[u8]) -> crate::Result<()> {
         ensure_initialized()?;
 
-        // Initialize HMAC handle with SHA-256
-        self.mac_handle =
-            unsafe { cmox_hmac_construct(&mut self.handle as *mut _, CMOX_HMAC_SHA256) };
+        let mut handle = unsafe { MaybeUninit::zeroed().assume_init() };
+        let mac_handle = unsafe { cmox_hmac_construct(&mut handle as *mut _, CMOX_HMAC_SHA256) };
 
-        if self.mac_handle.is_null() {
+        if mac_handle.is_null() {
             return Err(crate::error::CipherError::Internal.into());
         }
 
-        // Initialize MAC
-        let result = unsafe { cmox_mac_init(self.mac_handle) };
-        MacResult::from_rv(result)?;
+        unsafe {
+            MacResult::from_rv(cmox_mac_init(mac_handle))?;
+            MacResult::from_rv(cmox_mac_setKey(mac_handle, key.as_ptr(), key.len()))?;
+        }
 
-        // Set key
-        let result = unsafe { cmox_mac_setKey(self.mac_handle, key.as_ptr(), key.len()) };
-        MacResult::from_rv(result)?;
-
-        self.initialized = true;
-        Ok(())
+        Ok(Self {
+            handle,
+            mac_handle,
+        })
     }
 
     /// Update the MAC with input data
     pub fn update_internal(&mut self, data: &[u8]) -> crate::Result<()> {
-        if !self.initialized {
-            return Err(crate::error::CoreError::InitFail.into());
-        }
-
         if data.is_empty() {
             return Ok(());
         }
 
-        let result = unsafe { cmox_mac_append(self.mac_handle, data.as_ptr(), data.len()) };
-
-        Ok(MacResult::from_rv(result)?)
+        unsafe { Ok(MacResult::from_rv(cmox_mac_append(self.mac_handle, data.as_ptr(), data.len()))?) }
     }
 
     /// Finalize and return the MAC tag
     pub fn finalize_internal(self) -> crate::Result<[u8; 32]> {
-        if !self.initialized {
-            return Err(crate::error::CoreError::InitFail.into());
-        }
-
         let mut tag = [0u8; 32];
         let mut tag_len = tag.len();
 
-        let result =
-            unsafe { cmox_mac_generateTag(self.mac_handle, tag.as_mut_ptr(), &mut tag_len) };
-
-        MacResult::from_rv(result)?;
-
-        // Clean up
         unsafe {
+            MacResult::from_rv(cmox_mac_generateTag(self.mac_handle, tag.as_mut_ptr(), &mut tag_len))?;
             cmox_mac_cleanup(self.mac_handle);
         }
 
@@ -154,11 +125,8 @@ impl Mac for HmacSha256 {
     }
 
     fn reset(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_mac_cleanup(self.mac_handle);
-            }
-            self.initialized = false;
+        unsafe {
+            cmox_mac_cleanup(self.mac_handle);
         }
         // Note: Reset would require re-initialization with key
         panic!("HMAC reset requires re-initialization with key");
@@ -223,10 +191,8 @@ impl Mac for HmacSha256 {
 
 impl Drop for HmacSha256 {
     fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_mac_cleanup(self.mac_handle);
-            }
+        unsafe {
+            cmox_mac_cleanup(self.mac_handle);
         }
     }
 }
@@ -240,7 +206,6 @@ impl Clone for HmacSha256 {
 impl fmt::Debug for HmacSha256 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HmacSha256")
-            .field("initialized", &self.initialized)
             .finish()
     }
 }
@@ -249,7 +214,6 @@ impl fmt::Debug for HmacSha256 {
 pub struct AesCmac {
     handle: cmox_cmac_handle_t,
     mac_handle: *mut cmox_mac_handle_t,
-    initialized: bool,
 }
 
 impl MacMarker for AesCmac {}
@@ -285,70 +249,42 @@ impl KeyInit for AesCmac {
 impl AesCmac {
     /// Create a new AES-CMAC instance with the given key
     pub fn new_with_key(key: &[u8]) -> crate::Result<Self> {
-        let mut cmac = Self {
-            handle: unsafe { MaybeUninit::zeroed().assume_init() },
-            mac_handle: core::ptr::null_mut(),
-            initialized: false,
-        };
-
-        cmac.init_with_key(key)?;
-        Ok(cmac)
-    }
-
-    fn init_with_key(&mut self, key: &[u8]) -> crate::Result<()> {
         ensure_initialized()?;
 
-        // Initialize CMAC handle with AES
-        self.mac_handle =
-            unsafe { cmox_cmac_construct(&mut self.handle as *mut _, CMOX_CMAC_AESFAST) };
+        let mut handle = unsafe { MaybeUninit::zeroed().assume_init() };
+        let mac_handle = unsafe { cmox_cmac_construct(&mut handle as *mut _, CMOX_CMAC_AESFAST) };
 
-        if self.mac_handle.is_null() {
+        if mac_handle.is_null() {
             return Err(crate::error::CipherError::Internal.into());
         }
 
-        // Initialize MAC
-        let result = unsafe { cmox_mac_init(self.mac_handle) };
-        MacResult::from_rv(result)?;
+        unsafe {
+            MacResult::from_rv(cmox_mac_init(mac_handle))?;
+            MacResult::from_rv(cmox_mac_setKey(mac_handle, key.as_ptr(), key.len()))?;
+        }
 
-        // Set key
-        let result = unsafe { cmox_mac_setKey(self.mac_handle, key.as_ptr(), key.len()) };
-        MacResult::from_rv(result)?;
-
-        self.initialized = true;
-        Ok(())
+        Ok(Self {
+            handle,
+            mac_handle,
+        })
     }
 
     /// Update the MAC with input data
     pub fn update_internal(&mut self, data: &[u8]) -> crate::Result<()> {
-        if !self.initialized {
-            return Err(crate::error::CoreError::InitFail.into());
-        }
-
         if data.is_empty() {
             return Ok(());
         }
 
-        let result = unsafe { cmox_mac_append(self.mac_handle, data.as_ptr(), data.len()) };
-
-        Ok(MacResult::from_rv(result)?)
+        unsafe { Ok(MacResult::from_rv(cmox_mac_append(self.mac_handle, data.as_ptr(), data.len()))?) }
     }
 
     /// Finalize and return the MAC tag
     pub fn finalize_internal(self) -> crate::Result<[u8; 16]> {
-        if !self.initialized {
-            return Err(crate::error::CoreError::InitFail.into());
-        }
-
         let mut tag = [0u8; 16];
         let mut tag_len = tag.len();
 
-        let result =
-            unsafe { cmox_mac_generateTag(self.mac_handle, tag.as_mut_ptr(), &mut tag_len) };
-
-        MacResult::from_rv(result)?;
-
-        // Clean up
         unsafe {
+            MacResult::from_rv(cmox_mac_generateTag(self.mac_handle, tag.as_mut_ptr(), &mut tag_len))?;
             cmox_mac_cleanup(self.mac_handle);
         }
 
@@ -387,11 +323,8 @@ impl Mac for AesCmac {
     }
 
     fn reset(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_mac_cleanup(self.mac_handle);
-            }
-            self.initialized = false;
+        unsafe {
+            cmox_mac_cleanup(self.mac_handle);
         }
         panic!("CMAC reset requires re-initialization with key");
     }
@@ -455,10 +388,8 @@ impl Mac for AesCmac {
 
 impl Drop for AesCmac {
     fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                cmox_mac_cleanup(self.mac_handle);
-            }
+        unsafe {
+            cmox_mac_cleanup(self.mac_handle);
         }
     }
 }
@@ -472,7 +403,6 @@ impl Clone for AesCmac {
 impl fmt::Debug for AesCmac {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AesCmac")
-            .field("initialized", &self.initialized)
             .finish()
     }
 }

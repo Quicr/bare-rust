@@ -16,7 +16,6 @@ pub struct Aes128 {
     dec_handle: cmox_ecb_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-192 cipher
@@ -25,7 +24,6 @@ pub struct Aes192 {
     dec_handle: cmox_ecb_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-256 cipher
@@ -34,7 +32,6 @@ pub struct Aes256 {
     dec_handle: cmox_ecb_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 // Helper macro to implement AES variants
@@ -50,83 +47,87 @@ macro_rules! impl_aes {
 
         impl KeyInit for $name {
             fn new(key: &Key<Self>) -> Self {
-                let mut cipher = Self {
-                    enc_handle: unsafe { MaybeUninit::zeroed().assume_init() },
-                    dec_handle: unsafe { MaybeUninit::zeroed().assume_init() },
-                    enc_cipher: core::ptr::null_mut(),
-                    dec_cipher: core::ptr::null_mut(),
-                    initialized: false,
-                };
+                ensure_initialized().expect("CMOX library not initialized");
 
-                cipher
-                    .init_with_key(key)
-                    .expect("Failed to initialize AES cipher");
-                cipher
+                let mut enc_handle = unsafe { MaybeUninit::zeroed().assume_init() };
+                let mut dec_handle = unsafe { MaybeUninit::zeroed().assume_init() };
+
+                // Initialize encryption handle
+                let enc_cipher = unsafe { cmox_ecb_construct(&mut enc_handle as *mut _, $enc_impl) };
+                if enc_cipher.is_null() {
+                    panic!("Failed to construct encryption handle");
+                }
+
+                // Initialize decryption handle
+                let dec_cipher = unsafe { cmox_ecb_construct(&mut dec_handle as *mut _, $dec_impl) };
+                if dec_cipher.is_null() {
+                    panic!("Failed to construct decryption handle");
+                }
+
+                unsafe {
+                    // Initialize encryption and decryption
+                    CipherResult::from_rv(cmox_cipher_init(enc_cipher))
+                        .expect("Failed to initialize encryption cipher");
+                    CipherResult::from_rv(cmox_cipher_init(dec_cipher))
+                        .expect("Failed to initialize decryption cipher");
+
+                    // Set encryption and decryption keys
+                    CipherResult::from_rv(cmox_cipher_setKey(enc_cipher, key.as_ptr(), key.len()))
+                        .expect("Failed to set encryption key");
+                    CipherResult::from_rv(cmox_cipher_setKey(dec_cipher, key.as_ptr(), key.len()))
+                        .expect("Failed to set decryption key");
+                }
+
+                Self {
+                    enc_handle,
+                    dec_handle,
+                    enc_cipher,
+                    dec_cipher,
+                }
             }
         }
 
         impl $name {
             /// Create a new AES cipher with the given key
             pub fn new_with_key(key: &[u8]) -> Result<Self> {
-                let mut cipher = Self {
-                    enc_handle: unsafe { MaybeUninit::zeroed().assume_init() },
-                    dec_handle: unsafe { MaybeUninit::zeroed().assume_init() },
-                    enc_cipher: core::ptr::null_mut(),
-                    dec_cipher: core::ptr::null_mut(),
-                    initialized: false,
-                };
-
-                cipher.init_with_key(key)?;
-                Ok(cipher)
-            }
-
-            fn init_with_key(&mut self, key: &[u8]) -> Result<()> {
                 ensure_initialized()?;
 
-                // Initialize encryption handle
-                self.enc_cipher =
-                    unsafe { cmox_ecb_construct(&mut self.enc_handle as *mut _, $enc_impl) };
+                let mut enc_handle = unsafe { MaybeUninit::zeroed().assume_init() };
+                let mut dec_handle = unsafe { MaybeUninit::zeroed().assume_init() };
 
-                if self.enc_cipher.is_null() {
+                // Initialize encryption handle
+                let enc_cipher = unsafe { cmox_ecb_construct(&mut enc_handle as *mut _, $enc_impl) };
+                if enc_cipher.is_null() {
                     return Err(CipherError::Internal.into());
                 }
 
                 // Initialize decryption handle
-                self.dec_cipher =
-                    unsafe { cmox_ecb_construct(&mut self.dec_handle as *mut _, $dec_impl) };
-
-                if self.dec_cipher.is_null() {
+                let dec_cipher = unsafe { cmox_ecb_construct(&mut dec_handle as *mut _, $dec_impl) };
+                if dec_cipher.is_null() {
                     return Err(CipherError::Internal.into());
                 }
 
-                // Initialize encryption
-                let result = unsafe { cmox_cipher_init(self.enc_cipher) };
-                CipherResult::from_rv(result)?;
+                unsafe {
+                    // Initialize encryption and decryption
+                    CipherResult::from_rv(cmox_cipher_init(enc_cipher))?;
+                    CipherResult::from_rv(cmox_cipher_init(dec_cipher))?;
 
-                // Initialize decryption
-                let result = unsafe { cmox_cipher_init(self.dec_cipher) };
-                CipherResult::from_rv(result)?;
+                    // Set encryption and decryption keys
+                    CipherResult::from_rv(cmox_cipher_setKey(enc_cipher, key.as_ptr(), key.len()))?;
+                    CipherResult::from_rv(cmox_cipher_setKey(dec_cipher, key.as_ptr(), key.len()))?;
+                }
 
-                // Set encryption key
-                let result =
-                    unsafe { cmox_cipher_setKey(self.enc_cipher, key.as_ptr(), key.len()) };
-                CipherResult::from_rv(result)?;
-
-                // Set decryption key
-                let result =
-                    unsafe { cmox_cipher_setKey(self.dec_cipher, key.as_ptr(), key.len()) };
-                CipherResult::from_rv(result)?;
-
-                self.initialized = true;
-                Ok(())
+                Ok(Self {
+                    enc_handle,
+                    dec_handle,
+                    enc_cipher,
+                    dec_cipher,
+                })
             }
+
 
             /// Encrypt a single block in-place
             pub fn encrypt_block_inplace(&self, block: &mut Block<Self>) -> Result<()> {
-                if !self.initialized {
-                    return Err(crate::error::CoreError::InitFail.into());
-                }
-
                 let mut output_len = block.len();
                 let result = unsafe {
                     cmox_cipher_append(
@@ -138,15 +139,11 @@ macro_rules! impl_aes {
                     )
                 };
 
-                Ok(CipherResult::from_rv(result)?)
+                CipherResult::from_rv(result).map_err(Into::into)
             }
 
             /// Decrypt a single block in-place
             pub fn decrypt_block_inplace(&self, block: &mut Block<Self>) -> Result<()> {
-                if !self.initialized {
-                    return Err(crate::error::CoreError::InitFail.into());
-                }
-
                 let mut output_len = block.len();
                 let result = unsafe {
                     cmox_cipher_append(
@@ -158,7 +155,7 @@ macro_rules! impl_aes {
                     )
                 };
 
-                Ok(CipherResult::from_rv(result)?)
+                CipherResult::from_rv(result).map_err(Into::into)
             }
 
             /// Encrypt a single block
@@ -178,11 +175,9 @@ macro_rules! impl_aes {
 
         impl Drop for $name {
             fn drop(&mut self) {
-                if self.initialized {
-                    unsafe {
-                        cmox_cipher_cleanup(self.enc_cipher);
-                        cmox_cipher_cleanup(self.dec_cipher);
-                    }
+                unsafe {
+                    cmox_cipher_cleanup(self.enc_cipher);
+                    cmox_cipher_cleanup(self.dec_cipher);
                 }
             }
         }
@@ -198,7 +193,6 @@ macro_rules! impl_aes {
         impl fmt::Debug for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.debug_struct(stringify!($name))
-                    .field("initialized", &self.initialized)
                     .finish()
             }
         }
@@ -218,7 +212,6 @@ pub struct Aes128Cbc {
     dec_handle: cmox_cbc_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-192 CBC mode
@@ -227,7 +220,6 @@ pub struct Aes192Cbc {
     dec_handle: cmox_cbc_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-256 CBC mode
@@ -236,28 +228,24 @@ pub struct Aes256Cbc {
     dec_handle: cmox_cbc_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-128 CTR mode
 pub struct Aes128Ctr {
     handle: cmox_ctr_handle_t,
     cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-192 CTR mode
 pub struct Aes192Ctr {
     handle: cmox_ctr_handle_t,
     cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-256 CTR mode
 pub struct Aes256Ctr {
     handle: cmox_ctr_handle_t,
     cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-128 CFB mode
@@ -266,7 +254,6 @@ pub struct Aes128Cfb {
     dec_handle: cmox_cfb_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-192 CFB mode
@@ -275,7 +262,6 @@ pub struct Aes192Cfb {
     dec_handle: cmox_cfb_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-256 CFB mode
@@ -284,28 +270,24 @@ pub struct Aes256Cfb {
     dec_handle: cmox_cfb_handle_t,
     enc_cipher: *mut cmox_cipher_handle_t,
     dec_cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-128 OFB mode
 pub struct Aes128Ofb {
     handle: cmox_ofb_handle_t,
     cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-192 OFB mode
 pub struct Aes192Ofb {
     handle: cmox_ofb_handle_t,
     cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 /// AES-256 OFB mode
 pub struct Aes256Ofb {
     handle: cmox_ofb_handle_t,
     cipher: *mut cmox_cipher_handle_t,
-    initialized: bool,
 }
 
 // Helper macro for modes that need IV and support both encryption and decryption
@@ -322,58 +304,41 @@ macro_rules! impl_aes_iv_mode {
         impl $name {
             /// Create a new cipher with the given key
             pub fn new_with_key(key: &[u8]) -> Result<Self> {
-                let mut cipher = Self {
-                    enc_handle: unsafe { MaybeUninit::zeroed().assume_init() },
-                    dec_handle: unsafe { MaybeUninit::zeroed().assume_init() },
-                    enc_cipher: core::ptr::null_mut(),
-                    dec_cipher: core::ptr::null_mut(),
-                    initialized: false,
-                };
-
-                cipher.init_with_key(key)?;
-                Ok(cipher)
-            }
-
-            fn init_with_key(&mut self, key: &[u8]) -> Result<()> {
                 ensure_initialized()?;
 
-                // Initialize encryption handle
-                self.enc_cipher =
-                    unsafe { $construct_fn(&mut self.enc_handle as *mut _, $enc_impl) };
+                let mut enc_handle = unsafe { MaybeUninit::zeroed().assume_init() };
+                let mut dec_handle = unsafe { MaybeUninit::zeroed().assume_init() };
 
-                if self.enc_cipher.is_null() {
+                // Initialize encryption handle
+                let enc_cipher = unsafe { $construct_fn(&mut enc_handle as *mut _, $enc_impl) };
+                if enc_cipher.is_null() {
                     return Err(CipherError::Internal.into());
                 }
 
                 // Initialize decryption handle
-                self.dec_cipher =
-                    unsafe { $construct_fn(&mut self.dec_handle as *mut _, $dec_impl) };
-
-                if self.dec_cipher.is_null() {
+                let dec_cipher = unsafe { $construct_fn(&mut dec_handle as *mut _, $dec_impl) };
+                if dec_cipher.is_null() {
                     return Err(CipherError::Internal.into());
                 }
 
-                // Initialize encryption
-                let result = unsafe { cmox_cipher_init(self.enc_cipher) };
-                CipherResult::from_rv(result)?;
+                unsafe {
+                    // Initialize encryption and decryption
+                    CipherResult::from_rv(cmox_cipher_init(enc_cipher))?;
+                    CipherResult::from_rv(cmox_cipher_init(dec_cipher))?;
 
-                // Initialize decryption
-                let result = unsafe { cmox_cipher_init(self.dec_cipher) };
-                CipherResult::from_rv(result)?;
+                    // Set encryption and decryption keys
+                    CipherResult::from_rv(cmox_cipher_setKey(enc_cipher, key.as_ptr(), key.len()))?;
+                    CipherResult::from_rv(cmox_cipher_setKey(dec_cipher, key.as_ptr(), key.len()))?;
+                }
 
-                // Set encryption key
-                let result =
-                    unsafe { cmox_cipher_setKey(self.enc_cipher, key.as_ptr(), key.len()) };
-                CipherResult::from_rv(result)?;
-
-                // Set decryption key
-                let result =
-                    unsafe { cmox_cipher_setKey(self.dec_cipher, key.as_ptr(), key.len()) };
-                CipherResult::from_rv(result)?;
-
-                self.initialized = true;
-                Ok(())
+                Ok(Self {
+                    enc_handle,
+                    dec_handle,
+                    enc_cipher,
+                    dec_cipher,
+                })
             }
+
 
             /// Encrypt data with the given IV
             pub fn encrypt(
@@ -382,31 +347,24 @@ macro_rules! impl_aes_iv_mode {
                 plaintext: &[u8],
                 output: &mut [u8],
             ) -> Result<usize> {
-                if !self.initialized {
-                    return Err(crate::error::CoreError::InitFail.into());
-                }
-
-                // Set IV
-                let result = unsafe { cmox_cipher_setIV(self.enc_cipher, iv.as_ptr(), iv.len()) };
-                CipherResult::from_rv(result)?;
-
                 if output.len() < plaintext.len() {
                     return Err(CipherError::BadInputSize.into());
                 }
 
                 let mut output_len = plaintext.len();
 
-                let result = unsafe {
-                    cmox_cipher_append(
+                unsafe {
+                    // Set IV and encrypt
+                    CipherResult::from_rv(cmox_cipher_setIV(self.enc_cipher, iv.as_ptr(), iv.len()))?;
+                    CipherResult::from_rv(cmox_cipher_append(
                         self.enc_cipher,
                         plaintext.as_ptr(),
                         plaintext.len(),
                         output.as_mut_ptr(),
                         &mut output_len,
-                    )
-                };
+                    ))?;
+                }
 
-                CipherResult::from_rv(result)?;
                 Ok(output_len)
             }
 
@@ -417,42 +375,33 @@ macro_rules! impl_aes_iv_mode {
                 ciphertext: &[u8],
                 output: &mut [u8],
             ) -> Result<usize> {
-                if !self.initialized {
-                    return Err(crate::error::CoreError::InitFail.into());
-                }
-
-                // Set IV
-                let result = unsafe { cmox_cipher_setIV(self.dec_cipher, iv.as_ptr(), iv.len()) };
-                CipherResult::from_rv(result)?;
-
                 if output.len() < ciphertext.len() {
                     return Err(CipherError::BadInputSize.into());
                 }
 
                 let mut output_len = ciphertext.len();
 
-                let result = unsafe {
-                    cmox_cipher_append(
+                unsafe {
+                    // Set IV and decrypt
+                    CipherResult::from_rv(cmox_cipher_setIV(self.dec_cipher, iv.as_ptr(), iv.len()))?;
+                    CipherResult::from_rv(cmox_cipher_append(
                         self.dec_cipher,
                         ciphertext.as_ptr(),
                         ciphertext.len(),
                         output.as_mut_ptr(),
                         &mut output_len,
-                    )
-                };
+                    ))?;
+                }
 
-                CipherResult::from_rv(result)?;
                 Ok(output_len)
             }
         }
 
         impl Drop for $name {
             fn drop(&mut self) {
-                if self.initialized {
-                    unsafe {
-                        cmox_cipher_cleanup(self.enc_cipher);
-                        cmox_cipher_cleanup(self.dec_cipher);
-                    }
+                unsafe {
+                    cmox_cipher_cleanup(self.enc_cipher);
+                    cmox_cipher_cleanup(self.dec_cipher);
                 }
             }
         }
@@ -460,7 +409,6 @@ macro_rules! impl_aes_iv_mode {
         impl fmt::Debug for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.debug_struct(stringify!($name))
-                    .field("initialized", &self.initialized)
                     .finish()
             }
         }
@@ -481,65 +429,49 @@ macro_rules! impl_aes_stream_mode {
         impl $name {
             /// Create a new cipher with the given key
             pub fn new_with_key(key: &[u8]) -> Result<Self> {
-                let mut cipher = Self {
-                    handle: unsafe { MaybeUninit::zeroed().assume_init() },
-                    cipher: core::ptr::null_mut(),
-                    initialized: false,
-                };
-
-                cipher.init_with_key(key)?;
-                Ok(cipher)
-            }
-
-            fn init_with_key(&mut self, key: &[u8]) -> Result<()> {
                 ensure_initialized()?;
 
-                // Initialize cipher handle
-                self.cipher = unsafe { $construct_fn(&mut self.handle as *mut _, $impl_const) };
+                let mut handle = unsafe { MaybeUninit::zeroed().assume_init() };
 
-                if self.cipher.is_null() {
+                // Initialize cipher handle
+                let cipher = unsafe { $construct_fn(&mut handle as *mut _, $impl_const) };
+                if cipher.is_null() {
                     return Err(CipherError::Internal.into());
                 }
 
-                // Initialize cipher
-                let result = unsafe { cmox_cipher_init(self.cipher) };
-                CipherResult::from_rv(result)?;
+                unsafe {
+                    // Initialize cipher and set key
+                    CipherResult::from_rv(cmox_cipher_init(cipher))?;
+                    CipherResult::from_rv(cmox_cipher_setKey(cipher, key.as_ptr(), key.len()))?;
+                }
 
-                // Set key
-                let result = unsafe { cmox_cipher_setKey(self.cipher, key.as_ptr(), key.len()) };
-                CipherResult::from_rv(result)?;
-
-                self.initialized = true;
-                Ok(())
+                Ok(Self {
+                    handle,
+                    cipher,
+                })
             }
+
 
             /// Encrypt or decrypt data with the given IV/nonce (same operation for stream ciphers)
             pub fn process(&self, iv: &[u8; 16], data: &[u8], output: &mut [u8]) -> Result<usize> {
-                if !self.initialized {
-                    return Err(crate::error::CoreError::InitFail.into());
-                }
-
-                // Set IV/nonce
-                let result = unsafe { cmox_cipher_setIV(self.cipher, iv.as_ptr(), iv.len()) };
-                CipherResult::from_rv(result)?;
-
                 if output.len() < data.len() {
                     return Err(CipherError::BadInputSize.into());
                 }
 
                 let mut output_len = data.len();
 
-                let result = unsafe {
-                    cmox_cipher_append(
+                unsafe {
+                    // Set IV/nonce and process data
+                    CipherResult::from_rv(cmox_cipher_setIV(self.cipher, iv.as_ptr(), iv.len()))?;
+                    CipherResult::from_rv(cmox_cipher_append(
                         self.cipher,
                         data.as_ptr(),
                         data.len(),
                         output.as_mut_ptr(),
                         &mut output_len,
-                    )
-                };
+                    ))?;
+                }
 
-                CipherResult::from_rv(result)?;
                 Ok(output_len)
             }
 
@@ -566,10 +498,8 @@ macro_rules! impl_aes_stream_mode {
 
         impl Drop for $name {
             fn drop(&mut self) {
-                if self.initialized {
-                    unsafe {
-                        cmox_cipher_cleanup(self.cipher);
-                    }
+                unsafe {
+                    cmox_cipher_cleanup(self.cipher);
                 }
             }
         }
@@ -577,7 +507,6 @@ macro_rules! impl_aes_stream_mode {
         impl fmt::Debug for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.debug_struct(stringify!($name))
-                    .field("initialized", &self.initialized)
                     .finish()
             }
         }
