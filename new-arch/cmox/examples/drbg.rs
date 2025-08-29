@@ -7,8 +7,8 @@
 #![no_main]
 
 use cmox::{
+    drbg::{CtrDrbg, CtrDrbgVariant},
     initialize,
-    rng::{CtrDrbg, CtrDrbgVariant},
 };
 use core::panic::PanicInfo;
 
@@ -151,26 +151,8 @@ fn convenience_methods_example() {
     let _random_u32 = rng.next_u32().expect("Failed to generate u32");
     let _random_u64 = rng.next_u64().expect("Failed to generate u64");
 
-    // Generate a vector of random bytes (up to 512 bytes)
-    let _random_vec = rng.generate_vec(64).expect("Failed to generate vec");
-
     // Check algorithm variant and initialization status
     assert_eq!(rng.variant(), CtrDrbgVariant::Aes256Fast);
-    assert!(rng.is_initialized());
-}
-
-/// Example for testing with deterministic entropy
-#[cfg(test)]
-fn deterministic_testing_example() {
-    // WARNING: Only for testing! Never use in production!
-    let mut test_rng =
-        CtrDrbg::new_deterministic_for_testing(12345).expect("Failed to create test DRBG");
-
-    // This will produce the same sequence every time for the same seed
-    let mut test_output = [0u8; 16];
-    test_rng
-        .generate_bytes(&mut test_output)
-        .expect("Test generation failed");
 }
 
 #[panic_handler]
