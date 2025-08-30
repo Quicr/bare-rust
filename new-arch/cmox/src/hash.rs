@@ -21,21 +21,8 @@ use core::mem::MaybeUninit;
 use digest::{
     consts::{U20, U28, U32, U48, U64},
     generic_array::ArrayLength,
-    FixedOutput, FixedOutputReset, HashMarker, Output, OutputSizeUser, Reset, Update,
+    FixedOutput, HashMarker, Output, OutputSizeUser, Update,
 };
-
-pub type Sha1 = Hash<Sha1Type>;
-pub type Sha224 = Hash<Sha224Type>;
-pub type Sha256 = Hash<Sha256Type>;
-pub type Sha3_224 = Hash<Sha3_224Type>;
-pub type Sha3_256 = Hash<Sha3_256Type>;
-pub type Sha3_384 = Hash<Sha3_384Type>;
-pub type Sha3_512 = Hash<Sha3_512Type>;
-pub type Sha384 = Hash<Sha384Type>;
-pub type Sha512_224 = Hash<Sha512_224Type>;
-pub type Sha512_256 = Hash<Sha512_256Type>;
-pub type Sha512 = Hash<Sha512Type>;
-pub type Sm3 = Hash<Sm3Type>;
 
 pub trait HashType {
     type RawHandle;
@@ -43,125 +30,34 @@ pub trait HashType {
     fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t;
 }
 
-pub struct Sha1Type;
+macro_rules! hash {
+    ($hash:ident, $type:ident, $handle:ident, $size:ident, $construct:ident) => {
+        pub type $hash = Hash<$type>;
 
-impl HashType for Sha1Type {
-    type RawHandle = cmox_sha1_handle_t;
-    type Size = U20;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha1_construct(raw_handle as *mut _) }
-    }
+        pub struct $type;
+
+        impl HashType for $type {
+            type RawHandle = $handle;
+            type Size = $size;
+            fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
+                unsafe { $construct(raw_handle as *mut _) }
+            }
+        }
+    };
 }
 
-pub struct Sha224Type;
-
-impl HashType for Sha224Type {
-    type RawHandle = cmox_sha224_handle_t;
-    type Size = U28;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha224_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha256Type;
-
-impl HashType for Sha256Type {
-    type RawHandle = cmox_sha256_handle_t;
-    type Size = U32;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha256_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha3_224Type;
-
-impl HashType for Sha3_224Type {
-    type RawHandle = cmox_sha3_handle_t;
-    type Size = U28;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha3_224_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha3_256Type;
-
-impl HashType for Sha3_256Type {
-    type RawHandle = cmox_sha3_handle_t;
-    type Size = U32;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha3_256_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha3_384Type;
-
-impl HashType for Sha3_384Type {
-    type RawHandle = cmox_sha3_handle_t;
-    type Size = U48;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha3_384_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha3_512Type;
-
-impl HashType for Sha3_512Type {
-    type RawHandle = cmox_sha3_handle_t;
-    type Size = U64;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha3_512_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha384Type;
-
-impl HashType for Sha384Type {
-    type RawHandle = cmox_sha384_handle_t;
-    type Size = U48;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha384_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha512Type;
-
-impl HashType for Sha512Type {
-    type RawHandle = cmox_sha512_handle_t;
-    type Size = U64;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha512_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha512_224Type;
-
-impl HashType for Sha512_224Type {
-    type RawHandle = cmox_sha512_handle_t;
-    type Size = U28;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha512_224_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sha512_256Type;
-
-impl HashType for Sha512_256Type {
-    type RawHandle = cmox_sha512_handle_t;
-    type Size = U32;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sha512_256_construct(raw_handle as *mut _) }
-    }
-}
-
-pub struct Sm3Type;
-
-impl HashType for Sm3Type {
-    type RawHandle = cmox_sm3_handle_t;
-    type Size = U32;
-    fn construct(raw_handle: &mut Self::RawHandle) -> *mut cmox_hash_handle_t {
-        unsafe { cmox_sm3_construct(raw_handle as *mut _) }
-    }
-}
+hash! { Sha1, Sha1Type, cmox_sha1_handle_t, U20, cmox_sha1_construct }
+hash! { Sha224, Sha224Type, cmox_sha224_handle_t, U28, cmox_sha224_construct }
+hash! { Sha256, Sha256Type, cmox_sha256_handle_t, U32, cmox_sha256_construct }
+hash! { Sha384, Sha384Type, cmox_sha384_handle_t, U48, cmox_sha384_construct }
+hash! { Sha512, Sha512Type, cmox_sha512_handle_t, U64, cmox_sha512_construct }
+hash! { Sha512_224, Sha512_224Type, cmox_sha512_handle_t, U28, cmox_sha512_224_construct }
+hash! { Sha512_256, Sha512_256Type, cmox_sha512_handle_t, U32, cmox_sha512_256_construct }
+hash! { Sha3_224, Sha3_224Type, cmox_sha3_handle_t, U28, cmox_sha3_224_construct }
+hash! { Sha3_256, Sha3_256Type, cmox_sha3_handle_t, U32, cmox_sha3_256_construct }
+hash! { Sha3_384, Sha3_384Type, cmox_sha3_handle_t, U48, cmox_sha3_384_construct }
+hash! { Sha3_512, Sha3_512Type, cmox_sha3_handle_t, U64, cmox_sha3_512_construct }
+hash! { Sm3, Sm3Type, cmox_sm3_handle_t, U32, cmox_sm3_construct }
 
 pub struct Hash<H: HashType> {
     raw_handle: <H as HashType>::RawHandle,
@@ -176,24 +72,19 @@ impl<H: HashType> Default for Hash<H> {
         let hash_handle = H::construct(&mut raw_handle);
 
         if hash_handle.is_null() {
-            panic!("Failed to construct SHA-1 hash handle");
+            panic!("Failed to construct hash handle");
         }
 
-        let mut h = Self {
+        unsafe { HashResult::from_rv(cmox_hash_init(hash_handle)).expect("Hash reset failed") }
+
+        Self {
             raw_handle,
             hash_handle,
-        };
-
-        h.init();
-        h
+        }
     }
 }
 
 impl<H: HashType> Hash<H> {
-    fn init(&mut self) {
-        unsafe { HashResult::from_rv(cmox_hash_init(self.hash_handle)).expect("Hash reset failed") }
-    }
-
     fn append(&mut self, data: &[u8]) {
         if data.is_empty() {
             return;
@@ -209,7 +100,7 @@ impl<H: HashType> Hash<H> {
         }
     }
 
-    fn generate(&mut self, out: &mut Output<Self>) {
+    fn generate(self, out: &mut Output<Self>) {
         let mut digest_len = out.len();
         unsafe {
             HashResult::from_rv(cmox_hash_generateTag(
@@ -232,13 +123,6 @@ impl<H: HashType> OutputSizeUser for Hash<H> {
     type OutputSize = H::Size;
 }
 
-impl<H: HashType> Reset for Hash<H> {
-    fn reset(&mut self) {
-        self.cleanup();
-        self.init();
-    }
-}
-
 impl<H: HashType> Update for Hash<H> {
     fn update(&mut self, data: &[u8]) {
         self.append(data);
@@ -247,15 +131,7 @@ impl<H: HashType> Update for Hash<H> {
 
 impl<H: HashType> FixedOutput for Hash<H> {
     fn finalize_into(self, out: &mut Output<Self>) {
-        let mut h = self;
-        h.generate(out);
-    }
-}
-
-impl<H: HashType> FixedOutputReset for Hash<H> {
-    fn finalize_into_reset(&mut self, out: &mut Output<Self>) {
         self.generate(out);
-        Reset::reset(self);
     }
 }
 
@@ -267,6 +143,7 @@ impl<H: HashType> Drop for Hash<H> {
 
 impl<H: HashType> fmt::Debug for Hash<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // XXX(RLB) Obviously this is wrong
         f.debug_struct("Sha1").finish()
     }
 }
