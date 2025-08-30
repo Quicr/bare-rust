@@ -31,7 +31,7 @@
 
 use crate::ensure_initialized;
 use crate::error::{EccResult, FromRetval, RsaResult};
-use crate::hash::sm3::Sm3;
+use crate::hash::Sm3;
 use cmox_sys::*;
 use core::fmt;
 use core::mem::MaybeUninit;
