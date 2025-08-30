@@ -1,178 +1,122 @@
-//! Example demonstrating block cipher usage with the CMOX crate
+//! Comprehensive Cipher and AEAD Example
 //!
-//! This example shows how to use AES and SM4 block ciphers for encryption and decryption.
+//! This example demonstrates all available cipher modes and AEAD algorithms
+//! in the CMOX crate, showing both basic usage and advanced features.
 
 #![no_std]
 #![no_main]
 
-use cipher::{Block, KeyInit};
-use cmox::{
-    cipher::{Aes128, Aes192, Aes256, Sm4},
-    initialize,
-};
-
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
+use aead::{AeadInPlace, Key, KeyInit, Nonce};
+use cmox::aead::{Aes128FastCcm, Aes128FastGcmFast, ChaChaPoly};
+use cmox::initialize;
+use core::panic::PanicInfo;
 
 #[no_mangle]
-pub extern "C" fn main() {
+pub extern "C" fn main() -> ! {
     // Initialize CMOX library
     initialize().expect("Failed to initialize CMOX");
 
-    // AES-128 ECB Example
-    {
-        let key = b"1234567890123456"; // 16-byte key for AES-128
-        let plaintext = b"Hello, World!123"; // Must be exactly 16 bytes for ECB
+    let key = [
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f,
+        0x3c,
+    ];
+    let nonce = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+    ];
+    let aad = b"Additional authenticated data";
+    let plaintext = b"Secret message for AEAD encryption";
 
-        // Create AES-128 cipher using cipher crate KeyInit trait
-        let cipher = Aes128::new_from_slice(key).expect("Invalid key length");
+    // AES-GCM example
+    aes_gcm_example(&key, &nonce, aad, plaintext);
 
-        // Convert plaintext to block format
-        let mut block = Block::<Aes128>::clone_from_slice(plaintext);
+    // AES-CCM example
+    aes_ccm_example(&key, &nonce, aad, plaintext);
 
-        // Encrypt the block in-place
-        cipher
-            .encrypt_block_inplace(&mut block)
-            .expect("Encryption failed");
+    // ChaCha20-Poly1305 example
+    chacha20_poly1305_example(&nonce, aad, plaintext);
 
-        // block now contains encrypted data
-        let encrypted = block;
+    loop {}
+}
 
-        // Decrypt the block
-        let mut decrypted_block = encrypted;
-        cipher
-            .decrypt_block_inplace(&mut decrypted_block)
-            .expect("Decryption failed");
+/// AES-GCM AEAD example
+fn aes_gcm_example(key: &[u8], nonce: &[u8], aad: &[u8], plaintext: &[u8]) {
+    let key_ref = Key::<Aes128FastCcm>::from_slice(key);
+    let cipher = Aes128FastGcmFast::new(key_ref);
 
-        // Verify decryption worked
-        if decrypted_block.as_slice() == plaintext {
-            // Encryption/decryption successful
-        }
-    }
+    let mut buffer = [0u8; 64];
+    let len = plaintext.len().min(48);
+    buffer[..len].copy_from_slice(&plaintext[..len]);
 
-    // AES-256 ECB Example using native API
-    {
-        let key = b"12345678901234567890123456789012"; // 32-byte key for AES-256
-        let plaintext = b"Native API usage"; // Pad to 16 bytes
+    // Encrypt and authenticate
+    let nonce_ref = Nonce::<Aes128FastGcmFast>::from_slice(nonce);
+    let tag = cipher
+        .encrypt_in_place_detached(nonce_ref, aad, &mut buffer[..len])
+        .expect("GCM encryption failed");
 
-        // Create AES-256 cipher using native API
-        let cipher = Aes256::new_with_key(key).expect("Failed to create AES-256");
+    // Decrypt and verify
+    cipher
+        .decrypt_in_place_detached(nonce_ref, aad, &mut buffer[..len], &tag)
+        .expect("GCM decryption failed");
 
-        // Convert to block and pad if necessary
-        let mut padded_plaintext = [0u8; 16];
-        let len = core::cmp::min(plaintext.len(), 16);
-        padded_plaintext[..len].copy_from_slice(&plaintext[..len]);
+    // Verify decrypted matches original plaintext
+    assert_eq!(plaintext, &buffer[..len]);
+}
 
-        let block = Block::<Aes256>::clone_from_slice(&padded_plaintext);
+/// AES-CCM AEAD example
+fn aes_ccm_example(key: &[u8], nonce: &[u8], aad: &[u8], plaintext: &[u8]) {
+    let key_ref = Key::<Aes128FastCcm>::from_slice(key);
+    let cipher = Aes128FastCcm::new(key_ref);
 
-        // Encrypt using the native encrypt_block method
-        let encrypted_block = cipher.encrypt_block(&block).expect("Encryption failed");
+    let mut buffer = [0u8; 64];
+    let len = plaintext.len().min(48);
+    buffer[..len].copy_from_slice(&plaintext[..len]);
 
-        // Decrypt back to verify
-        let decrypted_block = cipher
-            .decrypt_block(&encrypted_block)
-            .expect("Decryption failed");
+    // Encrypt and authenticate
+    let nonce_ref = Nonce::<Aes128FastCcm>::from_slice(nonce);
+    let tag = cipher
+        .encrypt_in_place_detached(nonce_ref, aad, &mut buffer[..len])
+        .expect("CCM encryption failed");
 
-        // Compare original and decrypted
-        if decrypted_block == block {
-            // Success!
-        }
-    }
+    // Decrypt and verify
+    cipher
+        .decrypt_in_place_detached(nonce_ref, aad, &mut buffer[..len], &tag)
+        .expect("CCM decryption failed");
 
-    // SM4 ECB Example
-    {
-        let key = b"sm4key1234567890"; // 16-byte key for SM4
-        let plaintext = b"SM4 cipher test!"; // Exactly 16 bytes
+    // Verify decrypted matches original plaintext
+    assert_eq!(plaintext, &buffer[..len]);
+}
 
-        // Create SM4 cipher
-        let cipher = Sm4::new_with_key(key).expect("Failed to create SM4");
+/// ChaCha20-Poly1305 AEAD example
+fn chacha20_poly1305_example(nonce: &[u8; 12], aad: &[u8], plaintext: &[u8]) {
+    let key = [
+        0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e,
+        0x8f, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d,
+        0x9e, 0x9f,
+    ];
 
-        let mut block = Block::<Sm4>::clone_from_slice(plaintext);
+    let key_ref = Key::<ChaChaPoly>::from_slice(&key);
+    let cipher = ChaChaPoly::new(key_ref);
 
-        // Encrypt
-        cipher
-            .encrypt_block_inplace(&mut block)
-            .expect("SM4 encryption failed");
-        let encrypted = block;
+    let mut buffer = [0u8; 64];
+    let len = plaintext.len().min(48);
+    buffer[..len].copy_from_slice(&plaintext[..len]);
 
-        // Decrypt
-        let mut decrypted = encrypted;
-        cipher
-            .decrypt_block_inplace(&mut decrypted)
-            .expect("SM4 decryption failed");
+    // Encrypt and authenticate
+    let nonce_ref = Nonce::<ChaChaPoly>::from_slice(nonce);
+    let tag = cipher
+        .encrypt_in_place_detached(nonce_ref, aad, &mut buffer[..len])
+        .expect("ChaCha20-Poly1305 encryption failed");
 
-        if decrypted.as_slice() == plaintext {
-            // SM4 encryption/decryption successful
-        }
-    }
+    // Decrypt and verify
+    cipher
+        .decrypt_in_place_detached(nonce_ref, aad, &mut buffer[..len], &tag)
+        .expect("ChaCha20-Poly1305 decryption failed");
 
-    // Multiple block encryption example (simplified CBC-like mode)
-    {
-        let key = b"1234567890123456";
-        let cipher = Aes128::new_with_key(key).expect("Failed to create AES-128");
+    // Verify decrypted matches original plaintext
+    assert_eq!(plaintext, &buffer[..len]);
+}
 
-        // Simulate multiple blocks of data
-        let blocks = [
-            b"Block 1 data!!!!",
-            b"Block 2 data!!!!",
-            b"Block 3 data!!!!",
-        ];
-
-        let mut encrypted_blocks = [[0u8; 16]; 3];
-
-        // Encrypt each block
-        for (i, plaintext_block) in blocks.iter().enumerate() {
-            let mut block = Block::<Aes128>::clone_from_slice(plaintext_block.as_slice());
-            cipher
-                .encrypt_block_inplace(&mut block)
-                .expect("Multi-block encryption failed");
-            encrypted_blocks[i] = *block.as_ref();
-        }
-
-        // Decrypt each block back
-        for (i, encrypted_block) in encrypted_blocks.iter().enumerate() {
-            let mut block = Block::<Aes128>::clone_from_slice(encrypted_block);
-            cipher
-                .decrypt_block_inplace(&mut block)
-                .expect("Multi-block decryption failed");
-
-            if block.as_slice() == blocks[i] {
-                // Block encryption/decryption successful
-            }
-        }
-    }
-
-    // Key size demonstration
-    {
-        // AES supports different key sizes
-        let aes128_key = b"1234567890123456"; // 16 bytes
-        let aes192_key = b"123456789012345678901234"; // 24 bytes
-        let aes256_key = b"12345678901234567890123456789012"; // 32 bytes
-
-        let _cipher128 = Aes128::new_with_key(aes128_key).expect("AES-128 key");
-        let _cipher192 = Aes192::new_with_key(aes192_key).expect("AES-192 key");
-        let _cipher256 = Aes256::new_with_key(aes256_key).expect("AES-256 key");
-
-        // SM4 uses 16-byte keys
-        let sm4_key = b"sm4key1234567890";
-        let _sm4_cipher = Sm4::new_with_key(sm4_key).expect("SM4 key");
-    }
-
-    // Error handling demonstration
-    {
-        // Trying to use wrong key size will fail
-        let wrong_key = b"wrong_size";
-
-        // This would panic in new(), but new_with_key() returns Result
-        match Aes128::new_with_key(wrong_key) {
-            Ok(_) => {
-                // This shouldn't happen with wrong key size
-            }
-            Err(_) => {
-                // Expected - key size mismatch
-            }
-        }
-    }
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {}
 }

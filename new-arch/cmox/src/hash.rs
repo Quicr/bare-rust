@@ -31,7 +31,7 @@ pub trait HashType {
 }
 
 macro_rules! hash {
-    ($hash:ident, $type:ident, $handle:ident, $size:ident, $construct:ident) => {
+    ($hash:ident, $type:ident, $handle:ty, $size:ty, $construct:ident) => {
         pub type $hash = Hash<$type>;
 
         pub struct $type;

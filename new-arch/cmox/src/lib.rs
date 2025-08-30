@@ -75,7 +75,6 @@ pub mod error;
 pub mod utils;
 
 pub mod aead;
-pub mod cipher;
 pub mod drbg;
 pub mod ecdh;
 pub mod hash;
