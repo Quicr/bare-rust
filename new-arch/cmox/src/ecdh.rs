@@ -39,7 +39,6 @@ use elliptic_curve::{
     consts::{U131, U32, U48, U56, U64, U65, U97},
     generic_array::{ArrayLength, GenericArray},
 };
-use heapless::Vec;
 use rand_core::CryptoRngCore;
 
 trait Curve: Default {
@@ -87,19 +86,6 @@ impl<C: Curve> PrivateKey<C> {
     fn derive(seed: &Seed<C>) -> Result<(Self, PublicKey<C>)> {
         ensure_initialized()?;
 
-        // Create ECC context
-        let mut working_buffer = [0u8; 2048];
-        let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-
-        unsafe {
-            cmox_ecc_construct(
-                &mut ecc_ctx,
-                C::CMOX_MATH,
-                working_buffer.as_mut_ptr(),
-                working_buffer.len(),
-            );
-        }
-
         let mut private_key: PrivateKey<C> = Default::default();
         let mut public_key: PublicKey<C> = Default::default();
 
@@ -107,9 +93,11 @@ impl<C: Curve> PrivateKey<C> {
         let mut public_key_len = public_key.len();
 
         // Call CMOX key generation
-        let result = unsafe {
+        let rv = unsafe {
+            let mut working_buffer = [0u8; 2048];
+            let mut ctx = EccContext::new::<C>(&mut working_buffer);
             cmox_ecdsa_keyGen(
-                &mut ecc_ctx,
+                ctx.context(),
                 C::CMOX_IMPL,
                 seed.as_ptr(),
                 seed.len(),
@@ -120,11 +108,7 @@ impl<C: Curve> PrivateKey<C> {
             )
         };
 
-        unsafe {
-            cmox_ecc_cleanup(&mut ecc_ctx);
-        }
-
-        EccResult::from_rv(result)?;
+        EccResult::from_rv(rv)?;
 
         Ok((private_key, public_key))
     }
@@ -135,21 +119,11 @@ impl<C: Curve> PrivateKey<C> {
         let mut shared_secret: SharedSecret<C> = Default::default();
         let mut shared_secret_len = shared_secret.len();
 
-        let mut working_buffer = [0u8; 2048];
         let rv = unsafe {
-            // Create ECC context
-            let mut ecc_ctx: cmox_ecc_handle_t = MaybeUninit::zeroed().assume_init();
-
-            cmox_ecc_construct(
-                &mut ecc_ctx,
-                C::CMOX_MATH,
-                working_buffer.as_mut_ptr(),
-                working_buffer.len(),
-            );
-
-            // Call CMOX ECDH
-            let rv = cmox_ecdh(
-                &mut ecc_ctx,
+            let mut working_buffer = [0u8; 2048];
+            let mut ctx = EccContext::new::<C>(&mut working_buffer);
+            cmox_ecdh(
+                ctx.context(),
                 C::CMOX_IMPL,
                 self.0.as_ptr(),
                 self.0.len(),
@@ -157,16 +131,45 @@ impl<C: Curve> PrivateKey<C> {
                 public_key.len(),
                 shared_secret.as_mut_ptr(),
                 &mut shared_secret_len,
-            );
-
-            // Clean up ECC context
-            cmox_ecc_cleanup(&mut ecc_ctx);
-
-            rv
+            )
         };
-
         EccResult::from_rv(rv)?;
 
         Ok(shared_secret)
+    }
+}
+
+// RAII wrapper for CMOX ECC context
+struct EccContext<'a> {
+    working_buffer: &'a mut [u8],
+    context: cmox_ecc_handle_t,
+}
+
+impl<'a> EccContext<'a> {
+    fn new<C: Curve>(working_buffer: &'a mut [u8]) -> Self {
+        unsafe {
+            let mut context: cmox_ecc_handle_t = MaybeUninit::zeroed().assume_init();
+            cmox_ecc_construct(
+                &mut context,
+                C::CMOX_MATH,
+                working_buffer.as_mut_ptr(),
+                working_buffer.len(),
+            );
+
+            Self {
+                working_buffer,
+                context,
+            }
+        }
+    }
+
+    fn context(&mut self) -> &mut cmox_ecc_handle_t {
+        &mut self.context
+    }
+}
+
+impl<'a> Drop for EccContext<'a> {
+    fn drop(&mut self) {
+        unsafe { cmox_ecc_cleanup(&mut self.context) };
     }
 }
