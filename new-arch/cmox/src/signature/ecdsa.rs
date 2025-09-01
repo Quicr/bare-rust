@@ -1,234 +1,237 @@
+#![allow(missing_docs)]
+
 use crate::ensure_initialized;
-use crate::error::{EccError, EccResult, FromRetval};
+use crate::error::{EccResult, FromRetval, Result};
+use crate::hash::{Sha256, Sha384, Sha512};
 use cmox_sys::*;
 use core::mem::MaybeUninit;
+use digest::Digest;
+use elliptic_curve::{
+    consts::{U133, U32, U48, U64, U65, U97},
+    generic_array::{ArrayLength, GenericArray},
+};
 use heapless::Vec;
-use rand_core::{CryptoRng, RngCore};
+use rand_core::CryptoRngCore;
+use signature::{RandomizedSigner, Verifier};
 
-/// Supported elliptic curves
-#[derive(Copy, Clone, Debug)]
-pub enum Curve {
-    /// NIST P-256 curve (secp256r1) - ECDSA
-    P256,
-    /// NIST P-384 curve (secp384r1) - ECDSA
-    P384,
-    /// NIST P-521 curve (secp521r1) - ECDSA
-    P521,
+pub trait VecLike: Default {
+    fn as_ptr(&self) -> *const u8;
+    fn as_mut_ptr(&mut self) -> *mut u8;
+    fn len(&self) -> usize;
 }
 
-impl Curve {
-    fn to_cmox_impl(self) -> cmox_ecc_impl_t {
-        match self {
-            Curve::P256 => unsafe { CMOX_ECC_SECP256R1_LOWMEM },
-            Curve::P384 => unsafe { CMOX_ECC_SECP384R1_LOWMEM },
-            Curve::P521 => unsafe { CMOX_ECC_SECP521R1_LOWMEM },
-        }
+impl<const N: usize> VecLike for Vec<u8, N> {
+    fn as_ptr(&self) -> *const u8 {
+        Vec::as_ptr(self)
     }
 
-    fn math_funcs(self) -> cmox_math_funcs_t {
-        match self {
-            Curve::P256 => unsafe { CMOX_MATH_FUNCS_SUPERFAST256 },
-            Curve::P384 => unsafe { CMOX_MATH_FUNCS_FAST },
-            Curve::P521 => unsafe { CMOX_MATH_FUNCS_FAST },
-        }
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        Vec::as_mut_ptr(self)
     }
 
-    fn signature_len(self) -> usize {
-        match self {
-            Curve::P256 => 64,  // 2 * 32 bytes (r + s)
-            Curve::P384 => 96,  // 2 * 48 bytes
-            Curve::P521 => 132, // 2 * 66 bytes
-        }
-    }
-
-    fn private_key_len(self) -> usize {
-        match self {
-            Curve::P256 => 32,
-            Curve::P384 => 48,
-            Curve::P521 => 66,
-        }
-    }
-
-    fn public_key_len(self) -> usize {
-        match self {
-            Curve::P256 => 64,  // 2 * 32 bytes (x + y)
-            Curve::P384 => 96,  // 2 * 48 bytes
-            Curve::P521 => 132, // 2 * 66 bytes
-        }
+    fn len(&self) -> usize {
+        // XXX(RLB) For some reason, just calling Vec::len causes infinite recursion.
+        Vec::as_slice(self).len()
     }
 }
 
-/// ECDSA signature with fixed-size components (max P-521 size)
-#[derive(Clone, Debug)]
-pub struct EcdsaSignature(Vec<u8, 132>);
-
-impl EcdsaSignature {
-    /// Create signature from raw bytes
-    pub fn from_bytes(bytes: &[u8]) -> crate::Result<Self> {
-        let mut signature = Vec::new();
-        signature
-            .extend_from_slice(bytes)
-            .map_err(|_| EccError::BadParameter)?;
-
-        Ok(Self(signature))
-    }
-
-    /// Get signature as bytes  
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
+pub trait Curve: Default {
+    const CMOX_IMPL: cmox_ecc_impl_t;
+    const CMOX_MATH: cmox_math_funcs_t;
+    type Signature: VecLike;
+    type PrivateKeyLength: ArrayLength<u8>;
+    type PublicKeyLength: ArrayLength<u8>;
+    type Hash: Digest;
 }
 
-/// ECDSA signing operations
-pub struct EcdsaSigningKey {
-    curve: Curve,
-    private_key: Vec<u8, 66>, // Max private key size for P-521
+#[derive(Default)]
+pub struct P256;
+
+impl Curve for P256 {
+    const CMOX_IMPL: cmox_ecc_impl_t = unsafe { CMOX_ECC_ED25519_OPT_LOWMEM };
+    const CMOX_MATH: cmox_math_funcs_t = unsafe { CMOX_MATH_FUNCS_FAST };
+    type Signature = Vec<u8, 72>;
+    type PrivateKeyLength = U32;
+    type PublicKeyLength = U65;
+    type Hash = Sha256;
 }
 
-impl EcdsaSigningKey {
-    /// Create a new ECDSA signing key
-    pub fn new(curve: Curve, bytes: &[u8]) -> crate::Result<Self> {
-        let mut private_key = Vec::new();
-        private_key
-            .extend_from_slice(bytes)
-            .map_err(|_| EccError::BadParameter)?;
+#[derive(Default)]
+pub struct P384;
 
-        Ok(Self { curve, private_key })
+impl Curve for P384 {
+    const CMOX_IMPL: cmox_ecc_impl_t = unsafe { CMOX_ECC_ED448_LOWMEM };
+    const CMOX_MATH: cmox_math_funcs_t = unsafe { CMOX_MATH_FUNCS_FAST };
+    type Signature = Vec<u8, 104>;
+    type PrivateKeyLength = U48;
+    type PublicKeyLength = U97;
+    type Hash = Sha384;
+}
+
+#[derive(Default)]
+pub struct P521;
+
+impl Curve for P521 {
+    const CMOX_IMPL: cmox_ecc_impl_t = unsafe { CMOX_ECC_ED448_LOWMEM };
+    const CMOX_MATH: cmox_math_funcs_t = unsafe { CMOX_MATH_FUNCS_FAST };
+    type Signature = Vec<u8, 139>;
+    type PrivateKeyLength = U64;
+    type PublicKeyLength = U133;
+    type Hash = Sha512;
+}
+
+pub type Seed<C> = GenericArray<u8, <C as Curve>::PrivateKeyLength>;
+pub type PrivateKeyData<C> = GenericArray<u8, <C as Curve>::PrivateKeyLength>;
+pub type PublicKeyData<C> = GenericArray<u8, <C as Curve>::PublicKeyLength>;
+pub type Signature<C> = <C as Curve>::Signature;
+
+#[derive(Default)]
+pub struct PrivateKey<C: Curve>(pub PrivateKeyData<C>);
+
+impl<C: Curve> PrivateKey<C> {
+    pub fn random(rng: &mut impl CryptoRngCore) -> Result<(Self, PublicKey<C>)> {
+        let mut seed: Seed<C> = Default::default();
+        rng.fill_bytes(seed.as_mut());
+        PrivateKey::<C>::derive(&seed)
     }
 
-    /// Sign a message digest using ECDSA
-    ///
-    /// # Arguments
-    /// * `digest` - The message digest to sign
-    /// * `rng` - Cryptographically secure random number generator for generating k value
-    pub fn sign_digest<R>(&self, digest: &[u8], rng: &mut R) -> crate::Result<EcdsaSignature>
-    where
-        R: RngCore + CryptoRng,
-    {
+    pub fn derive(seed: &Seed<C>) -> Result<(Self, PublicKey<C>)> {
         ensure_initialized()?;
 
-        // Create ECC context with working buffer
-        // Buffer size needs to be sufficient for ECC operations - using 2KB for safety
-        let mut working_buffer = [0u8; 2048];
-        let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
+        let mut private_key: PrivateKey<C> = Default::default();
+        let mut public_key: PublicKey<C> = Default::default();
 
-        // Construct ECC context
-        unsafe {
-            cmox_ecc_construct(
-                &mut ecc_ctx,
-                self.curve.math_funcs(),
-                working_buffer.as_mut_ptr(),
-                working_buffer.len(),
-            );
-        }
+        let mut private_key_len = private_key.0.len();
+        let mut public_key_len = public_key.0.len();
 
-        let mut sig_len = self.curve.signature_len();
-        let mut signature = Vec::new();
-        let _ = signature.resize(sig_len, 0);
-
-        // Generate cryptographically secure random bytes for k value
-        let mut random_k = Vec::<u8, 64>::new();
-        let _ = random_k.resize(self.private_key.len(), 0);
-        rng.fill_bytes(&mut random_k);
-
-        // Call CMOX ECDSA sign
-        let result = unsafe {
-            cmox_ecdsa_sign(
-                &mut ecc_ctx,
-                self.curve.to_cmox_impl(),
-                random_k.as_ptr(),
-                random_k.len(),
-                self.private_key.as_ptr(),
-                self.private_key.len(),
-                digest.as_ptr(),
-                digest.len(),
-                signature.as_mut_ptr(),
-                &mut sig_len,
+        // Call CMOX key generation
+        let rv = unsafe {
+            let mut working_buffer = [0u8; 2048];
+            let mut ctx = EccContext::new::<C>(&mut working_buffer);
+            cmox_ecdsa_keyGen(
+                ctx.context(),
+                C::CMOX_IMPL,
+                seed.as_ptr(),
+                seed.len(),
+                private_key.0.as_mut_ptr(),
+                &mut private_key_len,
+                public_key.0.as_mut_ptr(),
+                &mut public_key_len,
             )
         };
 
-        // Cleanup ECC context
-        unsafe {
-            cmox_ecc_cleanup(&mut ecc_ctx);
-        }
+        EccResult::from_rv(rv)?;
 
-        // Check result
-        EccResult::from_rv(result)?;
-
-        Ok(EcdsaSignature(signature))
+        Ok((private_key, public_key))
     }
 }
 
-/// ECDSA verification operations
-pub struct EcdsaVerifyingKey {
-    curve: Curve,
-    public_key: Vec<u8, 132>, // Max public key size for P-521
+impl<C: Curve> RandomizedSigner<Signature<C>> for PrivateKey<C> {
+    fn try_sign_with_rng(
+        &self,
+        rng: &mut impl CryptoRngCore,
+        message: &[u8],
+    ) -> core::result::Result<Signature<C>, signature::Error> {
+        ensure_initialized().map_err(|_| signature::Error::new())?;
+
+        let mut signature: Signature<C> = Default::default();
+        let mut signature_len = signature.len();
+
+        let mut random_k: Seed<C> = Default::default();
+        rng.fill_bytes(&mut random_k);
+
+        let rv = unsafe {
+            let mut working_buffer = [0u8; 2048];
+            let mut ctx = EccContext::new::<C>(&mut working_buffer);
+            cmox_ecdsa_sign(
+                ctx.context(),
+                C::CMOX_IMPL,
+                random_k.as_ptr(),
+                random_k.len(),
+                self.0.as_ptr(),
+                self.0.len(),
+                message.as_ptr(),
+                message.len(),
+                signature.as_mut_ptr(),
+                &mut signature_len,
+            )
+        };
+
+        EccResult::from_rv(rv).map_err(|_| signature::Error::new())?;
+
+        Ok(signature)
+    }
 }
 
-impl EcdsaVerifyingKey {
-    /// Create a new ECDSA verifying key
-    pub fn new(curve: Curve, bytes: &[u8]) -> crate::Result<Self> {
-        let mut public_key = Vec::new();
-        public_key
-            .extend_from_slice(bytes)
-            .map_err(|_| EccError::BadParameter)?;
+#[derive(Default)]
+pub struct PublicKey<C: Curve>(pub PublicKeyData<C>);
 
-        Ok(Self { curve, public_key })
-    }
+impl<C: Curve> Verifier<Signature<C>> for PrivateKey<C> {
+    fn verify(
+        &self,
+        message: &[u8],
+        signature: &Signature<C>,
+    ) -> core::result::Result<(), signature::Error> {
+        ensure_initialized().map_err(|_| signature::Error::new())?;
 
-    /// Verify a signature against a message digest
-    pub fn verify_digest(&self, digest: &[u8], signature: &EcdsaSignature) -> crate::Result<()> {
-        ensure_initialized()?;
-
-        // Check signature length
-        if signature.as_bytes().len() != self.curve.signature_len() {
-            return Err(crate::error::EccError::BadParameter.into());
-        }
-
-        // Create ECC context with working buffer
-        let mut working_buffer = [0u8; 2048];
-        let mut ecc_ctx: cmox_ecc_handle_t = unsafe { MaybeUninit::zeroed().assume_init() };
-
-        // Construct ECC context
-        unsafe {
-            cmox_ecc_construct(
-                &mut ecc_ctx,
-                self.curve.math_funcs(),
-                working_buffer.as_mut_ptr(),
-                working_buffer.len(),
-            );
-        }
-
-        let mut fault_check: u32 = 0;
-
-        // Call CMOX ECDSA verify
-        let result = unsafe {
+        let mut fault_check: u32 = 0xffffffff;
+        let rv = unsafe {
+            let mut working_buffer = [0u8; 2048];
+            let mut ctx = EccContext::new::<C>(&mut working_buffer);
             cmox_ecdsa_verify(
-                &mut ecc_ctx,
-                self.curve.to_cmox_impl(),
-                self.public_key.as_ptr(),
-                self.public_key.len(),
-                digest.as_ptr(),
-                digest.len(),
-                signature.as_bytes().as_ptr(),
-                signature.as_bytes().len(),
+                ctx.context(),
+                C::CMOX_IMPL,
+                self.0.as_ptr(),
+                self.0.len(),
+                message.as_ptr(),
+                message.len(),
+                signature.as_ptr(),
+                signature.len(),
                 &mut fault_check,
             )
         };
 
-        // Cleanup ECC context
-        unsafe {
-            cmox_ecc_cleanup(&mut ecc_ctx);
-        }
+        EccResult::from_rv(rv).map_err(|_| signature::Error::new())?;
 
-        // Check result and fault check
-        EccResult::from_rv(result)?;
-
-        // Additional fault check - both result and fault_check must indicate success
-        if result != fault_check {
-            return Err(crate::error::EccError::BadParameter.into());
+        if rv != fault_check {
+            return Err(signature::Error::new());
         }
 
         Ok(())
+    }
+}
+
+// RAII wrapper for CMOX ECC context
+struct EccContext<'a> {
+    working_buffer: &'a mut [u8],
+    context: cmox_ecc_handle_t,
+}
+
+impl<'a> EccContext<'a> {
+    fn new<C: Curve>(working_buffer: &'a mut [u8]) -> Self {
+        unsafe {
+            let mut context: cmox_ecc_handle_t = MaybeUninit::zeroed().assume_init();
+            cmox_ecc_construct(
+                &mut context,
+                C::CMOX_MATH,
+                working_buffer.as_mut_ptr(),
+                working_buffer.len(),
+            );
+
+            Self {
+                working_buffer,
+                context,
+            }
+        }
+    }
+
+    fn context(&mut self) -> &mut cmox_ecc_handle_t {
+        &mut self.context
+    }
+}
+
+impl<'a> Drop for EccContext<'a> {
+    fn drop(&mut self) {
+        unsafe { cmox_ecc_cleanup(&mut self.context) };
     }
 }

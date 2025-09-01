@@ -16,8 +16,6 @@
 
 /// Elliptic Curve Digital Signature Algorithm
 pub mod ecdsa;
-pub use ecdsa::*;
 
 /// Edwards Curve Digital Signature Algorithm
 pub mod eddsa;
-pub use eddsa::*;

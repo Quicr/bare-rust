@@ -70,11 +70,13 @@ curve! { P521, CMOX_ECC_SECP521R1_LOWMEM, CMOX_MATH_FUNCS_FAST, U64, U131, U64 }
 curve! { X25519, CMOX_ECC_CURVE25519, CMOX_MATH_FUNCS_FAST, U32, U32, U32 }
 curve! { X448, CMOX_ECC_CURVE448, CMOX_MATH_FUNCS_FAST, U56, U56, U56 }
 
-#[derive(Default)]
-struct PrivateKey<C: Curve>(GenericArray<u8, C::PrivateKeyLength>);
 type Seed<C> = GenericArray<u8, <C as Curve>::PrivateKeyLength>;
+type PrivateKeyData<C> = GenericArray<u8, <C as Curve>::PrivateKeyLength>;
 type PublicKey<C> = GenericArray<u8, <C as Curve>::PublicKeyLength>;
 type SharedSecret<C> = GenericArray<u8, <C as Curve>::SharedSecretLength>;
+
+#[derive(Default)]
+struct PrivateKey<C: Curve>(pub PrivateKeyData<C>);
 
 impl<C: Curve> PrivateKey<C> {
     fn random(rng: &mut impl CryptoRngCore) -> Result<(Self, PublicKey<C>)> {
