@@ -12,8 +12,8 @@ use rand_core::CryptoRngCore;
 use signature::{Signer, Verifier};
 
 pub trait Curve: Default {
-    const CMOX_IMPL: cmox_ecc_impl_t;
-    const CMOX_MATH: cmox_math_funcs_t;
+    fn cmox_impl() -> cmox_ecc_impl_t;
+    fn cmox_math() -> cmox_math_funcs_t;
     type SignatureLength: ArrayLength<u8>;
     type PrivateKeyLength: ArrayLength<u8>;
     type PublicKeyLength: ArrayLength<u8>;
@@ -23,8 +23,12 @@ pub trait Curve: Default {
 pub struct Ed25519;
 
 impl Curve for Ed25519 {
-    const CMOX_IMPL: cmox_ecc_impl_t = unsafe { CMOX_ECC_ED25519_OPT_LOWMEM };
-    const CMOX_MATH: cmox_math_funcs_t = unsafe { CMOX_MATH_FUNCS_FAST };
+    fn cmox_impl() -> cmox_ecc_impl_t {
+        unsafe { CMOX_ECC_ED25519_OPT_LOWMEM }
+    }
+    fn cmox_math() -> cmox_math_funcs_t {
+        unsafe { CMOX_MATH_FUNCS_FAST }
+    }
     type SignatureLength = U64;
     type PrivateKeyLength = U32;
     type PublicKeyLength = U32;
@@ -34,8 +38,12 @@ impl Curve for Ed25519 {
 pub struct Ed448;
 
 impl Curve for Ed448 {
-    const CMOX_IMPL: cmox_ecc_impl_t = unsafe { CMOX_ECC_ED448_LOWMEM };
-    const CMOX_MATH: cmox_math_funcs_t = unsafe { CMOX_MATH_FUNCS_FAST };
+    fn cmox_impl() -> cmox_ecc_impl_t {
+        unsafe { CMOX_ECC_ED448_LOWMEM }
+    }
+    fn cmox_math() -> cmox_math_funcs_t {
+        unsafe { CMOX_MATH_FUNCS_FAST }
+    }
     type SignatureLength = U114;
     type PrivateKeyLength = U56;
     type PublicKeyLength = U56;
@@ -71,7 +79,7 @@ impl<C: Curve> PrivateKey<C> {
             let mut ctx = EccContext::new::<C>(&mut working_buffer);
             cmox_eddsa_keyGen(
                 ctx.context(),
-                C::CMOX_IMPL,
+                C::cmox_impl(),
                 seed.as_ptr(),
                 seed.len(),
                 private_key.0.as_mut_ptr(),
@@ -99,7 +107,7 @@ impl<C: Curve> Signer<Signature<C>> for PrivateKey<C> {
             let mut ctx = EccContext::new::<C>(&mut working_buffer);
             cmox_eddsa_sign(
                 ctx.context(),
-                C::CMOX_IMPL,
+                C::cmox_impl(),
                 self.0.as_ptr(),
                 self.0.len(),
                 message.as_ptr(),
@@ -118,7 +126,7 @@ impl<C: Curve> Signer<Signature<C>> for PrivateKey<C> {
 #[derive(Default)]
 pub struct PublicKey<C: Curve>(pub PublicKeyData<C>);
 
-impl<C: Curve> Verifier<Signature<C>> for PrivateKey<C> {
+impl<C: Curve> Verifier<Signature<C>> for PublicKey<C> {
     fn verify(
         &self,
         message: &[u8],
@@ -132,7 +140,7 @@ impl<C: Curve> Verifier<Signature<C>> for PrivateKey<C> {
             let mut ctx = EccContext::new::<C>(&mut working_buffer);
             cmox_eddsa_verify(
                 ctx.context(),
-                C::CMOX_IMPL,
+                C::cmox_impl(),
                 self.0.as_ptr(),
                 self.0.len(),
                 message.as_ptr(),
@@ -165,7 +173,7 @@ impl<'a> EccContext<'a> {
             let mut context: cmox_ecc_handle_t = MaybeUninit::zeroed().assume_init();
             cmox_ecc_construct(
                 &mut context,
-                C::CMOX_MATH,
+                C::cmox_math(),
                 working_buffer.as_mut_ptr(),
                 working_buffer.len(),
             );

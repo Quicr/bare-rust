@@ -1,4 +1,5 @@
 #![no_std]
+#![no_main]
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs, rust_2018_idioms)]
 #![allow(clippy::len_without_is_empty)]
@@ -153,6 +154,7 @@ pub(crate) fn ensure_initialized() -> Result<()> {
         .ok_or(CoreError::InitFail.into())
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,3 +168,4 @@ mod tests {
         assert!(!is_initialized());
     }
 }
+*/

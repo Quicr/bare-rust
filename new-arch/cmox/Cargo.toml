@@ -2,12 +2,19 @@
 name = "cmox"
 version = "0.1.0"
 edition = "2021"
-authors = ["Rich Barnet"]
-description = "Idiomatic Rust bindings to STM32 CMOX cryptographic library"
-repository = "https://github.com/your-repo/cmox"
+authors = ["Richard Barnes <rlb@ipv.sx>"]
+description = "Rust bindings to STM32 CMOX cryptographic library"
 license = "MIT OR Apache-2.0"
 keywords = ["cryptography", "stm32", "cmox", "no-std", "embedded"]
 categories = ["cryptography", "embedded", "no-std"]
+
+[lib]
+harness = false
+test = false
+
+[[test]]
+name = "example"
+harness = false
 
 [dependencies]
 cmox-sys = { path = "../cmox-sys", default-features = false }
@@ -26,9 +33,16 @@ subtle = { version = "2.6", default-features = false }
 heapless = { version = "0.8", default-features = false }
 hybrid-array = { version = "0.2", default-features = false }
 
+[dev-dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = { version = "1" }
+embedded-test = { version = "0.6.0", features = ["defmt"]}
+rtt-target = { version="0.6.1", features = ["defmt"] }
+stm32f0xx-hal = { version = "0.18", features = ["stm32f072"] }
+
 [features]
 # STM32 family selection features - choose one based on your STM32 MCU family
-# These features enable optimized implementations and activate appropriate cmox-sys features
 stm32-auto = ["cm4"]           # Auto-detect target (default, may be larger/slower)
 stm32f0 = ["cm0"]              # STM32F0 series (Cortex-M0)
 stm32f1 = ["cm3"]              # STM32F1 series (Cortex-M3)
@@ -56,6 +70,3 @@ cm3 = ["cmox-sys/cm3"]
 cm33 = ["cmox-sys/cm33"]
 cm4 = ["cmox-sys/cm4"]
 cm7 = ["cmox-sys/cm7"]
-
-[dev-dependencies]
-hex = { version = "0.4", default-features = false, features = ["alloc"] }

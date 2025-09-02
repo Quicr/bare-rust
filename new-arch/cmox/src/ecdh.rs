@@ -25,6 +25,7 @@
 //!   - Real cryptographic operations via CMOX library
 //!   - Proper memory management and cleanup
 //!   - Fault checking for enhanced security
+#![allow(missing_docs)]
 
 // XXX(RLB) In order for this to work for MLS, we will need a way to implement DeriveKeyPair, in
 // particular for the NIST curves.  It looks like that will have to go through cmox_ecdsa_keyGen,
@@ -41,9 +42,9 @@ use elliptic_curve::{
 };
 use rand_core::CryptoRngCore;
 
-trait Curve: Default {
-    const CMOX_IMPL: cmox_ecc_impl_t;
-    const CMOX_MATH: cmox_math_funcs_t;
+pub trait Curve: Default {
+    fn cmox_impl() -> cmox_ecc_impl_t;
+    fn cmox_math() -> cmox_math_funcs_t;
     type PrivateKeyLength: ArrayLength<u8>;
     type PublicKeyLength: ArrayLength<u8>;
     type SharedSecretLength: ArrayLength<u8>;
@@ -52,11 +53,15 @@ trait Curve: Default {
 macro_rules! curve {
     ($name:ident, $impl:ident, $math:ident, $priv:ty, $pub:ty, $ss:ty) => {
         #[derive(Default)]
-        struct $name;
+        pub struct $name;
 
         impl Curve for $name {
-            const CMOX_IMPL: cmox_ecc_impl_t = unsafe { $impl };
-            const CMOX_MATH: cmox_math_funcs_t = unsafe { $math };
+            fn cmox_impl() -> cmox_ecc_impl_t {
+                unsafe { $impl }
+            }
+            fn cmox_math() -> cmox_math_funcs_t {
+                unsafe { $math }
+            }
             type PrivateKeyLength = $priv;
             type PublicKeyLength = $pub;
             type SharedSecretLength = $ss;
@@ -70,22 +75,22 @@ curve! { P521, CMOX_ECC_SECP521R1_LOWMEM, CMOX_MATH_FUNCS_FAST, U64, U131, U64 }
 curve! { X25519, CMOX_ECC_CURVE25519, CMOX_MATH_FUNCS_FAST, U32, U32, U32 }
 curve! { X448, CMOX_ECC_CURVE448, CMOX_MATH_FUNCS_FAST, U56, U56, U56 }
 
-type Seed<C> = GenericArray<u8, <C as Curve>::PrivateKeyLength>;
-type PrivateKeyData<C> = GenericArray<u8, <C as Curve>::PrivateKeyLength>;
-type PublicKey<C> = GenericArray<u8, <C as Curve>::PublicKeyLength>;
-type SharedSecret<C> = GenericArray<u8, <C as Curve>::SharedSecretLength>;
+pub type Seed<C> = GenericArray<u8, <C as Curve>::PrivateKeyLength>;
+pub type PrivateKeyData<C> = GenericArray<u8, <C as Curve>::PrivateKeyLength>;
+pub type PublicKey<C> = GenericArray<u8, <C as Curve>::PublicKeyLength>;
+pub type SharedSecret<C> = GenericArray<u8, <C as Curve>::SharedSecretLength>;
 
 #[derive(Default)]
-struct PrivateKey<C: Curve>(pub PrivateKeyData<C>);
+pub struct PrivateKey<C: Curve>(pub PrivateKeyData<C>);
 
 impl<C: Curve> PrivateKey<C> {
-    fn random(rng: &mut impl CryptoRngCore) -> Result<(Self, PublicKey<C>)> {
+    pub fn random(rng: &mut impl CryptoRngCore) -> Result<(Self, PublicKey<C>)> {
         let mut seed: Seed<C> = Default::default();
         rng.fill_bytes(seed.as_mut());
         PrivateKey::<C>::derive(&seed)
     }
 
-    fn derive(seed: &Seed<C>) -> Result<(Self, PublicKey<C>)> {
+    pub fn derive(seed: &Seed<C>) -> Result<(Self, PublicKey<C>)> {
         ensure_initialized()?;
 
         let mut private_key: PrivateKey<C> = Default::default();
@@ -100,7 +105,7 @@ impl<C: Curve> PrivateKey<C> {
             let mut ctx = EccContext::new::<C>(&mut working_buffer);
             cmox_ecdsa_keyGen(
                 ctx.context(),
-                C::CMOX_IMPL,
+                C::cmox_impl(),
                 seed.as_ptr(),
                 seed.len(),
                 private_key.0.as_mut_ptr(),
@@ -115,7 +120,7 @@ impl<C: Curve> PrivateKey<C> {
         Ok((private_key, public_key))
     }
 
-    fn exchange(&self, public_key: &PublicKey<C>) -> Result<SharedSecret<C>> {
+    pub fn exchange(&self, public_key: &PublicKey<C>) -> Result<SharedSecret<C>> {
         ensure_initialized()?;
 
         let mut shared_secret: SharedSecret<C> = Default::default();
@@ -126,7 +131,7 @@ impl<C: Curve> PrivateKey<C> {
             let mut ctx = EccContext::new::<C>(&mut working_buffer);
             cmox_ecdh(
                 ctx.context(),
-                C::CMOX_IMPL,
+                C::cmox_impl(),
                 self.0.as_ptr(),
                 self.0.len(),
                 public_key.as_ptr(),
@@ -153,7 +158,7 @@ impl<'a> EccContext<'a> {
             let mut context: cmox_ecc_handle_t = MaybeUninit::zeroed().assume_init();
             cmox_ecc_construct(
                 &mut context,
-                C::CMOX_MATH,
+                C::cmox_math(),
                 working_buffer.as_mut_ptr(),
                 working_buffer.len(),
             );
