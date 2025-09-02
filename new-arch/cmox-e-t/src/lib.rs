@@ -80,7 +80,7 @@ pub mod utils;
 //pub mod aead;
 pub mod drbg;
 //pub mod ecdh;
-//pub mod hash;
+pub mod hash;
 //pub mod mac;
 //pub mod signature;
 

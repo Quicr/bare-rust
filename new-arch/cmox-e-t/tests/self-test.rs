@@ -72,6 +72,18 @@ mod unit_tests {
         assert!(zeros < output.len() / 256 * 2);
     }
 
+    #[test]
+    fn hash() {
+        use cmox::hash::*;
+        use digest::Digest;
+
+        let h = Sha256::digest(b"hello, world");
+
+        // Test that there are no more than 2 zero bytes in the hash output
+        let zeros = h.iter().filter(|&x| *x == 0).count();
+        assert!(zeros <= 2);
+    }
+
     /*
     // Another example for a conditionally enabled test
     #[test]
