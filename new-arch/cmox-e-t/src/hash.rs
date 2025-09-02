@@ -16,7 +16,6 @@
 use crate::ensure_initialized;
 use crate::error::{FromRetval, HashResult};
 use cmox_sys::*;
-use core::fmt;
 use core::mem::MaybeUninit;
 use digest::{
     consts::{U20, U28, U32, U48, U64},
@@ -75,7 +74,7 @@ impl<H: HashType> Default for Hash<H> {
             panic!("Failed to construct hash handle");
         }
 
-        unsafe { HashResult::from_rv(cmox_hash_init(hash_handle)).expect("Hash reset failed") }
+        unsafe { HashResult::from_rv(cmox_hash_init(hash_handle)).expect("Hash init failed") }
 
         Self {
             raw_handle,
@@ -138,12 +137,5 @@ impl<H: HashType> FixedOutput for Hash<H> {
 impl<H: HashType> Drop for Hash<H> {
     fn drop(&mut self) {
         self.cleanup();
-    }
-}
-
-impl<H: HashType> fmt::Debug for Hash<H> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // XXX(RLB) Obviously this is wrong
-        f.debug_struct("Sha1").finish()
     }
 }

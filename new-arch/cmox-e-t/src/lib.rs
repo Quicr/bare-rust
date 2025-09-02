@@ -77,7 +77,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 pub mod error;
 pub mod utils;
 
-//pub mod aead;
+pub mod aead;
 pub mod drbg;
 pub mod ecdh;
 pub mod hash;
