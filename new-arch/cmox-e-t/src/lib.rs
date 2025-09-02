@@ -82,7 +82,7 @@ pub mod drbg;
 pub mod ecdh;
 pub mod hash;
 pub mod mac;
-//pub mod signature;
+pub mod signature;
 
 pub use error::{
     CipherError, CmoxError, CoreError, DrbgError, EccError, HashError, Result, RsaError,

@@ -143,9 +143,45 @@ mod unit_tests {
         let (alice_priv, alice_pub) = PrivateKey::<P256>::random(&mut rng).unwrap();
         let (bob_priv, bob_pub) = PrivateKey::<P256>::random(&mut rng).unwrap();
 
-        let alice_shared = alice_priv.exchalte(&bob_pub).unwrap();
-        let bob_shared = bob_priv.exchalte(&alice_pub).unwrap();
+        let alice_shared = alice_priv.exchange(&bob_pub).unwrap();
+        let bob_shared = bob_priv.exchange(&alice_pub).unwrap();
 
         assert!(alice_shared == bob_shared);
+    }
+
+    #[test]
+    #[ignore] // XXX(RLB) Unexplained halt
+    fn signature() {
+        // ECDSA
+        {
+            use cmox::drbg::CtrDrbg;
+            use cmox::signature::ecdsa::*;
+            use signature::{RandomizedSigner, Verifier};
+
+            let entropy = [0x42; 32];
+            let nonce = [0x01; 128];
+            let mut rng = unwrap!(CtrDrbg::new_default(&entropy, &nonce));
+
+            let message = b"Hello, world!";
+            let (private_key, public_key) = unwrap!(PrivateKey::<P256>::random(&mut rng));
+            let signature = private_key.sign_with_rng(&mut rng, message);
+            unwrap!(public_key.verify(message, &signature).map_err(|_| ()));
+        }
+
+        // EdDSA
+        {
+            use cmox::drbg::CtrDrbg;
+            use cmox::signature::eddsa::*;
+            use signature::{Signer, Verifier};
+
+            let entropy = [0x42; 32];
+            let nonce = [0x01; 128];
+            let mut rng = unwrap!(CtrDrbg::new_default(&entropy, &nonce));
+
+            let message = b"Hello, world!";
+            let (private_key, public_key) = unwrap!(PrivateKey::<Ed25519>::random(&mut rng));
+            let signature = private_key.sign(message);
+            unwrap!(public_key.verify(message, &signature).map_err(|_| ()));
+        }
     }
 }
