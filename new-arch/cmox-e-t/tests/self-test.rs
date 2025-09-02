@@ -6,29 +6,48 @@
 #![no_main]
 
 // This links the HAL so that reset vectors, etc. are populated
-use stm32f0xx_hal as _;
+use embassy_stm32 as _;
 
 // This ensures that the defmt library is linked, so that the test framework can use it
 use defmt as _;
 
 #[embedded_test::tests(setup=rtt_target::rtt_init_defmt!())]
 mod unit_tests {
-    use cmox_sys::cmox_getInfos;
-    use core::mem::MaybeUninit;
-    use defmt::info;
+    use defmt::unwrap;
+    use embassy_stm32::crc::{self, Crc};
+
+    // The init function enables the CRC peripheral.  This seems to be needed for some
+    // cryptographic functions, not sure why.
+    #[init]
+    fn init() {
+        let p = embassy_stm32::init(Default::default());
+        let _ = Crc::new(
+            p.CRC,
+            unwrap!(crc::Config::new(
+                crc::InputReverseConfig::Byte,
+                true,
+                crc::PolySize::Width32,
+                0xFFFFFFFF,
+                0x04C11DB7
+            )),
+        );
+    }
 
     #[test]
     fn version() {
-        let mut info = unsafe { MaybeUninit::zeroed().assume_init() };
-        unsafe { cmox_getInfos(&mut info) };
-
-        info!("version = {}", info.version);
-        info!("build = {:?}", info.build);
-
-        assert_eq!(info.version, 1);
-        assert_eq!(info.build, [0, 0, 0, 0, 0, 0, 0]);
+        let version = cmox::version();
+        assert_eq!(version, 0x040000B1);
     }
 
+    #[test]
+    fn initialize() {
+        assert!(cmox::initialize().is_ok());
+        assert!(cmox::is_initialized());
+        assert!(cmox::finalize().is_ok());
+        assert!(!cmox::is_initialized());
+    }
+
+    /*
     // Another example for a conditionally enabled test
     #[test]
     fn defmt() {
@@ -73,4 +92,5 @@ mod unit_tests {
     fn it_timeouts() {
         loop {} // should run into the 10s timeout
     }
+    */
 }
