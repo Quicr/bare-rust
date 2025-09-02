@@ -47,6 +47,16 @@ mod unit_tests {
         assert!(!cmox::is_initialized());
     }
 
+    #[test]
+    fn constant_time_eq() {
+        use cmox::utils::constant_time_eq;
+
+        assert!(constant_time_eq(b"hello", b"hello"));
+        assert!(!constant_time_eq(b"hello", b"world"));
+        assert!(!constant_time_eq(b"hello", b"hell"));
+        assert!(!constant_time_eq(b"hell", b"hello"));
+    }
+
     /*
     // Another example for a conditionally enabled test
     #[test]
