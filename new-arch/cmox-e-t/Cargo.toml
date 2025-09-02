@@ -5,6 +5,9 @@ edition = "2021"
 repository = "https://github.com/probe-rs/embedded-test"
 license = "MIT OR Apache-2.0"
 
+[profile.dev]
+opt-level = "s"
+
 [lib]
 harness = false
 test = false
@@ -37,7 +40,6 @@ cortex-m-rt = "0.7"
 embedded-test = { version = "0.6.0", features = ["defmt"]}
 embassy-stm32 = { version = "0.3.0", features = ["defmt", "stm32f072cb", "memory-x"] }
 rtt-target = { version="0.6.1", features = ["defmt"] }
-#stm32f0xx-hal = { version = "0.18", features = ["stm32f072"] }
 
 [features]
 # STM32 family selection features - choose one based on your STM32 MCU family

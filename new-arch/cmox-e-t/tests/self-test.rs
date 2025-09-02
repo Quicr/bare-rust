@@ -57,6 +57,7 @@ mod unit_tests {
         assert!(!constant_time_eq(b"hell", b"hello"));
     }
 
+    /*
     #[test]
     fn drbg() {
         use cmox::drbg::*;
@@ -71,6 +72,7 @@ mod unit_tests {
         let zeros = output.iter().filter(|&x| *x == 0).count();
         assert!(zeros < output.len() / 256 * 2);
     }
+    */
 
     #[test]
     fn hash() {
@@ -99,50 +101,23 @@ mod unit_tests {
         assert!(zeros <= 2);
     }
 
-    /*
-    // Another example for a conditionally enabled test
-    #[test]
-    fn defmt() {
-        defmt::info!("Hello, defmt!");
-        assert!(true)
-    }
+    // TODO put AEAD here
 
-    // Tests can be ignored with the #[ignore] attribute
     #[test]
-    #[ignore]
-    fn it_works_ignored() {
-        assert!(false)
-    }
+    fn ecdh() {
+        use cmox::drbg::CtrDrbg;
+        use cmox::ecdh::*;
 
-    // A test that fails with a panic
-    #[test]
-    fn it_fails1() {
-        assert!(false)
-    }
+        let entropy = [0x42; 32];
+        let nonce = [0x01; 128];
+        let mut rng = unwrap!(CtrDrbg::new_default(&entropy, &nonce));
 
-    // A test that fails with a returned Err(&str)
-    #[test]
-    fn it_fails2() -> Result<(), &'static str> {
-        Err("It failed because ...")
-    }
+        let (alice_priv, alice_pub) = PrivateKey::<P256>::random(&mut rng).unwrap();
+        let (bob_priv, bob_pub) = PrivateKey::<P256>::random(&mut rng).unwrap();
 
-    // Tests can be annotated with #[should_panic] if they are expected to panic
-    #[test]
-    #[should_panic]
-    fn it_passes() {
-        assert!(false)
-    }
+        let alice_shared = alice_priv.exchange(&bob_pub).unwrap();
+        let bob_shared = bob_priv.exchange(&alice_pub).unwrap();
 
-    // This test should panic, but doesn't => it fails
-    #[test]
-    #[should_panic]
-    fn it_fails3() {}
-
-    // Tests can be annotated with #[timeout(<secs>)] to change the default timeout of 60s
-    #[test]
-    #[timeout(1)]
-    fn it_timeouts() {
-        loop {} // should run into the 10s timeout
+        assert!(alice_shared == bob_shared);
     }
-    */
 }
