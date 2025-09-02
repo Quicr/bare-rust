@@ -385,3 +385,18 @@ impl From<UtilsError> for CmoxError {
         Self::Utils(err)
     }
 }
+
+impl defmt::Format for CmoxError {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            CmoxError::Core(err) => defmt::write!(f, "Core error: {:?}", err),
+            CmoxError::Hash(err) => defmt::write!(f, "Hash error: {:?}", err),
+            CmoxError::Cipher(err) => defmt::write!(f, "Cipher error: {:?}", err),
+            CmoxError::Ecc(err) => defmt::write!(f, "ECC error: {:?}", err),
+            CmoxError::Rsa(err) => defmt::write!(f, "RSA error: {:?}", err),
+            CmoxError::Drbg(err) => defmt::write!(f, "DRBG error: {:?}", err),
+            CmoxError::Mac(err) => defmt::write!(f, "MAC error: {:?}", err),
+            CmoxError::Utils(err) => defmt::write!(f, "Utils error: {:?}", err),
+        }
+    }
+}

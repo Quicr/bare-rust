@@ -27,6 +27,14 @@ pub enum CoreError {
     InitFail,
 }
 
+impl defmt::Format for CoreError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            CoreError::InitFail => defmt::write!(f, "InitFail"),
+        }
+    }
+}
+
 impl FromRetval<cmox_init_retval_t> for CoreResult {
     fn from_rv(rv: cmox_init_retval_t) -> Self {
         match rv {
@@ -52,6 +60,17 @@ pub enum HashError {
 
     /// The desired digest size is not supported by the hash alforithm
     BadTagSize,
+}
+
+impl defmt::Format for HashError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            HashError::Internal => defmt::write!(f, "Internal"),
+            HashError::BadParameter => defmt::write!(f, "BadParameter"),
+            HashError::BadOperation => defmt::write!(f, "BadOperation"),
+            HashError::BadTagSize => defmt::write!(f, "BadTagSize"),
+        }
+    }
 }
 
 impl FromRetval<cmox_hash_retval_t> for HashResult {
@@ -88,6 +107,19 @@ pub enum CipherError {
 
     /// Authentication of the tag failed
     AuthFail,
+}
+
+impl defmt::Format for CipherError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            CipherError::Internal => defmt::write!(f, "Internal"),
+            CipherError::NotImplemented => defmt::write!(f, "NotImplemented"),
+            CipherError::BadParameter => defmt::write!(f, "BadParameter"),
+            CipherError::BadOperation => defmt::write!(f, "BadOperation"),
+            CipherError::BadInputSize => defmt::write!(f, "BadInputSize"),
+            CipherError::AuthFail => defmt::write!(f, "AuthFail"),
+        }
+    }
 }
 
 impl FromRetval<cmox_cipher_retval_t> for CipherResult {
@@ -135,6 +167,22 @@ pub enum EccError {
 
     /// ECC signature not verified
     AuthFail,
+}
+
+impl defmt::Format for EccError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            EccError::Internal => defmt::write!(f, "Internal"),
+            EccError::BadParameter => defmt::write!(f, "BadParameter"),
+            EccError::InvalidPubkey => defmt::write!(f, "InvalidPubkey"),
+            EccError::InvalidSignature => defmt::write!(f, "InvalidSignature"),
+            EccError::WrongRandom => defmt::write!(f, "WrongRandom"),
+            EccError::MemoryFail => defmt::write!(f, "MemoryFail"),
+            EccError::MathCurveMismatch => defmt::write!(f, "MathCurveMismatch"),
+            EccError::AlgoCurveMismatch => defmt::write!(f, "AlgoCurveMismatch"),
+            EccError::AuthFail => defmt::write!(f, "AuthFail"),
+        }
+    }
 }
 
 impl FromRetval<cmox_ecc_retval_t> for EccResult {
@@ -188,6 +236,23 @@ pub enum RsaError {
 
     /// ECC signature not verified
     AuthFail,
+}
+
+impl defmt::Format for RsaError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            RsaError::Internal => defmt::write!(f, "Internal"),
+            RsaError::BadParameter => defmt::write!(f, "BadParameter"),
+            RsaError::ModulusTooShort => defmt::write!(f, "ModulusTooShort"),
+            RsaError::InvalidSignature => defmt::write!(f, "InvalidSignature"),
+            RsaError::WrongDecryption => defmt::write!(f, "WrongDecryption"),
+            RsaError::WrongRandom => defmt::write!(f, "WrongRandom"),
+            RsaError::MemoryFail => defmt::write!(f, "MemoryFail"),
+            RsaError::MathAlgoMismatch => defmt::write!(f, "MathAlgoMismatch"),
+            RsaError::MexpAlgoMismatch => defmt::write!(f, "MexpAlgoMismatch"),
+            RsaError::AuthFail => defmt::write!(f, "AuthFail"),
+        }
+    }
 }
 
 impl FromRetval<cmox_rsa_retval_t> for RsaResult {
@@ -244,6 +309,23 @@ pub enum DrbgError {
     BadNonceSize,
 }
 
+impl defmt::Format for DrbgError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            DrbgError::Internal => defmt::write!(f, "Internal"),
+            DrbgError::BadParameter => defmt::write!(f, "BadParameter"),
+            DrbgError::BadOperation => defmt::write!(f, "BadOperation"),
+            DrbgError::UninitializedState => defmt::write!(f, "UninitializedState"),
+            DrbgError::ReseedNeeded => defmt::write!(f, "ReseedNeeded"),
+            DrbgError::BadEntropySize => defmt::write!(f, "BadEntropySize"),
+            DrbgError::BadPersonalizationStringLength => defmt::write!(f, "BadPersonalizationStringLength"),
+            DrbgError::BadAdditionalInputLength => defmt::write!(f, "BadAdditionalInputLength"),
+            DrbgError::BadRequest => defmt::write!(f, "BadRequest"),
+            DrbgError::BadNonceSize => defmt::write!(f, "BadNonceSize"),
+        }
+    }
+}
+
 impl FromRetval<cmox_drbg_retval_t> for DrbgResult {
     fn from_rv(rv: cmox_drbg_retval_t) -> Self {
         match rv {
@@ -280,6 +362,17 @@ pub enum MacError {
     AuthFail,
 }
 
+impl defmt::Format for MacError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            MacError::Internal => defmt::write!(f, "Internal"),
+            MacError::BadParameter => defmt::write!(f, "BadParameter"),
+            MacError::BadOperation => defmt::write!(f, "BadOperation"),
+            MacError::AuthFail => defmt::write!(f, "AuthFail"),
+        }
+    }
+}
+
 impl FromRetval<cmox_mac_retval_t> for MacResult {
     fn from_rv(rv: cmox_mac_retval_t) -> Self {
         match rv {
@@ -298,6 +391,14 @@ impl FromRetval<cmox_mac_retval_t> for MacResult {
 pub enum UtilsError {
     /// Input buffers are different
     AuthFail,
+}
+
+impl defmt::Format for UtilsError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            UtilsError::AuthFail => defmt::write!(f, "AuthFail"),
+        }
+    }
 }
 
 impl FromRetval<cmox_utils_retval_t> for UtilsResult {
@@ -383,5 +484,20 @@ impl From<MacError> for CmoxError {
 impl From<UtilsError> for CmoxError {
     fn from(err: UtilsError) -> Self {
         Self::Utils(err)
+    }
+}
+
+impl defmt::Format for CmoxError {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        match self {
+            CmoxError::Core(err) => defmt::write!(f, "Core error: {:?}", err),
+            CmoxError::Hash(err) => defmt::write!(f, "Hash error: {:?}", err),
+            CmoxError::Cipher(err) => defmt::write!(f, "Cipher error: {:?}", err),
+            CmoxError::Ecc(err) => defmt::write!(f, "ECC error: {:?}", err),
+            CmoxError::Rsa(err) => defmt::write!(f, "RSA error: {:?}", err),
+            CmoxError::Drbg(err) => defmt::write!(f, "DRBG error: {:?}", err),
+            CmoxError::Mac(err) => defmt::write!(f, "MAC error: {:?}", err),
+            CmoxError::Utils(err) => defmt::write!(f, "Utils error: {:?}", err),
+        }
     }
 }

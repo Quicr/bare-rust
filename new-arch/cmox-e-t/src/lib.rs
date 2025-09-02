@@ -78,7 +78,7 @@ pub mod error;
 pub mod utils;
 
 //pub mod aead;
-//pub mod drbg;
+pub mod drbg;
 //pub mod ecdh;
 //pub mod hash;
 //pub mod mac;
@@ -169,7 +169,9 @@ pub fn is_initialized() -> bool {
 
 /// Ensure CMOX library is initialized before calling cryptographic functions
 pub(crate) fn ensure_initialized() -> Result<()> {
-    crate::is_initialized()
-        .then_some(())
-        .ok_or(CoreError::InitFail.into())
+    if !is_initialized() {
+        initialize()
+    } else {
+        Ok(())
+    }
 }

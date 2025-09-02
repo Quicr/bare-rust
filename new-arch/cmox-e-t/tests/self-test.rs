@@ -57,6 +57,21 @@ mod unit_tests {
         assert!(!constant_time_eq(b"hell", b"hello"));
     }
 
+    #[test]
+    fn drbg() {
+        use cmox::drbg::*;
+
+        let mut drbg = unwrap!(CtrDrbg::new_default(&[0x42; 32], &[0x43; 5]));
+
+        let mut output = [0_u8; 1024];
+        unwrap!(drbg.generate(&mut output, None));
+
+        // Test that the number of zero bytes in the output is roughly what you would expect from
+        // andom output (within a factor of two)
+        let zeros = output.iter().filter(|&x| *x == 0).count();
+        assert!(zeros < output.len() / 256 * 2);
+    }
+
     /*
     // Another example for a conditionally enabled test
     #[test]
