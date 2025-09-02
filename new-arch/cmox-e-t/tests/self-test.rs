@@ -84,6 +84,21 @@ mod unit_tests {
         assert!(zeros <= 2);
     }
 
+    #[test]
+    fn mac() {
+        use cmox::mac::*;
+        use digest::{Key, Mac};
+
+        let key = Key::<HmacSha256>::from_slice(&[0xA0; 32]);
+        let h = HmacSha256::new(key)
+            .chain_update(b"hello, world")
+            .finalize();
+
+        // Test that there are no more than 2 zero bytes in the hash output
+        let zeros = h.into_bytes().iter().filter(|&x| *x == 0).count();
+        assert!(zeros <= 2);
+    }
+
     /*
     // Another example for a conditionally enabled test
     #[test]

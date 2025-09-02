@@ -81,7 +81,7 @@ pub mod utils;
 pub mod drbg;
 //pub mod ecdh;
 pub mod hash;
-//pub mod mac;
+pub mod mac;
 //pub mod signature;
 
 pub use error::{
