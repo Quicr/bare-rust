@@ -14,23 +14,14 @@ use defmt as _;
 #[embedded_test::tests(setup=rtt_target::rtt_init_defmt!())]
 mod unit_tests {
     use defmt::unwrap;
-    use embassy_stm32::crc::{self, Crc};
+    use embassy_stm32::crc::Crc;
 
     // The init function enables the CRC peripheral.  This seems to be needed for some
     // cryptographic functions, not sure why.
     #[init]
     fn init() {
         let p = embassy_stm32::init(Default::default());
-        let _ = Crc::new(
-            p.CRC,
-            unwrap!(crc::Config::new(
-                crc::InputReverseConfig::Byte,
-                true,
-                crc::PolySize::Width32,
-                0xFFFFFFFF,
-                0x04C11DB7
-            )),
-        );
+        let _ = Crc::new(p.CRC);
     }
 
     #[test]
@@ -58,7 +49,7 @@ mod unit_tests {
     }
 
     #[test]
-    #[ignore] // XXX(RLB) Complains about reseed-needed
+    #[ignore] // XXX(RLB) Unexplained halt
     fn drbg() {
         use cmox::drbg::*;
 

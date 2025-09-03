@@ -1,8 +1,13 @@
 [target.thumbv6m-none-eabi]
 runner = "probe-rs run --chip STM32F072CBTx"
+linker = "flip-link"
+
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip STM32F405RGTx"
+linker = "flip-link"
 
 [build]
-target = "thumbv6m-none-eabi"
+target = "thumbv7em-none-eabihf"
 
 [env]
 DEFMT_LOG="debug"
