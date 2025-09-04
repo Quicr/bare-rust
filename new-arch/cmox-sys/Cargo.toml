@@ -1,0 +1,23 @@
+[package]
+name = "cmox-sys"
+version = "0.1.0"
+edition = "2021"
+authors = ["Richard Barnes <rlb@ipv.sx>"]
+description = "Rust bindings to STM32 CMOX cryptographic library"
+license = "MIT"
+
+[dependencies]
+cty = "0.2"
+
+[build-dependencies]
+bindgen = "0.70"
+cc = "1.0"
+
+[features]
+default = ["cm4"]
+cm0 = []
+cm0plus = []
+cm3 = []
+cm4 = []
+cm7 = []
+cm33 = []
