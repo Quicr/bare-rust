@@ -7,21 +7,77 @@
 
 // This links the HAL so that reset vectors, etc. are populated
 use embassy_stm32 as _;
+use embassy_stm32::{bind_interrupts, peripherals, rng};
 
 // This ensures that the defmt library is linked, so that the test framework can use it
 use defmt as _;
 
+bind_interrupts!(struct Irqs {
+    RNG => rng::InterruptHandler<peripherals::RNG>;
+});
+
 #[embedded_test::tests(setup=rtt_target::rtt_init_defmt!())]
 mod unit_tests {
+    use super::Irqs;
     use defmt::unwrap;
-    use embassy_stm32::crc::Crc;
+    use embassy_stm32::{crc::Crc, peripherals::RNG, rng::Rng};
 
     // The init function enables the CRC peripheral.  This seems to be needed for some
     // cryptographic functions, not sure why.
     #[init]
-    fn init() {
-        let p = embassy_stm32::init(Default::default());
-        let _ = Crc::new(p.CRC);
+    fn init() -> (Crc<'static>, Rng<'static, RNG>) {
+        let config = {
+            use embassy_stm32::rcc::*;
+
+            let mut config = embassy_stm32::Config::default();
+            config.rcc.hsi = true;
+            config.rcc.sys = Sysclk::PLL1_P;
+            config.rcc.pll_src = PllSource::HSI;
+            config.rcc.pll = Some(Pll {
+                prediv: PllPreDiv::DIV8,
+                mul: PllMul::MUL168,
+                divp: Some(PllPDiv::DIV2),
+                divq: Some(PllQDiv::DIV7),
+                divr: None,
+            });
+            config.rcc.ahb_pre = AHBPrescaler::DIV1;
+            config.rcc.apb1_pre = APBPrescaler::DIV4;
+            config.rcc.apb2_pre = APBPrescaler::DIV2;
+            config.rcc.ls = LsConfig {
+                rtc: RtcClockSource::LSI,
+                lsi: true,
+                lse: None,
+            };
+
+            // XXX(RLB): The clocks should be driven off of HSE, but the Embassy clock init code
+            // hangs if I configure HSE, presumably waiting for `hserdy`.  The above configuration
+            // is a hack that produces the same output frequencies using the 16Mhz HSI clock as a
+            // base and dividing it down further (2Mhz = 16Mhz / M=8 vs. 6Mhz / M=3).  That seems
+            // to be good enough to get the tests going.
+            /*
+            config.rcc.hse = Some(Hse {
+                freq: Hertz(6_000_000),
+                mode: HseMode::Bypass,
+            });
+            config.rcc.sys = Sysclk::PLL1_P;
+            config.rcc.pll_src = PllSource::HSE;
+            config.rcc.pll = Some(Pll {
+                prediv: PllPreDiv::DIV3,
+                mul: PllMul::MUL168,
+                divp: Some(PllPDiv::DIV2),
+                divq: Some(PllQDiv::DIV7),
+                divr: None,
+            });
+            */
+
+            config
+        };
+
+        let p = embassy_stm32::init(config);
+        let crc = Crc::new(p.CRC);
+        let rng = Rng::new(p.RNG, Irqs);
+
+        (crc, rng)
     }
 
     #[test]
@@ -50,7 +106,7 @@ mod unit_tests {
 
     #[test]
     #[ignore] // XXX(RLB) Unexplained halt
-    fn drbg() {
+    fn drbg(_crc_rng: (Crc<'static>, Rng<'static, RNG>)) {
         use cmox::drbg::*;
 
         let mut drbg = unwrap!(CtrDrbg::new_default(&[0x42; 32], &[0x43; 5]));
