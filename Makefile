@@ -15,6 +15,13 @@ build-mgmt:
 flash-mgmt:
 	cd mgmt && cargo flash --release --chip STM32F072CBTx
 
+# XXX(RLB) This line has a bunch of special cases for my laptop that probably
+# won't work elsewhere
+flasher-mgmt:
+	cd mgmt && cargo objcopy --release --target=thumbv6m-none-eabi -- -O binary target/mgmt.bin
+	python3 ../hactar/software/flasher/main.py --baud=115200 --chip="mgmt" --port=/dev/tty.usbserial-10 \
+								 -bin=mgmt/target/mgmt.bin
+
 run-mgmt:
 	echo run "openocd -f mgmt/openocd.cfg" in background
 	echo run something like "screen /dev/tty.usbserial-120 115200" in another window
