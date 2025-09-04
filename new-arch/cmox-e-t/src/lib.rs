@@ -2,7 +2,6 @@
 #![no_main]
 //#![doc = include_str!("../README.md")]
 #![warn(missing_docs, rust_2018_idioms)]
-#![allow(clippy::len_without_is_empty)]
 #![allow(dead_code)] // XXX(RLB) Only while reviewing / refactoring
 
 //! # CMOX - Idiomatic Rust Cryptography using STM32 CMOX

@@ -16,6 +16,10 @@ test = false
 name = "self-test"
 harness = false
 
+[[test]]
+name = "rust-crypto"
+harness = false
+
 [dependencies]
 cmox-sys = { path = "../cmox-sys", default-features = false }
 
@@ -36,10 +40,16 @@ defmt = { version = "1" }
 
 [dev-dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
-cortex-m-rt = "0.7"
+cortex-m-rt = { version = "0.7" }
 embedded-test = { version = "0.6.0", features = ["defmt"]}
 embassy-stm32 = { version = "0.3.0", features = ["defmt", "stm32f405rg", "memory-x"] }
 rtt-target = { version="0.6.1", features = ["defmt"] }
+sha2 = { version = "0.10.9", default-features = false }
+hmac = { version = "0.12.1", default-features = false }
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes"] }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdh", "ecdsa"] }
+x25519-dalek = { version = "2.0.1", default-features = false }
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["rand_core"] }
 
 [features]
 # STM32 family selection features - choose one based on your STM32 MCU family
