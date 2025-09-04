@@ -121,7 +121,7 @@ mod unit_tests {
     }
 
     #[test]
-    #[ignore] // XXX(RLB) Unexplained halt
+    // #[ignore] // XXX(RLB) Unexplained halt
     fn hash() {
         use cmox::hash::*;
         use digest::Digest;

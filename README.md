@@ -39,9 +39,11 @@ README in that directory for more details.
 
 ## Quickstart
 
-Prerequisite: [probe-rs]
-
 ```
+# Prerequisites for on-device build/test
+> brew install probe-rs
+> rustup target add thumbv7em-none-eabihf
+
 # To run in a terminal window
 > cd ui-laptop
 > cargo run
@@ -56,6 +58,27 @@ The expected behavior is:
 * Pushing the PTT (top) button should illuminate the green LED
 * Pushing the AI (bottom) button should illuminate the blue LED
 * If both buttons are pushed at the same time, the LED should be cyan
+
+### CMOX Requirements
+
+To build / test the CMOX library, you will also need:
+
+* [ARM GCC toolchain](https://developer.arm.com/Tools%20and%20Software/GNU%20Toolchain)
+* [STM cryptographic library](https://www.st.com/en/embedded-software/x-cube-cryptolib.html)
+
+When you build / test the CMOX library, you will need to set environment
+variables that indicate the location of these libraries.  The `ARM_STDLIB_PATH`
+environment variable needs to point to the directory that holds headers such as
+`stdint.h`.  The `CMOX_PATH` environment variable needs to point to the
+directory that has CMOX headers under `include` and binaries under `lib` (within
+the `Middlewares` directory of the distribution bindle).  If you provide these
+on the command line you'll end up with something like the following:
+
+```
+ARM_STDLIB_PATH=<path to directory with ARM stdlib headers> \
+CMOX_PATH=<path to STMCryptographic library and headers> \
+cargo test -F stm32f4 --test self-test
+```
 
 ## FAQ
 
