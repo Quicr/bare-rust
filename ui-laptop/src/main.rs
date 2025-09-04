@@ -13,13 +13,27 @@ impl Led for MockLed {
 }
 
 #[derive(Default)]
+struct MockTx;
+
+impl ui_app::Write for MockTx {
+    fn write(&mut self, _buf: &[u8]) -> usize {
+        0
+    }
+}
+
+#[derive(Default)]
 struct MockOutputs {
     status_led: MockLed,
+    mgmt_tx: MockTx,
 }
 
 impl Outputs for MockOutputs {
     fn status_led(&mut self) -> &mut impl Led {
         &mut self.status_led
+    }
+
+    fn mgmt_tx(&mut self) -> &mut impl ui_app::Write {
+        &mut self.mgmt_tx
     }
 }
 

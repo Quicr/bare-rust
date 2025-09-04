@@ -1,51 +1,61 @@
 Rust on Hactar
 ==============
 
-This directory contains a prototype of a new structure for Rust code on the
-Hactar UI chip.  It currently contains three primary crates:
+This repository contains Rust crates for developing firmware for the Hactar UI
+chip. It currently contains three primary crates:
 
-- `ui-app`
-    * The device-independent aspects of the UI chip logic
+- `ui-app`: The device-independent aspects of the UI chip logic
     * Tests that verify that this logic works as intended, given the right
       inputs.
     * An enum of events that can be emitted by the hardware (basically, async
       inputs)
     * An `Outputs` trait that captures the ways that the app can invoke hardware
       capabilities
-- `ui-stm32`
-    * Code to instantiate the app on the Hactar stm32f405 chip
+- `ui-stm32`: Code to instantiate the app on the Hactar stm32f405 chip
     * An implementation of the traits in the `ui-app` crate based on the Hactar
       EV12 hardware platform.
     * An entry point function that instantiates the app and the board
       abstraction, and routes events from ISRs to the app.
-- `ui-laptop`
-    * Code to instantiate the app in a terminal window
+- `ui-laptop`: Code to instantiate the app in a terminal window
 
-There are also a few other crates here for other purposes:
+## CMOX
 
-- `mgmt-embassy`: An experimental MGMT chip firmware that just echos UART data
-  to demonstrate how to do UART+DMA.  It also has logic to pipes UART data
-  back and forth to the UI chip.
+The `cmox` directory contains crates that enable the use of the STM
+Cryptographic library ("Cortex-M Optimized Crypto Stack").  Following the Rust
+"sys-crate" pattern, it contains two crates:
 
-- `net-idf`: An experimental NET chip firmware that connects to wifi and makes a
-  websocket connection.
+- `cmox-sys`: A bindgen-generated unsafe API and logic to link the CMOX library
+- `cmox`: A safe, idiomatic API to the functions exposed by `cmox-sys`
 
-- `cmox-sys`: A `-sys` module for the STM cryptographic library.
+These libraries currently build successfully, including building and running
+tests on the UI chip.  However, tests are currently failing due to some
+low-level issues.
+
+## Archive
+
+The `archive` directory contains some earlier attempts at getting Rust running
+on Hactar, some parts of which may be useful for future development.  See the
+README in that directory for more details.
 
 ## Quickstart
+
+Prerequisite: [probe-rs]
 
 ```
 # To run in a terminal window
 > cd ui-laptop
 > cargo run
 
-# To run on an EV12 board
+# To run on an actual UI chip, via ST-LINK
 > cd ui-stm32
-> cargo build
-# Connect USB-C cable to Hactar
-# You may have to modify the Makefile to point to a local Hactar flasher script
-> make flash
+# Connect ST-LINK to UI chip
+> cargo run
 ```
+
+The expected behavior is:
+* Pushing the PTT (top) button should illuminate the green LED
+* Pushing the AI (bottom) button should illuminate the blue LED
+* If both buttons are pushed at the same time, the LED should be cyan
 
 ## FAQ
 
@@ -80,11 +90,6 @@ precise configuration of the EV12 board is almost entirely captured in the file
 are short.  To support EV13 and beyond, we can make a parallel `ev13.rs`; its
 use and any ISR adaptations should be easy to switch using cargo features.
 
-## Known Gaps vis à vis `bare-rust`
-
-* Stack measurement - should be possible to re-add
-* UART support - should be able to add via off-the-shelf HAL 
-
 ## TODO
 
 * [ ] UART+DMA connectivity to the MGMT chip
@@ -98,6 +103,7 @@ use and any ISR adaptations should be easy to switch using cargo features.
 * [ ] Use [flip-link] to protect against stack overflow
 * [ ] More application functionality...
 
+[probe-rs]: https://probe.rs/docs/getting-started/installation/
 [stm32f4xx-hal]: https://docs.rs/stm32f4xx-hal/
 [cortex-m]: https://docs.rs/cortex-m/
 [cortex-m-rt]: https://docs.rs/cortex-m-rt/
