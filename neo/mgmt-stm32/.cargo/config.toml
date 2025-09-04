@@ -1,0 +1,9 @@
+
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+runner = "arm-none-eabi-gdb -q -x openocd.gdb"
+rustflags = [
+    "-Clink-arg=-Tmem072.x",
+]
+
+[build]
+target = "thumbv6m-none-eabi"

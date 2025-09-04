@@ -1,0 +1,14 @@
+[package]
+name = "svdgen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde-xml-rs = "0.8.1"
+serde = { version = "1.0.219", features = ["derive"] }
+clap = { version = "4.5.41", features = ["derive"] }
+quote = "1.0.40"
+anyhow = "1.0.98"
+prettyplease = "0.2.35"
+syn = "2.0.104"
+proc-macro2 = "1.0.95"

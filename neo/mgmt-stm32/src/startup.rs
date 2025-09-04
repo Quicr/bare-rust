@@ -1,0 +1,552 @@
+// XXX(RLB): I have just copied this over blindly from the initial bare-rust code.  Just some light
+// clean-up to get things to build.  It seems like there's a lot of duplication here (how many
+// Default_Handler functions do we need??), and cleanup that could be done, e.g., skipping a lot of
+// the initialization code and turning the IRQ table into a struct.  But I don't feel like I
+// understand what's going on here well enough to make changes.
+
+//! Startup code for ARM Cortex-M microcontrollers
+//!
+//! The `Reset_Handler` function is the entry point of the program
+//! and is called after the microcontroller is reset. It initializes
+//! the `.bss` and `.data` sections, and then calls the `main` function.
+//!
+//! The `Default_Handler` function is an exception handler that is called
+//! when an exception with no specific handler is raised. It simply
+//! turns on the red LED and enters an infinite loop.
+//!
+//! The `XXX_IRQHandler` functions are interrupt handlers that are called
+//! when a specific interrupt is raised.
+//!
+//! More information about the startup process can be found in
+//! the [Cortex-M4 Technical Reference Manual](https://documentation-service.arm.com/static/5f19da2a20b7cf4bc524d99a).
+//!
+//! The code in this module is closely tied to the linker configuration
+//! script in the `linker.ld` file.
+//!
+
+use core::ptr;
+
+const STACK_PAINT_BYTE: u8 = 0xCC;
+
+unsafe extern "C" {
+    fn main() -> !;
+}
+
+use core::panic::PanicInfo;
+
+// XXX(RLB) This is at odds with our construction of a Board as an owned object.  It might be
+// possible to make it static, since calls to it aren't mutable.  But we would want something like
+// OnceCell so that we could initialize it at runtime.  Or we could cheat and make the default
+// value uninitialized + init() method, but that would have the unpleasant side effect of exposing
+// an uninitialized value.
+//
+// ANS(RLB)
+// * Need to loop{}, can never come out of panic
+// * Can't do serial or anything
+#[panic_handler]
+fn panic(_panic: &PanicInfo) -> ! {
+    /*
+    const LED_RED_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 4);
+    const LED_GREEN_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 6);
+    const LED_BLUE_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 7);
+
+    LED_RED_PIN.output();
+    LED_GREEN_PIN.output();
+    LED_BLUE_PIN.output();
+
+    LED_RED_PIN.low();
+    LED_GREEN_PIN.high();
+    LED_BLUE_PIN.high();
+    */
+    loop {}
+}
+
+unsafe extern "C" {
+    static mut _sbss: u8;
+    static _ebss: u8;
+    static mut _sdata: u8;
+    static _edata: u8;
+    static _sidata: u8;
+    static _estack: u8;
+    static mut _heap_start: u8;
+}
+
+// XXX(RLB) Under what circumstances is this called?  It doesn't look like there's a comparable
+// method defined in the C firmware for the mgmt chip.
+//
+// ANS(RLB): It's the first thing that is called on startup.  Probably in ASM in the C version.
+#[unsafe(no_mangle)]
+#[allow(static_mut_refs)]
+pub extern "C" fn Reset_Handler() -> ! {
+    unsafe {
+        // XXX(RLB) Why do we care about the initial contents of this section?
+        // ANS(RLB) Makes it easier to debug.
+
+        // initialize the BSS section with zeros
+        let count = &_ebss as *const u8 as usize - &_sbss as *const u8 as usize;
+        ptr::write_bytes(&mut _sbss as *mut u8, 0, count);
+    }
+    unsafe {
+        // XXX(RLB) What function does this serve?
+        // ANS(RLB) Compiler/linker act as if the data are in memory (in the DATA section), but in
+        // our binary, they are actually in the FLASH section.
+
+        // initialize the DATA section with the data from the flash
+        let count = &_edata as *const u8 as usize - &_sdata as *const u8 as usize;
+        ptr::copy_nonoverlapping(&_sidata as *const u8, &mut _sdata as *mut u8, count);
+    }
+    unsafe {
+        // XXX(RLB) If we're not doing stack painting for stack usage measurements, do we need to
+        // do this?
+        // ANS(RLB) Only for stack painting.  Nice to have a clean stack when in debugger.
+        // ANS(RLB) The magic "100" is to keep it clear of this function's stack usage.
+
+        // initialize the heap and stack to 0xC1
+        // leave 100 bytes free for this function
+        let count = &_estack as *const u8 as usize - &_heap_start as *const u8 as usize - 100;
+        ptr::write_bytes(&mut _heap_start as *mut u8, STACK_PAINT_BYTE, count);
+    }
+
+    unsafe { main() }
+}
+
+// XXX(RLB): Similar problems with Board ownership here.
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler() {
+    /*
+    const LED_RED_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 4);
+    const LED_GREEN_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 6);
+    const LED_BLUE_PIN: gpio::Pin = gpio::Pin(cpu::GPIOA, 7);
+
+    LED_GREEN_PIN.output();
+    LED_RED_PIN.output();
+    LED_BLUE_PIN.output();
+
+    LED_GREEN_PIN.high();
+    LED_RED_PIN.low();
+    LED_BLUE_PIN.high();
+    */
+
+    loop {}
+}
+
+// XXX(RLB) Do we need to define all these duplicate symbols?  I don't see them at all in the C
+// code.  In the IRQ vectors, it seems like we could just link to a single `Default_Handler`.
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_HandlerA() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_HandlerB() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_HandlerC() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_HandlerD() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_HandlerE() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_HandlerF() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_HandlerG() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_HandlerH() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler1a() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler1b() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler1c() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler1d() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler2() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler3() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler4() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler5() {
+    Default_Handler();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Default_Handler6() {
+    Default_Handler();
+}
+
+// XXX(RLB) Interesting question of how to enable an application to selectively override some of
+// the IRQ handlers, without having to list all the ones they're not using.  I think something like
+// the following would work thanks to some Rust syntactic sugar:
+//
+// * Define an IrqTable type that replaces the array below
+// * impl Default for IrqTable // just has DefaultHandler for everything
+//
+// static Exceptions: IrqTable = IrqTable {
+//    TIM1: &tim1_handler,
+//    TIM2: &tim2_handler,
+//    .. Default::default()
+// };
+#[unsafe(no_mangle)]
+pub extern "C" fn TIM1_UP_TIM10_IRQHandler() {
+    //hal::timer::handle_tim1_irq();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn TIM2_IRQHandler() {
+    // TODO(RLB): Implement timers
+    //hal::timer::handle_tim2_irq();
+}
+
+// XXX(RLB) Why do we need a union here?  On a 32-bit system, the `fn` pointer will be 32 bits, so
+// this ends up being the same size.
+//
+// ANS(RLB) Cullen is mystified by this as well
+#[allow(dead_code)]
+pub union IrqVector {
+    not_used: u32,
+    handler: unsafe extern "C" fn(),
+}
+
+// XXX(RLB) It would be a little nicer to just define this as an `extern "C" fn`.  Is there a
+// reason for it to be a pointer variable like this?
+//
+// ANS(RLB): This needs to be a function pointer, not the function itself.  There might still be a
+// nicer way to express it.
+#[unsafe(link_section = ".vector_table.reset_vector")]
+#[unsafe(no_mangle)]
+pub static Reset_Vector: extern "C" fn() -> ! = Reset_Handler;
+
+// XXX(RLB) Could we make this a struct instead of an array?  You could arrange it so that the
+// memory layout was the same; in fact, I think just doing the obvious thing would work:
+//
+// pub type IrqVector = unsafe extern "C" fn();
+//
+// struct IrqTable {
+//     pub NMI: IrqVector,
+//     pub HardFault: IrqVector,
+//     pub SVC: IrqVector,
+//     ...
+// }
+//
+// It would also be nice to generate this struct off of the SVD file.  Looking at the SVD file, I
+// don't see anything about the first 5 entries here, but I see things like this:
+//
+//      <interrupt>
+//        <name>TIM7</name>
+//        <description>TIM7 global interrupt</description>
+//        <value>18</value>
+//      </interrupt>
+//
+// So maybe we could hard-code the first 5 enteries, then generate the rest of the struct/table
+// from <interrupt> objects in the SVD?
+//
+// ANS(RLB): All the Default_Handler functions are for debugging, so you can put a breakpoint in
+// them.  Can be simplified.
+//
+// ANS(RLB): Struct should work, check ASM to make sure it comes out the same.
+#[unsafe(link_section = ".vector_table.exceptions")]
+#[unsafe(no_mangle)]
+pub static Exceptions: [IrqVector; 5 + 81] = [
+    IrqVector {
+        handler: Default_HandlerA,
+    }, // NMI
+    IrqVector {
+        handler: Default_HandlerB,
+    }, // hard fault
+    IrqVector {
+        handler: Default_HandlerC,
+    }, // SVC
+    IrqVector {
+        handler: Default_HandlerD,
+    }, // Pend  SV
+    IrqVector {
+        handler: Default_HandlerE,
+    }, // Sys Timer
+    // TODO - int vectors are wrong
+    IrqVector {
+        handler: Default_Handler1a,
+    }, // WWDG
+    IrqVector {
+        handler: Default_Handler1b,
+    }, // PVD
+    IrqVector {
+        handler: Default_Handler,
+    }, // RTC_WKUP
+    IrqVector {
+        handler: Default_Handler,
+    }, // FLASH
+    IrqVector {
+        handler: Default_Handler,
+    }, // RCC
+    IrqVector {
+        handler: Default_Handler,
+    }, // EXTI0
+    IrqVector {
+        handler: Default_Handler,
+    }, // EXTI1
+    IrqVector {
+        handler: Default_Handler,
+    }, // EXTI2
+    IrqVector {
+        handler: Default_Handler,
+    }, // EXTI3
+    IrqVector {
+        handler: Default_Handler,
+    }, // EXTI4
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA1_Stream0
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA1_Stream1
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA1_Stream2
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA1_Stream3
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA1_Stream4
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA1_Stream5
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA1_Stream6
+    IrqVector {
+        handler: Default_Handler,
+    }, // ADC
+    IrqVector {
+        handler: Default_Handler,
+    }, // CAN1_TX
+    IrqVector {
+        handler: Default_Handler,
+    }, // CAN1_RX0
+    IrqVector {
+        handler: Default_Handler,
+    }, // CAN1_RX1
+    IrqVector {
+        handler: Default_Handler,
+    }, // CAN1_SCE
+    IrqVector {
+        handler: Default_Handler,
+    }, // EXTI9_5
+    IrqVector {
+        handler: Default_Handler1c,
+    }, // TIM1_BRK_TIM9
+    IrqVector {
+        handler: TIM1_UP_TIM10_IRQHandler,
+    }, // TIM1_UP_TIM10
+    IrqVector {
+        handler: Default_Handler2,
+    }, // TIM1_TRG_COM_TIM11
+    IrqVector {
+        handler: Default_Handler3,
+    }, // TIM1_CC
+    IrqVector {
+        handler: TIM2_IRQHandler,
+    }, // TIM2
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM3
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM4
+    IrqVector {
+        handler: Default_Handler,
+    }, // I2C1_EV
+    IrqVector {
+        handler: Default_Handler,
+    }, // I2C1_ER
+    IrqVector {
+        handler: Default_Handler,
+    }, // I2C2_EV
+    IrqVector {
+        handler: Default_Handler,
+    }, // I2C2_ER
+    IrqVector {
+        handler: Default_Handler,
+    }, // SPI1
+    IrqVector {
+        handler: Default_Handler,
+    }, // SPI2
+    IrqVector {
+        handler: Default_Handler,
+    }, // USART1
+    IrqVector {
+        handler: Default_Handler,
+    }, // USART2
+    IrqVector {
+        handler: Default_Handler,
+    }, // USART3
+    IrqVector {
+        handler: Default_Handler,
+    }, // EXTI15_10
+    IrqVector {
+        handler: Default_Handler,
+    }, // RTC_Alarm
+    IrqVector {
+        handler: Default_Handler,
+    }, // OTG_FS_WKUP
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM8_BRK_TIM12
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM8_UP_TIM13
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM8_TRG_COM_TIM14
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM8_CC
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA1_Stream7
+    IrqVector {
+        handler: Default_Handler,
+    }, // FSMC
+    IrqVector {
+        handler: Default_Handler,
+    }, // SDIO
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM5
+    IrqVector {
+        handler: Default_Handler,
+    }, // SPI3
+    IrqVector {
+        handler: Default_Handler,
+    }, // UART4
+    IrqVector {
+        handler: Default_Handler,
+    }, // UART5
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM6_DAC
+    IrqVector {
+        handler: Default_Handler,
+    }, // TIM7
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA2_Stream0
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA2_Stream1
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA2_Stream2
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA2_Stream3
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA2_Stream4
+    IrqVector {
+        handler: Default_Handler,
+    }, // ETH
+    IrqVector {
+        handler: Default_Handler,
+    }, // ETH_WKUP
+    IrqVector {
+        handler: Default_Handler,
+    }, // CAN2_TX
+    IrqVector {
+        handler: Default_Handler,
+    }, // CAN2_RX0
+    IrqVector {
+        handler: Default_Handler,
+    }, // CAN2_RX1
+    IrqVector {
+        handler: Default_Handler,
+    }, // CAN2_SCE
+    IrqVector {
+        handler: Default_Handler,
+    }, // OTG_FS
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA2_Stream5
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA2_Stream6
+    IrqVector {
+        handler: Default_Handler,
+    }, // DMA2_Stream7
+    IrqVector {
+        handler: Default_Handler,
+    }, // USART6
+    IrqVector {
+        handler: Default_Handler,
+    }, // I2C3_EV
+    IrqVector {
+        handler: Default_Handler,
+    }, // I2C3_ER
+    IrqVector {
+        handler: Default_Handler,
+    }, // OTG_HS_EP1_OUT
+    IrqVector {
+        handler: Default_Handler,
+    }, // OTG_HS_EP1_IN
+    IrqVector {
+        handler: Default_Handler,
+    }, // OTG_HS_WKUP
+    IrqVector {
+        handler: Default_Handler,
+    }, // OTG_HS
+    IrqVector {
+        handler: Default_Handler,
+    }, // DCMI
+    IrqVector {
+        handler: Default_Handler,
+    }, // CRYP
+    IrqVector {
+        handler: Default_Handler,
+    }, // HASH_RNG
+    IrqVector {
+        handler: Default_Handler,
+    }, // FPU
+];
