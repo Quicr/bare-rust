@@ -42,9 +42,9 @@ README in that directory for more details.
 Prerequisite: [probe-rs]
 
 ```
-# To run in a terminal window
-> cd ui-laptop
-> cargo run
+# To run the Tauri app
+> cd ui-tauri
+> cargo tauri dev
 
 # To run on an actual UI chip, via ST-LINK
 > cd ui-stm32
