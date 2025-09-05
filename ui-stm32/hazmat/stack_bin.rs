@@ -1,5 +1,5 @@
 //! **WARNING:** Running this binary on an EV13 device destroyed the device.  (Including the parts
-//! that are now commented out.  The UI chip became non-responsive and could not be reprogrammed.
+//! that are now commented out.)  The UI chip became non-responsive and could not be reprogrammed.
 //! It is included in the repo only for archival purposes.
 
 #![no_std]
