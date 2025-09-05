@@ -16,7 +16,7 @@ chip. It currently contains three primary crates:
       EV12 hardware platform.
     * An entry point function that instantiates the app and the board
       abstraction, and routes events from ISRs to the app.
-- `ui-laptop`: Code to instantiate the app in a terminal window
+- `ui-tauri`: Code to instantiate the app in a Tauri webview
 
 ## CMOX
 

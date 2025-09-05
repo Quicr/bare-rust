@@ -1,9 +1,0 @@
-[package]
-name = "ui-laptop"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-cursive = "0.21.1"
-termion = "4.0.5"
-ui-app = { path = "../ui-app" }
