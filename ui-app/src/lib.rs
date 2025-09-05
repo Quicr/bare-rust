@@ -58,13 +58,8 @@ pub trait Led {
     }
 }
 
-pub trait Write {
-    fn write(&mut self, buf: &[u8]) -> usize;
-}
-
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
-    fn mgmt_tx(&mut self) -> &mut impl Write;
 }
 
 #[derive(Debug)]
