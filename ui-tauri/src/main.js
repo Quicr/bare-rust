@@ -51,9 +51,19 @@ async function handle_screen(e) {
   ctx.putImageData(imageData, left, top);
 }
 
+async function handle_led(e) {
+  console.log("handle_led", e);
+
+  let {name, r, g, b} = e.payload;
+
+  const led = document.getElementById(name);
+  led.style.background = `rgb(${r}, ${g}, ${b})`;
+}
+
 async function handle_events() {
   const ptt_state = listen('PttState', handle_ptt);
   const screen = listen('Screen', handle_screen);
+  const led = listen('LED', handle_led);
   return Promise.all([ptt_state, screen])
 }
 
@@ -88,11 +98,33 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Capture keyboard events
   document.addEventListener("keydown", (e) => {
+    console.log("code:", e.code);
+
+    if (e.code == "BracketLeft") {
+      ptt_button_press("mousedown");
+      return;
+    } 
+
+    if (e.code == "BracketRight") {
+      ai_button_press("mousedown");
+      return;
+    }
+
     document.querySelector(asClass(e.code)).classList.add("active");
     invoke("keydown", { code: e.code });
   });
 
   document.addEventListener("keyup", (e) => {
+    if (e.code == "BracketLeft") {
+      ptt_button_press("mouseup");
+      return;
+    } 
+
+    if (e.code == "BracketRight") {
+      ai_button_press("mouseup");
+      return;
+    }
+
     document.querySelector(asClass(e.code)).classList.remove("active");
     invoke("keyup", { code: e.code });
   });

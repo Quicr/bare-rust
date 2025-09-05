@@ -67,6 +67,7 @@ pub trait Outputs {
     fn mgmt_tx(&mut self) -> &mut impl Write;
 }
 
+#[derive(Debug)]
 pub struct App {
     ptt_down: bool,
     ai_down: bool,
