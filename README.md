@@ -16,7 +16,7 @@ chip. It currently contains three primary crates:
       EV12 hardware platform.
     * An entry point function that instantiates the app and the board
       abstraction, and routes events from ISRs to the app.
-- `ui-laptop`: Code to instantiate the app in a terminal window
+- `ui-tauri`: Code to instantiate the app in a Tauri webview
 
 ## CMOX
 
@@ -40,13 +40,20 @@ README in that directory for more details.
 ## Quickstart
 
 ```
+# Prerequisites for Tauri
+> cargo install tauri-cli
+
+# To run the Tauri app
+> cd ui-tauri
+> cargo tauri dev
+```
+
+... or ...
+
+```
 # Prerequisites for on-device build/test
 > brew install probe-rs
 > rustup target add thumbv7em-none-eabihf
-
-# To run in a terminal window
-> cd ui-laptop
-> cargo run
 
 # To run on an actual UI chip, via ST-LINK
 > cd ui-stm32
