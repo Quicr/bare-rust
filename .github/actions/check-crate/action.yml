@@ -1,0 +1,48 @@
+name: Check crate
+
+inputs:
+  path:
+    description: The path to the crate being checked
+    required: true
+  run-tests:
+    description: Whether `cargo test` should be run
+    required: false
+    default: true
+  args:
+    description: Which arguments should be provided to cargo
+    required: false
+    default:
+
+runs:
+  using: "composite"
+  steps:
+    - name: Verify that the crate builds
+      working-directory: ${{ inputs.path }}
+      shell: bash
+      run: |
+        cargo check ${{ inputs.args }}
+
+    - name: Verify that tests and examples build
+      working-directory: ${{ inputs.path }}
+      shell: bash
+      run: |
+        cargo test ${{ inputs.args }} --no-run
+
+    - name: Verify that tests pass
+      if: ${{ inputs.run-tests }}
+      working-directory: ${{ inputs.path }}
+      shell: bash
+      run: |
+        cargo test ${{ inputs.args }}
+
+    - name: Verify that clippy passes
+      working-directory: ${{ inputs.path }}
+      shell: bash
+      run: |
+        cargo clippy ${{ inputs.args }}
+
+    - name: Verify that code is formatted
+      working-directory: ${{ inputs.path }}
+      shell: bash
+      run: |
+        cargo fmt --check

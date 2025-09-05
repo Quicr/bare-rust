@@ -5,7 +5,7 @@ use core::ops::DerefMut;
 use once_cell::sync::OnceCell;
 use std::sync::Mutex;
 use tauri::Emitter;
-use ui_app::{App, Event, Led, Outputs, Write};
+use ui_app::{App, Event, Led, Outputs};
 
 mod hactar_vaporwave;
 
@@ -24,26 +24,13 @@ mod cmd {
 const UI_LED_NAME: &str = "led-ui";
 
 #[derive(Debug)]
-struct NoopWrite;
-
-impl Write for NoopWrite {
-    fn write(&mut self, _buf: &[u8]) -> usize {
-        0
-    }
-}
-
-#[derive(Debug)]
 struct Board {
     app: tauri::AppHandle,
-    mgmt_tx: NoopWrite,
 }
 
 impl Board {
     fn new(app: tauri::AppHandle) -> Self {
-        Self {
-            app,
-            mgmt_tx: NoopWrite,
-        }
+        Self { app }
     }
 }
 
@@ -60,13 +47,9 @@ impl Led for Board {
     }
 }
 
-impl ui_app::Outputs for Board {
+impl Outputs for Board {
     fn status_led(&mut self) -> &mut impl Led {
         self
-    }
-
-    fn mgmt_tx(&mut self) -> &mut impl Write {
-        &mut self.mgmt_tx
     }
 }
 
@@ -122,7 +105,7 @@ static UI_APP: OnceCell<Mutex<App>> = OnceCell::new();
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let mut board = Board::new(app.handle().clone());
+            let board = Board::new(app.handle().clone());
             BOARD.set(Mutex::new(board)).unwrap();
             Ok(())
         })

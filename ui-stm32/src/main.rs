@@ -3,7 +3,7 @@
 
 mod board;
 
-use board::{Board, Button, SerialRx};
+use board::{Board, Button};
 use ui_app::{App, Event};
 
 use defmt::*;
@@ -28,11 +28,6 @@ async fn monitor_button(mut button: Button, down: Event, up: Event, events: Even
     }
 }
 
-#[embassy_executor::task]
-async fn monitor_rx(_rx: SerialRx, _event_template: Event, _events: EventSender) {
-    // TODO(RLB) Monitor the serial channel for input; generate events
-}
-
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut board = Board::new();
@@ -50,12 +45,6 @@ async fn main(spawner: Spawner) {
         board.ptt_button.take().unwrap(),
         Event::PttDown,
         Event::PttUp,
-        EVENT_QUEUE.sender()
-    )));
-
-    unwrap!(spawner.spawn(monitor_rx(
-        board.mgmt_rx.take().unwrap(),
-        Event::PttDown, // TODO(RLB) Actual event template
         EVENT_QUEUE.sender()
     )));
 
