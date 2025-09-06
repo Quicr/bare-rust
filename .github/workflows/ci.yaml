@@ -24,3 +24,23 @@ jobs:
       with:
         path: ./ui-app
 
+    - name: Verify the ui-stm32 crate (ev12)
+      uses: ./.github/actions/check-crate
+      with:
+        path: ./ui-stm32
+        run-tests: false
+        args: --no-default-features -F ev12
+
+    - name: Verify the ui-stm32 crate (ev13)
+      uses: ./.github/actions/check-crate
+      with:
+        path: ./ui-stm32
+        run-tests: false
+        args: --no-default-features -F ev12
+
+    - name: Verify the ui-tauri crate
+      uses: ./.github/actions/check-crate
+      with:
+        path: ./ui-tauri/src-tauri
+        run-tests: false
+

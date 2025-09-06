@@ -22,9 +22,9 @@ static EVENT_QUEUE: EventChannel = Channel::new();
 async fn monitor_button(mut button: Button, down: Event, up: Event, events: EventSender) {
     loop {
         button.wait_for_rising_edge().await;
-        events.send(down.clone()).await;
+        events.send(down).await;
         button.wait_for_falling_edge().await;
-        events.send(up.clone()).await;
+        events.send(up).await;
     }
 }
 

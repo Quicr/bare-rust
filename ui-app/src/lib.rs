@@ -125,6 +125,7 @@ pub struct App {
 }
 
 impl App {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             ptt_down: false,
