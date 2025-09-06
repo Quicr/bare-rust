@@ -115,6 +115,7 @@ pub trait Led {
 
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
+    fn log(&mut self, message: &str);
 }
 
 #[derive(Debug)]
@@ -147,8 +148,11 @@ impl App {
             Event::AiUp => {
                 self.ai_down = false;
             }
-            _ => {
-                todo!()
+            Event::KeyDown(_key, _value) => {
+                out.log("key down");
+            }
+            Event::KeyUp(_key) => {
+                out.log("key up");
             }
         }
 

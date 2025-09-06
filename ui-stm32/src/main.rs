@@ -3,7 +3,7 @@
 
 mod board;
 
-use board::{Board, Button};
+use board::{Board, Button, Keyboard};
 use ui_app::{App, Event};
 
 use defmt::*;
@@ -28,6 +28,15 @@ async fn monitor_button(mut button: Button, down: Event, up: Event, events: Even
     }
 }
 
+#[embassy_executor::task]
+async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
+    loop {
+        for event in keyboard.scan() {
+            events.send(event).await;
+        }
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut board = Board::new();
@@ -45,6 +54,12 @@ async fn main(spawner: Spawner) {
         board.ptt_button.take().unwrap(),
         Event::PttDown,
         Event::PttUp,
+        EVENT_QUEUE.sender()
+    )));
+
+    // Capture keyboard events
+    unwrap!(spawner.spawn(monitor_keyboard(
+        board.keyboard.take().unwrap(),
         EVENT_QUEUE.sender()
     )));
 
