@@ -5,7 +5,7 @@ use core::ops::DerefMut;
 use once_cell::sync::OnceCell;
 use std::sync::Mutex;
 use tauri::Emitter;
-use ui_app::{App, Event, Led, Outputs};
+use ui_app::{App, Event, Key, KeyValue, Led, Outputs};
 
 mod hactar_vaporwave;
 
@@ -51,15 +51,18 @@ impl Outputs for Board {
     fn status_led(&mut self) -> &mut impl Led {
         self
     }
+
+    fn log(&mut self, message: &str) {
+        println!("LOG: {}", message);
+    }
 }
 
 #[tauri::command]
 fn start() {
     println!("Start");
     let mut board = BOARD.get().unwrap().lock().unwrap();
-
-    let ui_app = App::start(board.deref_mut());
-    UI_APP.set(Mutex::new(ui_app)).unwrap();
+    let mut ui_app = UI_APP.get().unwrap().lock().unwrap();
+    ui_app.start(board.deref_mut());
 }
 
 #[tauri::command]
@@ -86,16 +89,87 @@ fn ai_button_press(name: &str) {
     }
 }
 
-#[tauri::command]
-fn keydown(code: &str) {
-    // TODO actually handle
-    println!("keydown: {}", code);
+fn key_from_code(code: usize) -> Key {
+    match code {
+        65 => Key::A,
+        66 => Key::B,
+        67 => Key::C,
+        68 => Key::D,
+        69 => Key::E,
+        70 => Key::F,
+        71 => Key::G,
+        72 => Key::H,
+        73 => Key::I,
+        74 => Key::J,
+        75 => Key::K,
+        76 => Key::L,
+        77 => Key::M,
+        78 => Key::N,
+        79 => Key::O,
+        80 => Key::P,
+        81 => Key::Q,
+        82 => Key::R,
+        83 => Key::S,
+        84 => Key::T,
+        85 => Key::U,
+        86 => Key::V,
+        87 => Key::W,
+        88 => Key::X,
+        89 => Key::Y,
+        90 => Key::Z,
+        8 => Key::Backspace,
+        18 => Key::Alt,
+        52 => Key::Dollar,
+        13 => Key::Enter,
+        16 => Key::LeftShift,
+        91 => Key::Mic,
+        32 => Key::Space,
+        19 => Key::Sym,
+        17 => Key::RightShift,
+        _ => unreachable!(),
+    }
+}
+
+fn key_value_from_string(value: &str) -> KeyValue {
+    if value.len() == 1 {
+        return KeyValue::Char(value.chars().next().unwrap());
+    }
+
+    match value {
+        "Backspace" => KeyValue::Backspace,
+        "AltLeft" => KeyValue::Alt,
+        "🔊" => KeyValue::Speaker,
+        "Enter" => KeyValue::Enter,
+        "ShiftLeft" => KeyValue::LeftShift,
+        "🎤︎" => KeyValue::Mic,
+        "Space" => KeyValue::Space,
+        "AltRight" => KeyValue::Sym,
+        "ShiftRight" => KeyValue::RightShift,
+        _ => unreachable!(),
+    }
 }
 
 #[tauri::command]
-fn keyup(code: &str) {
-    // TODO actually handle
-    println!("keyup: {}", code);
+fn keydown(code: usize, value: &str) {
+    let mut board = BOARD.get().unwrap().lock().unwrap();
+    let mut ui_app = UI_APP.get().unwrap().lock().unwrap();
+
+    let key = key_from_code(code);
+    let value = key_value_from_string(value);
+
+    println!("keydown: {:?} {:?} {:?}", code, key, value);
+    ui_app.handle(Event::KeyDown(key, value), board.deref_mut());
+}
+
+#[tauri::command]
+fn keyup(code: usize) {
+    let mut board = BOARD.get().unwrap().lock().unwrap();
+    let mut ui_app = UI_APP.get().unwrap().lock().unwrap();
+
+    let key = key_from_code(code);
+
+    println!("keyup: {:?}", key);
+    ui_app.handle(Event::KeyUp(key), board.deref_mut());
 }
 
 static BOARD: OnceCell<Mutex<Board>> = OnceCell::new();
@@ -107,6 +181,10 @@ pub fn run() {
         .setup(|app| {
             let board = Board::new(app.handle().clone());
             BOARD.set(Mutex::new(board)).unwrap();
+
+            let ui_app = App::new();
+            UI_APP.set(Mutex::new(ui_app)).unwrap();
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

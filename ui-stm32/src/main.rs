@@ -40,7 +40,7 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut board = Board::new();
-    let mut app = App::start(&mut board);
+    let mut app = App::new();
 
     // Capture button events
     unwrap!(spawner.spawn(monitor_button(
@@ -62,6 +62,8 @@ async fn main(spawner: Spawner) {
         board.keyboard.take().unwrap(),
         EVENT_QUEUE.sender()
     )));
+
+    app.start(&mut board);
 
     // Main event loop
     loop {

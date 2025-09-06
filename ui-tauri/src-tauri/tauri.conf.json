@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "hactar-ptt",
+  "productName": "Hactar",
   "version": "0.1.0",
   "identifier": "com.cisco.hactar-ptt",
   "build": {
@@ -10,8 +10,8 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "hactar-ptt",
-        "width": 800,
+        "title": "Hactar",
+        "width": 400,
         "height": 600
       }
     ],

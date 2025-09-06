@@ -6,6 +6,44 @@ let pttLogEl;
 let aiButtonEl;
 let aiLogEl;
 
+const keyMap = {
+          "KeyQ": ["Q", "#"],
+          "KeyW": ["W", "1"],
+          "KeyE": ["E", "2"],
+          "KeyR": ["R", "3"],
+          "KeyT": ["T", "("],
+          "KeyY": ["Y", ")"],
+          "KeyU": ["U", "_"],
+          "KeyI": ["I", "-"],
+          "KeyO": ["O", "+"],
+          "KeyP": ["P", "@"],
+          "KeyA": ["A", "*"],
+          "KeyS": ["S", "4"],
+          "KeyD": ["D", "5"],
+          "KeyF": ["F", "6"],
+          "KeyG": ["G", "/"],
+          "KeyH": ["H", ":"],
+          "KeyJ": ["J", ";"],
+          "KeyK": ["K", "'"],
+          "KeyL": ["L", '"'],
+          "KeyZ": ["Z", "7"],
+          "KeyX": ["X", "8"],
+          "KeyC": ["C", "9"],
+          "KeyV": ["V", "?"],
+          "KeyB": ["B", "!"],
+          "KeyN": ["N", ","],
+          "KeyM": ["M", "."],
+          "Digit4": ["$", "🔊"],
+          "MetaLeft": ["🎤︎", "0"],
+};
+
+function remap(sym) {
+  for (let className in keyMap) {
+    let [normalVal, symVal] = keyMap[className];
+    document.querySelector("." + className).innerText = (sym)? symVal : normalVal;
+  }
+}
+
 async function start() {
   await invoke("start");
 }
@@ -96,6 +134,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     return "." + code;
   }
 
+  let sym = false;
+  let l_shift = false;
+  let r_shift = false;
+
   // Capture keyboard events
   document.addEventListener("keydown", (e) => {
     console.log("code:", e.code);
@@ -110,8 +152,46 @@ window.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
+    let code = e.keyCode;
+    if (e.code == "AltRight") {
+      sym = true;
+
+      // Both alt keys have the same code othewise, and this doesn't collide
+      code += 1; 
+    }
+
+    if (e.code == "ShiftLeft") {
+      l_shift = true;
+    }
+
+    if (e.code == "ShiftRight") {
+      r_shift = true;
+
+      // Both shift keys have the same code othewise, and this doesn't collide
+      code += 1; 
+    }
+
+    if (sym) {
+      remap(true);
+    }
+
+    let value = e.code;
+    if (value in keyMap) {
+      if (sym) {
+        value = keyMap[value][1];
+      } else {
+        value = keyMap[value][0];
+      }
+
+      if (l_shift || r_shift) {
+        value = value.toUpperCase();
+      } else {
+        value = value.toLowerCase();
+      }
+    }
+
     document.querySelector(asClass(e.code)).classList.add("active");
-    invoke("keydown", { code: e.code });
+    invoke("keydown", { code, value });
   });
 
   document.addEventListener("keyup", (e) => {
@@ -124,13 +204,37 @@ window.addEventListener("DOMContentLoaded", async () => {
       ai_button_press("mouseup");
       return;
     }
+    
+    let code = e.keyCode;
+
+    if (e.code == "AltRight") {
+      sym = false;
+      remap(false);
+
+      // Both alt keys have the same code othewise, and this doesn't collide
+      code += 1; 
+    }
+
+    if (e.code == "ShiftLeft") {
+      l_shift = false;
+    }
+
+    if (e.code == "ShiftRight") {
+      r_shift = false;
+
+      // Both shift keys have the same code othewise, and this doesn't collide
+      code += 1; 
+    }
 
     document.querySelector(asClass(e.code)).classList.remove("active");
-    invoke("keyup", { code: e.code });
+    invoke("keyup", { code });
   });
 
   // Await events
   await handle_events();
+
+  // Map the keyboard to normal keycaps
+  remap(false);
 
   // Notify the backend that the UI has started
   start();

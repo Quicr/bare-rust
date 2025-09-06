@@ -125,13 +125,15 @@ pub struct App {
 }
 
 impl App {
-    pub fn start(out: &mut impl Outputs) -> Self {
-        out.status_led().set_color(Color::Black);
-
+    pub fn new() -> Self {
         Self {
             ptt_down: false,
             ai_down: false,
         }
+    }
+
+    pub fn start(&mut self, out: &mut impl Outputs) {
+        out.status_led().set_color(Color::Black);
     }
 
     pub fn handle(&mut self, event: Event, out: &mut impl Outputs) {
