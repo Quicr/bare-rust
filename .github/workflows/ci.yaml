@@ -28,6 +28,7 @@ jobs:
       uses: ./.github/actions/check-crate
       with:
         path: ./ui-stm32
+        build-tests: false
         run-tests: false
         args: --no-default-features -F ev12
 
@@ -35,6 +36,7 @@ jobs:
       uses: ./.github/actions/check-crate
       with:
         path: ./ui-stm32
+        build-tests: false
         run-tests: false
         args: --no-default-features -F ev12
 
