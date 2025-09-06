@@ -17,7 +17,7 @@ jobs:
       with:
         toolchain: stable
         components: clippy, rustfmt
-        target: thumbv7em-none-eabihf
+        target: thumbv7em-none-eabi
 
     - name: Verify the ui-app crate
       uses: ./.github/actions/check-crate
