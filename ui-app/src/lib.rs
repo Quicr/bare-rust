@@ -1,11 +1,66 @@
 #![no_std]
 
-#[derive(Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Key {
+    Q,
+    W,
+    E,
+    R,
+    T,
+    Y,
+    U,
+    I,
+    O,
+    P,
+    A,
+    S,
+    D,
+    F,
+    G,
+    H,
+    J,
+    K,
+    L,
+    Z,
+    X,
+    C,
+    V,
+    B,
+    N,
+    M,
+    Backspace,
+    Alt,
+    Dollar,
+    Enter,
+    LeftShift,
+    Mic,
+    Space,
+    Sym,
+    RightShift,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum KeyValue {
+    Char(char),
+    Backspace,
+    Alt,
+    Speaker,
+    Enter,
+    LeftShift,
+    Mic,
+    Space,
+    Sym,
+    RightShift,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Event {
     PttDown,
     PttUp,
     AiDown,
     AiUp,
+    KeyDown(Key, KeyValue),
+    KeyUp(Key),
 }
 
 #[allow(dead_code)]
@@ -60,6 +115,7 @@ pub trait Led {
 
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
+    fn log(&mut self, message: &str);
 }
 
 #[derive(Debug)]
@@ -69,13 +125,16 @@ pub struct App {
 }
 
 impl App {
-    pub fn start(out: &mut impl Outputs) -> Self {
-        out.status_led().set_color(Color::Black);
-
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
         Self {
             ptt_down: false,
             ai_down: false,
         }
+    }
+
+    pub fn start(&mut self, out: &mut impl Outputs) {
+        out.status_led().set_color(Color::Black);
     }
 
     pub fn handle(&mut self, event: Event, out: &mut impl Outputs) {
@@ -91,6 +150,12 @@ impl App {
             }
             Event::AiUp => {
                 self.ai_down = false;
+            }
+            Event::KeyDown(_key, _value) => {
+                out.log("key down");
+            }
+            Event::KeyUp(_key) => {
+                out.log("key up");
             }
         }
 

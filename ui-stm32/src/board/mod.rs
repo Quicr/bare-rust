@@ -24,6 +24,9 @@ pub use ev13::*;
 use embassy_stm32::{exti::ExtiInput, gpio::Output};
 use ui_app::Led;
 
+mod keyboard;
+pub use keyboard::Keyboard;
+
 struct StatusLed {
     r: Output<'static>,
     g: Output<'static>,

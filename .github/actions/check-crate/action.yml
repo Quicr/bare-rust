@@ -4,6 +4,10 @@ inputs:
   path:
     description: The path to the crate being checked
     required: true
+  build-tests:
+    description: Whether `cargo test --no-run` should be run
+    required: false
+    default: true
   run-tests:
     description: Whether `cargo test` should be run
     required: false
@@ -23,13 +27,14 @@ runs:
         cargo check ${{ inputs.args }}
 
     - name: Verify that tests and examples build
+      if: ${{ inputs.build-tests }}
       working-directory: ${{ inputs.path }}
       shell: bash
       run: |
         cargo test ${{ inputs.args }} --no-run
 
     - name: Verify that tests pass
-      if: ${{ inputs.run-tests }}
+      if: ${{ inputs.build-tests  && inputs.run-tests }}
       working-directory: ${{ inputs.path }}
       shell: bash
       run: |

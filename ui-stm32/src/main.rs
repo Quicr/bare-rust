@@ -3,7 +3,7 @@
 
 mod board;
 
-use board::{Board, Button};
+use board::{Board, Button, Keyboard};
 use ui_app::{App, Event};
 
 use defmt::*;
@@ -22,16 +22,25 @@ static EVENT_QUEUE: EventChannel = Channel::new();
 async fn monitor_button(mut button: Button, down: Event, up: Event, events: EventSender) {
     loop {
         button.wait_for_rising_edge().await;
-        events.send(down.clone()).await;
+        events.send(down).await;
         button.wait_for_falling_edge().await;
-        events.send(up.clone()).await;
+        events.send(up).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
+    loop {
+        for event in keyboard.scan() {
+            events.send(event).await;
+        }
     }
 }
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut board = Board::new();
-    let mut app = App::start(&mut board);
+    let mut app = App::new();
 
     // Capture button events
     unwrap!(spawner.spawn(monitor_button(
@@ -47,6 +56,14 @@ async fn main(spawner: Spawner) {
         Event::PttUp,
         EVENT_QUEUE.sender()
     )));
+
+    // Capture keyboard events
+    unwrap!(spawner.spawn(monitor_keyboard(
+        board.keyboard.take().unwrap(),
+        EVENT_QUEUE.sender()
+    )));
+
+    app.start(&mut board);
 
     // Main event loop
     loop {
