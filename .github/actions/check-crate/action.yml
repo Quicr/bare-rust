@@ -4,7 +4,7 @@ inputs:
   path:
     description: The path to the crate being checked
     required: true
-  run-tests:
+  build-tests:
     description: Whether `cargo test --no-run` should be run
     required: false
     default: true
