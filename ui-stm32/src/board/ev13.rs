@@ -1,8 +1,11 @@
 use super::{Button, Keyboard, Screen, StatusLed};
 use embassy_stm32::{
+    bind_interrupts,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
+    peripherals,
     spi::Spi,
+    usart,
 };
 use ui_app::{Led, Outputs};
 
@@ -13,6 +16,10 @@ pub struct Board {
     pub ai_button: Option<Button>,
     pub keyboard: Option<Keyboard>,
 }
+
+bind_interrupts!(struct Irqs {
+    USART2 => usart::InterruptHandler<peripherals::USART2>;
+});
 
 impl Board {
     pub async fn new() -> Self {
@@ -64,8 +71,17 @@ impl Board {
         let spi1 = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
         let screen = Screen::new(chip_select, data_command, reset, backlight, spi1).await;
 
-        // TODO(RLB): NET UART
-        // TODO(RLB): MGMT UART
+        // NET UART
+        let net_uart = {
+            use embassy_stm32::usart::*;
+            let mut config = Config::default();
+            config.baudrate = 460800;
+            config.data_bits = DataBits::DataBits8;
+            config.stop_bits = StopBits::STOP2;
+            config.parity = Parity::ParityNone;
+
+            Uart::new(p.USART2, p.PA3, p.PA2, Irqs, p.DMA1_CH6, p.DMA1_CH5, config).unwrap()
+        };
 
         Self {
             status_led,
