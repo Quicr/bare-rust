@@ -27,6 +27,8 @@ use ui_app::Led;
 mod keyboard;
 pub use keyboard::Keyboard;
 
+mod screen;
+
 struct StatusLed {
     r: Output<'static>,
     g: Output<'static>,
