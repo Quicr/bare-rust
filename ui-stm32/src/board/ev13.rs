@@ -16,6 +16,36 @@ pub struct Board {
 
 impl Board {
     pub fn new() -> Self {
+        let config = {
+            use embassy_stm32::{rcc::*, time::Hertz};
+
+            let mut config = embassy_stm32::Config::default();
+
+            config.rcc.hse = Some(Hse {
+                freq: Hertz(6_000_000),
+                mode: HseMode::Bypass,
+            });
+            config.rcc.sys = Sysclk::PLL1_P;
+            config.rcc.pll_src = PllSource::HSE;
+            config.rcc.pll = Some(Pll {
+                prediv: PllPreDiv::DIV3,
+                mul: PllMul::MUL168,
+                divp: Some(PllPDiv::DIV2),
+                divq: Some(PllQDiv::DIV7),
+                divr: None,
+            });
+
+            config.rcc.ahb_pre = AHBPrescaler::DIV1;
+            config.rcc.apb1_pre = APBPrescaler::DIV4;
+            config.rcc.apb2_pre = APBPrescaler::DIV2;
+            config.rcc.ls = LsConfig {
+                rtc: RtcClockSource::LSI,
+                lsi: true,
+                lse: None,
+            };
+
+            config
+        };
         let p = embassy_stm32::init(Default::default());
 
         // Status LED
