@@ -1,6 +1,8 @@
 #![no_std]
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+use defmt::Format;
+
+#[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum Key {
     Q,
     W,
@@ -39,7 +41,7 @@ pub enum Key {
     RightShift,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum KeyValue {
     Char(char),
     Backspace,
@@ -53,7 +55,7 @@ pub enum KeyValue {
     RightShift,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum Event {
     PttDown,
     PttUp,
