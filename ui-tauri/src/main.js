@@ -70,11 +70,13 @@ async function handle_ptt(e) {
 }
 
 async function handle_screen(e) {
-  let { left, top, width, height, data } = e.payload;
+  let { left, right, top, bottom, data } = e.payload;
 
   const screen = document.getElementById("screen");
   const ctx = screen.getContext("2d");
 
+  const width = right - left;
+  const height = bottom - top;
   const imageData = ctx.createImageData(width, height);
 
   if (data.length != imageData.data.length) {
@@ -102,7 +104,7 @@ async function handle_events() {
   const ptt_state = listen('PttState', handle_ptt);
   const screen = listen('Screen', handle_screen);
   const led = listen('LED', handle_led);
-  return Promise.all([ptt_state, screen])
+  return Promise.all([ptt_state, screen, led])
 }
 
 window.addEventListener("DOMContentLoaded", async () => {

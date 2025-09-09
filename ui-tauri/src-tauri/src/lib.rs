@@ -5,7 +5,7 @@ use core::ops::DerefMut;
 use once_cell::sync::OnceCell;
 use std::sync::Mutex;
 use tauri::Emitter;
-use ui_app::{App, Event, Key, KeyValue, Led, Outputs};
+use ui_app::{App, Event, Key, KeyValue, Led, Outputs, Screen};
 
 mod hactar_vaporwave;
 
@@ -18,6 +18,17 @@ mod cmd {
         pub r: usize,
         pub g: usize,
         pub b: usize,
+    }
+
+    #[derive(Clone, Serialize)]
+    pub struct Draw<'a> {
+        pub left: usize,
+        pub right: usize,
+        pub top: usize,
+        pub bottom: usize,
+
+        /// Data in <canvas> RGBA format
+        pub data: &'a [u8],
     }
 }
 
@@ -47,8 +58,66 @@ impl Led for Board {
     }
 }
 
+impl Screen for Board {
+    fn width(&self) -> usize {
+        320
+    }
+
+    fn height(&self) -> usize {
+        240
+    }
+
+    fn fill(&mut self, color: u16) {
+        let data = [color; 320 * 240];
+        self.draw(0, self.width(), 0, self.height(), &data);
+    }
+
+    fn draw(&mut self, left: usize, right: usize, top: usize, bottom: usize, data: &[u16]) {
+        println!(
+            "draw {} {} {} {} ({} x {} == {}? {})",
+            left,
+            right,
+            top,
+            bottom,
+            (right - left),
+            (bottom - top),
+            data.len(),
+            data.len() == (right - left) * (bottom - top)
+        );
+
+        // Unpack the rgb565 values to RGBA tuples
+        let data: Vec<u8> = data
+            .iter()
+            .map(|rgb565| {
+                [
+                    (((rgb565 & 0b11111_000000_00000) >> 11) << 3) as u8, // R
+                    (((rgb565 & 0b00000_111111_00000) >> 5) << 2) as u8,  // G
+                    (((rgb565 & 0b00000_000000_11111) >> 0) << 3) as u8,  // B
+                    (0xff as u8),                                         // A
+                ]
+            })
+            .flatten()
+            .collect();
+
+        // Send the draw command to the UI
+        let cmd = cmd::Draw {
+            left,
+            right,
+            top,
+            bottom,
+            data: data.as_slice(),
+        };
+
+        self.app.emit("Screen", cmd).unwrap();
+    }
+}
+
 impl Outputs for Board {
     fn status_led(&mut self) -> &mut impl Led {
+        self
+    }
+
+    fn screen(&mut self) -> &mut impl Screen {
         self
     }
 
