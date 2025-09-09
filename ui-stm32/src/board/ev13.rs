@@ -1,4 +1,4 @@
-use super::{screen::Screen, Button, Keyboard, StatusLed};
+use super::{Button, Keyboard, Screen, StatusLed};
 use embassy_stm32::{
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
@@ -80,6 +80,10 @@ impl Board {
 impl Outputs for Board {
     fn status_led(&mut self) -> &mut impl Led {
         &mut self.status_led
+    }
+
+    fn screen(&mut self) -> &mut impl ui_app::Screen {
+        &mut self.screen
     }
 
     fn log(&mut self, message: &str) {

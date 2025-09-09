@@ -28,6 +28,7 @@ mod keyboard;
 pub use keyboard::Keyboard;
 
 mod screen;
+pub use screen::Screen;
 
 struct StatusLed {
     r: Output<'static>,

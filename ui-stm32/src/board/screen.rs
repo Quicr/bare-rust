@@ -1,5 +1,9 @@
 use core::convert::TryFrom;
-use embassy_stm32::{gpio::Output, mode::Blocking, spi::Spi};
+use embassy_stm32::{
+    gpio::Output,
+    mode::Blocking,
+    spi::{Spi, Word},
+};
 use embassy_time::Timer;
 use num_enum::IntoPrimitive;
 
@@ -11,7 +15,36 @@ pub struct Screen {
     spi: Spi<'static, Blocking>,
 }
 
+impl ui_app::Screen for Screen {
+    fn width(&self) -> usize {
+        Self::WIDTH
+    }
+
+    fn height(&self) -> usize {
+        Self::HEIGHT
+    }
+
+    fn fill(&mut self, color: u16) {
+        let row = [color; Self::WIDTH];
+
+        self.set_window(0, 0, Self::WIDTH, Self::HEIGHT);
+        self.send_command(Command::WriteMemory, &[]);
+        for i in 0..Self::HEIGHT {
+            self.spi.blocking_write(&row).unwrap();
+        }
+    }
+
+    fn draw(&mut self, left: usize, right: usize, top: usize, bottom: usize, data: &[u16]) {
+        self.set_window(left, right, top, bottom);
+        self.send_command(Command::WriteMemory, &[]);
+        self.send_data(data);
+    }
+}
+
 impl Screen {
+    const WIDTH: usize = 320;
+    const HEIGHT: usize = 240;
+
     pub fn new(
         chip_select: Output<'static>,
         data_command: Output<'static>,
@@ -49,7 +82,10 @@ impl Screen {
         Timer::after_millis(120).await;
 
         // Set portrait orientation
-        self.set_orientation(Orientation::Portrait);
+        self.send_command(
+            Command::MemoryAccessControl,
+            &[u8::from(Orientation::Portrait)],
+        );
 
         // Set the pixel format to rgb565
         self.send_command(Command::SetPixelFormat, &[0x55]);
@@ -65,19 +101,7 @@ impl Screen {
         self.set_backlight(true);
     }
 
-    pub fn clear_screen(&mut self, color: u16) {
-        const WIDTH: usize = 240;
-        const HEIGHT: usize = 320;
-
-        let row = [color; WIDTH];
-
-        self.set_window(0, 0, WIDTH, HEIGHT);
-        for i in 0..HEIGHT {
-            self.spi.blocking_write(&row).unwrap();
-        }
-    }
-
-    fn set_window(&mut self, x0: usize, y0: usize, x1: usize, y1: usize) {
+    fn set_window(&mut self, x0: usize, x1: usize, y0: usize, y1: usize) {
         let mut x_data = [0u8; 4];
         x_data[..2].copy_from_slice(&(x0 as u16).to_be_bytes());
         x_data[2..].copy_from_slice(&(x1 as u16).to_be_bytes());
@@ -97,14 +121,9 @@ impl Screen {
         self.send_data(data);
     }
 
-    fn send_data(&mut self, data: &[u8]) {
+    fn send_data<W: Word>(&mut self, data: &[W]) {
         self.data_command.set_high();
         self.spi.blocking_write(data).unwrap(); // TODO propagate error
-    }
-
-    fn set_orientation(&mut self, orientation: Orientation) {
-        // TODO set internal width/height
-        self.send_command(Command::MemoryAccessControl, &[u8::from(orientation)]);
     }
 
     pub fn set_backlight(&mut self, on: bool) {
@@ -125,7 +144,7 @@ enum Command {
     InvertOff = 0x20,
     InvertOn = 0x21,
     MemoryAccessControl = 0x36,
-    MemoryWrite = 0x2c,
+    WriteMemory = 0x2c,
     NormalModeFrameRate = 0xb1,
     SetPageAddress = 0x2b,
     SetPixelFormat = 0x3a,
@@ -134,7 +153,7 @@ enum Command {
     SleepModeOn = 0x10,
     SoftwareReset = 0x01,
     VerticalScrollAddr = 0x37,
-    VerticalScrollDefine = 0x33,
+    DefineVerticalScroll = 0x33,
 }
 
 #[derive(Copy, Clone, IntoPrimitive)]
