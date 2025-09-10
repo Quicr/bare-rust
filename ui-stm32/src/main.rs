@@ -4,7 +4,7 @@
 mod board;
 
 use board::{Board, Button, Keyboard};
-use ui_app::{App, Color, Event, Led, Outputs, Screen};
+use ui_app::{App, Event};
 
 use defmt::*;
 use embassy_executor::Spawner;
@@ -45,7 +45,7 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let mut board = Board::new();
+    let mut board = Board::new().await;
     let mut app = App::new();
 
     // Capture button events
@@ -69,30 +69,12 @@ async fn main(spawner: Spawner) {
         EVENT_QUEUE.sender()
     )));
 
-    debug!("screen init");
-    board.screen.init().await; // XXX
-
     debug!("app start");
     app.start(&mut board);
 
     // Main event loop
-    let mut backlight_on = false;
     loop {
-        embassy_time::Timer::after_millis(1000).await;
-        debug!("blink");
-
-        backlight_on = !backlight_on;
-        board.screen.set_backlight(backlight_on);
-
-        board.status_led().set_color(if backlight_on {
-            Color::Green
-        } else {
-            Color::Black
-        });
-
-        /*
         let event = EVENT_QUEUE.receive().await;
         app.handle(event, &mut board);
-        */
     }
 }

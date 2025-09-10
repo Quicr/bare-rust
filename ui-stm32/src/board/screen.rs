@@ -44,70 +44,68 @@ impl Screen {
     const WIDTH: usize = 240;
     const HEIGHT: usize = 320;
 
-    pub fn new(
+    // Initial command sequence borrowed from
+    //
+    // https://github.com/yuri91/ili9341-rs/blob/master/src/lib.rs#L139
+    pub async fn new(
         chip_select: Output<'static>,
         data_command: Output<'static>,
         reset: Output<'static>,
         backlight: Output<'static>,
         spi: Spi<'static, Blocking>,
     ) -> Self {
-        Self {
+        let mut screen = Self {
             chip_select,
             data_command,
             reset,
             backlight,
             spi,
-        }
-    }
+        };
 
-    // Initial command sequence borrowed from
-    //
-    // https://github.com/yuri91/ili9341-rs/blob/master/src/lib.rs#L139
-    //
-    // It might be better to put this in new(), as is done there.
-    pub async fn init(&mut self) {
         // Chip select pin is always held low
         defmt::debug!("chip_select");
-        self.chip_select.set_low();
+        screen.chip_select.set_low();
 
         // Do hardware reset by holding reset low for at least 10us, then wait 5ms for the reset to
         // occur before sending more commands.
         defmt::debug!("reset low");
-        self.reset.set_low();
+        screen.reset.set_low();
         defmt::debug!("after_millis");
         Timer::after_millis(200).await;
         defmt::debug!("reset high");
-        self.reset.set_high();
+        screen.reset.set_high();
         Timer::after_millis(200).await;
 
         // Do hardware reset, then wait 120ms for the reset to occur before sending more commands.
         defmt::debug!("software reset");
-        self.send_command(Command::SoftwareReset, &[]);
+        screen.send_command(Command::SoftwareReset, &[]);
         Timer::after_millis(200).await;
 
         // Set portrait orientation
         defmt::debug!("set orientation");
-        self.send_command(
+        screen.send_command(
             Command::MemoryAccessControl,
             &[u8::from(Orientation::Portrait)],
         );
 
         // Set the pixel format to rgb565
         defmt::debug!("set pixel format");
-        self.send_command(Command::SetPixelFormat, &[0x55]);
+        screen.send_command(Command::SetPixelFormat, &[0x55]);
 
         // Have the display emerge from sleep, then wait 5ms for it to wake up
         defmt::debug!("set sleep mode off");
-        self.send_command(Command::SleepModeOff, &[]);
+        screen.send_command(Command::SleepModeOff, &[]);
         Timer::after_millis(200).await;
 
         // Turn the display on
         defmt::debug!("display on");
-        self.send_command(Command::DisplayOn, &[]);
+        screen.send_command(Command::DisplayOn, &[]);
 
         // Turn on the backlight
         defmt::debug!("backlight on");
-        self.set_backlight(true);
+        screen.set_backlight(true);
+
+        screen
     }
 
     fn set_window(&mut self, x0: usize, x1: usize, y0: usize, y1: usize) {
@@ -125,14 +123,14 @@ impl Screen {
 
     fn send_command(&mut self, cmd: Command, data: &[u8]) {
         self.data_command.set_low();
-        self.spi.blocking_write(&[u8::from(cmd)]).unwrap(); // TODO propagate error
+        self.spi.blocking_write(&[u8::from(cmd)]).unwrap();
 
         self.send_data(data);
     }
 
     fn send_data<W: Word>(&mut self, data: &[W]) {
         self.data_command.set_high();
-        self.spi.blocking_write(data).unwrap(); // TODO propagate error
+        self.spi.blocking_write(data).unwrap();
     }
 
     pub fn set_backlight(&mut self, on: bool) {

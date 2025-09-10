@@ -8,15 +8,14 @@ use ui_app::{Led, Outputs};
 
 pub struct Board {
     status_led: StatusLed,
-    pub screen: Screen, // XXX should not be pub
+    screen: Screen,
     pub ptt_button: Option<Button>,
     pub ai_button: Option<Button>,
     pub keyboard: Option<Keyboard>,
 }
 
 impl Board {
-    pub fn new() -> Self {
-        /*
+    pub async fn new() -> Self {
         let config = {
             use embassy_stm32::{rcc::*, time::Hertz};
 
@@ -47,8 +46,7 @@ impl Board {
 
             config
         };
-        */
-        let p = embassy_stm32::init(Default::default());
+        let p = embassy_stm32::init(config);
 
         // Status LED
         let r = Output::new(p.PA4, Level::Low, Speed::Low);
@@ -94,7 +92,7 @@ impl Board {
             config
         };
         let spi1 = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
-        let screen = Screen::new(chip_select, data_command, reset, backlight, spi1);
+        let screen = Screen::new(chip_select, data_command, reset, backlight, spi1).await;
 
         // TODO(RLB): NET UART
         // TODO(RLB): MGMT UART
