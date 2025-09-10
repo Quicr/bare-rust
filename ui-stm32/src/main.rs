@@ -84,6 +84,7 @@ async fn main(spawner: Spawner) {
     for i in 0.. {
         let color = colors[i % colors.len()];
         board.status_led().set_color(color);
+        embassy_time::Timer::after_millis(1000).await;
 
         /*
         let event = EVENT_QUEUE.receive().await;
