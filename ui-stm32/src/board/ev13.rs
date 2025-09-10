@@ -3,18 +3,21 @@ use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
+    mode::Async,
     peripherals,
     spi::Spi,
-    usart,
+    usart::{self, UartRx, UartTx},
 };
 use ui_app::{Led, Outputs};
 
 pub struct Board {
     status_led: StatusLed,
     screen: Screen,
+    net_tx: UartTx<'static, Async>,
     pub ptt_button: Option<Button>,
     pub ai_button: Option<Button>,
     pub keyboard: Option<Keyboard>,
+    pub net_rx: Option<UartRx<'static, Async>>,
 }
 
 bind_interrupts!(struct Irqs {
@@ -83,12 +86,16 @@ impl Board {
             Uart::new(p.USART2, p.PA3, p.PA2, Irqs, p.DMA1_CH6, p.DMA1_CH5, config).unwrap()
         };
 
+        let (net_tx, net_rx) = net_uart.split();
+
         Self {
             status_led,
             screen,
+            net_tx,
             ptt_button: Some(ptt_button),
             ai_button: Some(ai_button),
             keyboard: Some(keyboard),
+            net_rx: Some(net_rx),
         }
     }
 }

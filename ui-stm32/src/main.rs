@@ -8,6 +8,7 @@ use ui_app::{App, Event};
 
 use defmt::*;
 use embassy_executor::Spawner;
+use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
@@ -43,6 +44,25 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
     }
 }
 
+#[embassy_executor::task]
+async fn monitor_uart(mut from: UartRx<'static, Async>) {
+    use hex::ToHex;
+
+    const DMA_BUFFER_SIZE: usize = 1024;
+
+    // Configure a ring buffer on the DMA receiver
+    // let mut dma_buf = [0u8; DMA_BUFFER_SIZE];
+    // let mut from = from.into_ring_buffered(&mut dma_buf);
+
+    // Log results
+    let mut buf = [0u8; 128];
+    loop {
+        let n = unwrap!(from.read_until_idle(&mut buf).await);
+        let hex: heapless::String<256> = (&buf[..n]).encode_hex();
+        defmt::info!("net rx: [{}]", hex);
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut board = Board::new().await;
@@ -69,6 +89,10 @@ async fn main(spawner: Spawner) {
         EVENT_QUEUE.sender()
     )));
 
+    // Capture UART events from the NET chip
+    unwrap!(spawner.spawn(monitor_uart(board.net_rx.take().unwrap())));
+
+    debug!("app start");
     app.start(&mut board);
 
     // Main event loop
