@@ -41,8 +41,8 @@ impl ui_app::Screen for Screen {
 }
 
 impl Screen {
-    const WIDTH: usize = 320;
-    const HEIGHT: usize = 240;
+    const WIDTH: usize = 240;
+    const HEIGHT: usize = 320;
 
     pub fn new(
         chip_select: Output<'static>,
