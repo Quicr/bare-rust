@@ -46,7 +46,7 @@ impl Board {
 
             config
         };
-        let p = embassy_stm32::init(Default::default());
+        let p = embassy_stm32::init(config);
 
         // Status LED
         let r = Output::new(p.PA4, Level::Low, Speed::Low);
@@ -92,7 +92,7 @@ impl Board {
             config
         };
         let spi1 = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
-        let mut screen = Screen::new(chip_select, data_command, reset, backlight, spi1);
+        let screen = Screen::new(chip_select, data_command, reset, backlight, spi1);
 
         // TODO(RLB): NET UART
         // TODO(RLB): MGMT UART

@@ -1,4 +1,3 @@
-use core::convert::TryFrom;
 use embassy_stm32::{
     gpio::Output,
     mode::Blocking,
@@ -29,7 +28,7 @@ impl ui_app::Screen for Screen {
 
         self.set_window(0, 0, Self::WIDTH, Self::HEIGHT);
         self.send_command(Command::WriteMemory, &[]);
-        for i in 0..Self::HEIGHT {
+        for _ in 0..Self::HEIGHT {
             self.spi.blocking_write(&row).unwrap();
         }
     }

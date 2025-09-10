@@ -4,7 +4,7 @@
 mod board;
 
 use board::{Board, Button, Keyboard};
-use ui_app::{App, Color, Event, Led, Outputs};
+use ui_app::{App, Event, Screen};
 
 use defmt::*;
 use embassy_executor::Spawner;
@@ -40,7 +40,6 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let mut board = Board::new();
-    /*
     let mut app = App::new();
 
     // Capture button events
@@ -65,30 +64,13 @@ async fn main(spawner: Spawner) {
     )));
 
     board.screen.init().await; // XXX
-    //board.screen.clear_screen(0b00000_111111_00000); // XXX
+    board.screen.fill(0b00000_111111_00000); // XXX
 
     app.start(&mut board);
-    */
 
     // Main event loop
-    let colors = [
-        Color::Black,
-        Color::Red,
-        Color::Green,
-        Color::Blue,
-        Color::Cyan,
-        Color::Purple,
-        Color::Yellow,
-        Color::White,
-    ];
-    for i in 0.. {
-        let color = colors[i % colors.len()];
-        board.status_led().set_color(color);
-        embassy_time::Timer::after_millis(1000).await;
-
-        /*
+    loop {
         let event = EVENT_QUEUE.receive().await;
         app.handle(event, &mut board);
-        */
     }
 }
