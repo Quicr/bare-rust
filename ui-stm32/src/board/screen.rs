@@ -74,6 +74,7 @@ impl Screen {
         // occur before sending more commands.
         defmt::debug!("reset low");
         self.reset.set_low();
+        defmt::debug!("after_millis");
         Timer::after_millis(200).await;
         defmt::debug!("reset high");
         self.reset.set_high();
