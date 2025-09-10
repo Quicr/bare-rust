@@ -16,6 +16,7 @@ pub struct Board {
 
 impl Board {
     pub fn new() -> Self {
+        /*
         let config = {
             use embassy_stm32::{rcc::*, time::Hertz};
 
@@ -46,7 +47,8 @@ impl Board {
 
             config
         };
-        let p = embassy_stm32::init(config);
+        */
+        let p = embassy_stm32::init(Default::default());
 
         // Status LED
         let r = Output::new(p.PA4, Level::Low, Speed::Low);
