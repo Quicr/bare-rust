@@ -130,6 +130,7 @@ impl Screen {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone, IntoPrimitive)]
 #[repr(u8)]
 enum Command {
@@ -155,6 +156,7 @@ enum Command {
     DefineVerticalScroll = 0x33,
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone, IntoPrimitive)]
 #[repr(u8)]
 enum Orientation {
