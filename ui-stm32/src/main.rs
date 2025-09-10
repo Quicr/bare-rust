@@ -69,8 +69,15 @@ async fn main(spawner: Spawner) {
     app.start(&mut board);
 
     // Main event loop
+    let mut backlight_on = false;
     loop {
+        embassy_time::Timer::after_millis(500).await;
+        backlight_on = !backlight_on;
+        board.screen.set_backlight(backlight_on);
+
+        /*
         let event = EVENT_QUEUE.receive().await;
         app.handle(event, &mut board);
+        */
     }
 }

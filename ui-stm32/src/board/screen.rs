@@ -72,13 +72,13 @@ impl Screen {
         // Do hardware reset by holding reset low for at least 10us, then wait 5ms for the reset to
         // occur before sending more commands.
         self.reset.set_low();
-        Timer::after_micros(100).await;
+        Timer::after_millis(200).await;
         self.reset.set_high();
-        Timer::after_millis(5).await;
+        Timer::after_millis(200).await;
 
         // Do hardware reset, then wait 120ms for the reset to occur before sending more commands.
         self.send_command(Command::SoftwareReset, &[]);
-        Timer::after_millis(120).await;
+        Timer::after_millis(200).await;
 
         // Set portrait orientation
         self.send_command(
@@ -91,7 +91,7 @@ impl Screen {
 
         // Have the display emerge from sleep, then wait 5ms for it to wake up
         self.send_command(Command::SleepModeOff, &[]);
-        Timer::after_millis(5).await;
+        Timer::after_millis(200).await;
 
         // Turn the display on
         self.send_command(Command::DisplayOn, &[]);
