@@ -72,9 +72,6 @@ async fn main(spawner: Spawner) {
     debug!("screen init");
     board.screen.init().await; // XXX
 
-    debug!("screen fill");
-    board.screen.fill(0b00000_111111_00000); // XXX
-
     debug!("app start");
     app.start(&mut board);
 
