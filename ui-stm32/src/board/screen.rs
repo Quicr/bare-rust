@@ -67,36 +67,45 @@ impl Screen {
     // It might be better to put this in new(), as is done there.
     pub async fn init(&mut self) {
         // Chip select pin is always held low
+        defmt::debug!("chip_select");
         self.chip_select.set_low();
 
         // Do hardware reset by holding reset low for at least 10us, then wait 5ms for the reset to
         // occur before sending more commands.
+        defmt::debug!("reset low");
         self.reset.set_low();
         Timer::after_millis(200).await;
+        defmt::debug!("reset high");
         self.reset.set_high();
         Timer::after_millis(200).await;
 
         // Do hardware reset, then wait 120ms for the reset to occur before sending more commands.
+        defmt::debug!("software reset");
         self.send_command(Command::SoftwareReset, &[]);
         Timer::after_millis(200).await;
 
         // Set portrait orientation
+        defmt::debug!("set orientation");
         self.send_command(
             Command::MemoryAccessControl,
             &[u8::from(Orientation::Portrait)],
         );
 
         // Set the pixel format to rgb565
+        defmt::debug!("set pixel format");
         self.send_command(Command::SetPixelFormat, &[0x55]);
 
         // Have the display emerge from sleep, then wait 5ms for it to wake up
+        defmt::debug!("set sleep mode off");
         self.send_command(Command::SleepModeOff, &[]);
         Timer::after_millis(200).await;
 
         // Turn the display on
+        defmt::debug!("display on");
         self.send_command(Command::DisplayOn, &[]);
 
         // Turn on the backlight
+        defmt::debug!("backlight on");
         self.set_backlight(true);
     }
 
