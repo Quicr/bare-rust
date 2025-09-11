@@ -64,59 +64,36 @@ fn default_black() {
 }
 
 #[test]
-fn ptt_button_green() {
-    let mut outputs = MockOutputs::default();
-    let mut app = App::new();
-    app.start(&mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Black));
+fn individual_buttons() {
+    fn individual_button(button: Button, color: Color) {
+        let mut outputs = MockOutputs::default();
+        let mut app = App::new();
+        app.start(&mut outputs);
+        assert_eq!(outputs.status_led.color, Some(Color::Black));
 
-    // Up should have no effect
-    app.handle(Event::PttUp, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Black));
+        // Up should have no effect
+        app.handle(Event::ButtonUp(button), &mut outputs);
+        assert_eq!(outputs.status_led.color, Some(Color::Black));
 
-    // Pushing the button should illuminate the LED
-    app.handle(Event::PttDown, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Green));
+        // Pushing the button should illuminate the LED
+        app.handle(Event::ButtonDown(button), &mut outputs);
+        assert_eq!(outputs.status_led.color, Some(color));
 
-    // Down should be idempotent
-    app.handle(Event::PttDown, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Green));
+        // Down should be idempotent
+        app.handle(Event::ButtonDown(button), &mut outputs);
+        assert_eq!(outputs.status_led.color, Some(color));
 
-    // Up should extinguish the LED
-    app.handle(Event::PttUp, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Black));
+        // Up should extinguish the LED
+        app.handle(Event::ButtonUp(button), &mut outputs);
+        assert_eq!(outputs.status_led.color, Some(Color::Black));
 
-    // Up should be idempotent
-    app.handle(Event::PttUp, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Black));
-}
+        // Up should be idempotent
+        app.handle(Event::ButtonUp(button), &mut outputs);
+        assert_eq!(outputs.status_led.color, Some(Color::Black));
+    }
 
-#[test]
-fn ai_button_blue() {
-    let mut outputs = MockOutputs::default();
-    let mut app = App::new();
-    app.start(&mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Black));
-
-    // Up should have no effect
-    app.handle(Event::AiUp, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Black));
-
-    // Pushing the button should illuminate the LED
-    app.handle(Event::AiDown, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Blue));
-
-    // Down should be idempotent
-    app.handle(Event::AiDown, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Blue));
-
-    // Up should extinguish the LED
-    app.handle(Event::AiUp, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Black));
-
-    // Up should be idempotent
-    app.handle(Event::AiUp, &mut outputs);
-    assert_eq!(outputs.status_led.color, Some(Color::Black));
+    individual_button(Button::A, Color::Green);
+    individual_button(Button::B, Color::Blue);
 }
 
 #[test]
@@ -126,16 +103,16 @@ fn buttons_compose() {
     app.start(&mut outputs);
     assert_eq!(outputs.status_led.color, Some(Color::Black));
 
-    app.handle(Event::AiDown, &mut outputs);
+    app.handle(Event::ButtonDown(Button::B), &mut outputs);
     assert_eq!(outputs.status_led.color, Some(Color::Blue));
 
-    app.handle(Event::PttDown, &mut outputs);
+    app.handle(Event::ButtonDown(Button::A), &mut outputs);
     assert_eq!(outputs.status_led.color, Some(Color::Cyan));
 
-    app.handle(Event::AiUp, &mut outputs);
+    app.handle(Event::ButtonUp(Button::B), &mut outputs);
     assert_eq!(outputs.status_led.color, Some(Color::Green));
 
-    app.handle(Event::PttUp, &mut outputs);
+    app.handle(Event::ButtonUp(Button::A), &mut outputs);
     assert_eq!(outputs.status_led.color, Some(Color::Black));
 }
 

@@ -1,0 +1,28 @@
+name: ui-app
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/**"
+      - "ui-app/Cargo.toml"
+      - "ui-app/**.rs"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - ".github/**"
+      - "ui-app/Cargo.toml"
+      - "ui-app/**.rs"
+
+jobs:
+  build-and-test:
+    name: CI
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Verify the ui-app crate
+      uses: ./.github/actions/check-crate
+      with:
+        path: ./ui-app

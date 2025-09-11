@@ -1,10 +1,8 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-let pttButtonEl;
-let pttLogEl;
-let aiButtonEl;
-let aiLogEl;
+let buttonA;
+let buttonB;
 
 const keyMap = {
           "KeyQ": ["Q", "#"],
@@ -48,24 +46,24 @@ async function start() {
   await invoke("start");
 }
 
-async function ptt_button_press(name) {
-  await invoke("ptt_button_press", { name });
+async function button_a_press(name) {
+  await invoke("button_a_press", { name });
 }
 
-async function ai_button_press(name) {
-  await invoke("ai_button_press", { name });
+async function button_b_press(name) {
+  await invoke("button_b_press", { name });
 }
 
 async function handle_ptt(e) {
   if (e.payload === "Idle") {
-    pttButtonEl.innerText = "PTT";
-    pttButtonEl.disabled = false;
+    buttonA.innerText = "PTT";
+    buttonA.disabled = false;
   } else if (e.payload === "Recording") {
-    pttButtonEl.innerText = "RECORDING";
-    pttButtonEl.disabled = false;
+    buttonA.innerText = "RECORDING";
+    buttonA.disabled = false;
   } else if (e.payload === "Playing") {
-    pttButtonEl.innerText = "PLAYING";
-    pttButtonEl.disabled = true;
+    buttonA.innerText = "PLAYING";
+    buttonA.disabled = true;
   }
 }
 
@@ -110,26 +108,26 @@ async function handle_events() {
 window.addEventListener("DOMContentLoaded", async () => {
   console.log("content loaded");
 
-  // Configure the PTT button
-  pttButtonEl = document.querySelector("#ptt-button");
+  // Configure button A 
+  buttonA = document.querySelector("#button-a");
 
-  pttButtonEl.addEventListener("mousedown", (e) => {
-    ptt_button_press("mousedown");
+  buttonA.addEventListener("mousedown", (e) => {
+    button_a_press("mousedown");
   });
 
-  pttButtonEl.addEventListener("mouseup", (e) => {
-    ptt_button_press("mouseup");
+  buttonA.addEventListener("mouseup", (e) => {
+    button_a_press("mouseup");
   });
 
-  // Configure the AI button
-  aiButtonEl = document.querySelector("#ai-button");
+  // Configure button B
+  buttonB = document.querySelector("#button-b");
 
-  aiButtonEl.addEventListener("mousedown", (e) => {
-    ai_button_press("mousedown");
+  buttonB.addEventListener("mousedown", (e) => {
+    button_b_press("mousedown");
   });
 
-  aiButtonEl.addEventListener("mouseup", (e) => {
-    ai_button_press("mouseup");
+  buttonB.addEventListener("mouseup", (e) => {
+    button_b_press("mouseup");
   });
 
   let asClass = (code) => {
@@ -145,12 +143,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     console.log("code:", e.code);
 
     if (e.code == "BracketLeft") {
-      ptt_button_press("mousedown");
+      button_a_press("mousedown");
       return;
     } 
 
     if (e.code == "BracketRight") {
-      ai_button_press("mousedown");
+      button_b_press("mousedown");
       return;
     }
 
@@ -198,12 +196,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.addEventListener("keyup", (e) => {
     if (e.code == "BracketLeft") {
-      ptt_button_press("mouseup");
+      button_a_press("mouseup");
       return;
     } 
 
     if (e.code == "BracketRight") {
-      ai_button_press("mouseup");
+      button_b_press("mouseup");
       return;
     }
     
