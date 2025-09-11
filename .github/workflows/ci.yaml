@@ -43,9 +43,6 @@ jobs:
 #        run-tests: false
 #        args: --no-default-features -F ev12
 
-XXX(RLB) Tauri build disabled for now because it looks like some dependencies
-need to be installed.
-
    - name: Verify the ui-tauri crate
      uses: ./.github/actions/check-crate
      with:
