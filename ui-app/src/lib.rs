@@ -119,8 +119,21 @@ pub trait Led {
     }
 }
 
+fn rgb565(r: u8, g: u8, b: u8) -> u16 {
+    // Discard the low-order bits of the colors
+    (((r as u16) >> 3) << 11) | (((g as u16) >> 2) << 5) | ((b as u16) >> 3)
+}
+
+pub trait Screen {
+    fn width(&self) -> usize;
+    fn height(&self) -> usize;
+    fn fill(&mut self, color: u16);
+    fn draw(&mut self, left: usize, right: usize, top: usize, bottom: usize, data: &[u16]);
+}
+
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
+    fn screen(&mut self) -> &mut impl Screen;
     fn log(&mut self, message: &str);
 }
 
@@ -140,7 +153,51 @@ impl App {
     }
 
     pub fn start(&mut self, out: &mut impl Outputs) {
+        // Extinguish the status LED
         out.status_led().set_color(Color::Black);
+
+        // Draw a test pattern to the screen
+        const SIZE: usize = 10;
+        let screen = out.screen();
+        let mut data = [0_u16; SIZE * SIZE];
+
+        // Background
+        screen.fill(rgb565(0x88, 0x88, 0x88));
+
+        // Upper left = R
+        let (x0, x1, y0, y1) = (SIZE, SIZE + SIZE, SIZE, SIZE + SIZE);
+        data.fill(rgb565(0xFF, 0x00, 0x00));
+        screen.draw(x0, x1, y0, y1, &data);
+
+        // Upper right = G
+        let (x0, x1, y0, y1) = (
+            screen.width() - SIZE - SIZE,
+            screen.width() - SIZE,
+            SIZE,
+            SIZE + SIZE,
+        );
+        data.fill(rgb565(0x00, 0xFF, 0x00));
+        screen.draw(x0, x1, y0, y1, &data);
+
+        // Lower left = B
+        let (x0, x1, y0, y1) = (
+            SIZE,
+            SIZE + SIZE,
+            screen.height() - SIZE - SIZE,
+            screen.height() - SIZE,
+        );
+        data.fill(rgb565(0x00, 0x00, 0xFF));
+        screen.draw(x0, x1, y0, y1, &data);
+
+        // Lower right = Y
+        let (x0, x1, y0, y1) = (
+            screen.width() - SIZE - SIZE,
+            screen.width() - SIZE,
+            screen.height() - SIZE - SIZE,
+            screen.height() - SIZE,
+        );
+        data.fill(rgb565(0xFF, 0xFF, 0x00));
+        screen.draw(x0, x1, y0, y1, &data);
     }
 
     pub fn handle(&mut self, event: Event, out: &mut impl Outputs) {

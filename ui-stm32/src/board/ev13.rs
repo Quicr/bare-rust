@@ -1,19 +1,21 @@
-use super::{Button, Keyboard, StatusLed};
+use super::{Button, Keyboard, Screen, StatusLed};
 use embassy_stm32::{
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
+    spi::Spi,
 };
 use ui_app::{Led, Outputs};
 
 pub struct Board {
     status_led: StatusLed,
+    screen: Screen,
     pub ptt_button: Option<Button>,
     pub ai_button: Option<Button>,
     pub keyboard: Option<Keyboard>,
 }
 
 impl Board {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let p = embassy_stm32::init(Default::default());
 
         // Status LED
@@ -45,8 +47,29 @@ impl Board {
         ];
         let keyboard = Keyboard::new(cols, rows);
 
+        // Screen
+        let chip_select = Output::new(p.PB8, Level::Low, Speed::Low);
+        let data_command = Output::new(p.PB9, Level::Low, Speed::Low);
+        let reset = Output::new(p.PC13, Level::Low, Speed::Low);
+        let backlight = Output::new(p.PC14, Level::Low, Speed::Low);
+
+        let config = {
+            use embassy_stm32::spi::*;
+            let mut config = Config::default();
+            config.mode.polarity = Polarity::IdleLow;
+            config.mode.phase = Phase::CaptureOnFirstTransition;
+            config.bit_order = BitOrder::MsbFirst;
+            config
+        };
+        let spi1 = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
+        let screen = Screen::new(chip_select, data_command, reset, backlight, spi1).await;
+
+        // TODO(RLB): NET UART
+        // TODO(RLB): MGMT UART
+
         Self {
             status_led,
+            screen,
             ptt_button: Some(ptt_button),
             ai_button: Some(ai_button),
             keyboard: Some(keyboard),
@@ -57,6 +80,10 @@ impl Board {
 impl Outputs for Board {
     fn status_led(&mut self) -> &mut impl Led {
         &mut self.status_led
+    }
+
+    fn screen(&mut self) -> &mut impl ui_app::Screen {
+        &mut self.screen
     }
 
     fn log(&mut self, message: &str) {
