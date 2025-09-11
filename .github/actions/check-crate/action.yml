@@ -1,5 +1,7 @@
 name: Check crate
 
+description: This action builds a Rust crate, runs its tests, and runs clippy and fmt.
+
 inputs:
   path:
     description: The path to the crate being checked
@@ -7,15 +9,15 @@ inputs:
   build-tests:
     description: Whether `cargo test --no-run` should be run
     required: false
-    default: true
+    default: 'true'
   run-tests:
     description: Whether `cargo test` should be run
     required: false
-    default: true
+    default: 'true'
   args:
     description: Which arguments should be provided to cargo
     required: false
-    default:
+    default: ''
 
 runs:
   using: "composite"
@@ -27,14 +29,14 @@ runs:
         cargo check ${{ inputs.args }}
 
     - name: Verify that tests and examples build
-      if: ${{ inputs.build-tests }}
+      if: ${{ inputs.build-tests == 'true' }}
       working-directory: ${{ inputs.path }}
       shell: bash
       run: |
         cargo test ${{ inputs.args }} --no-run
 
     - name: Verify that tests pass
-      if: ${{ inputs.build-tests  && inputs.run-tests }}
+      if: ${{ inputs.build-tests == 'true'  && inputs.run-tests == 'true' }}
       working-directory: ${{ inputs.path }}
       shell: bash
       run: |
