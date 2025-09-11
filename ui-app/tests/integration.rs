@@ -11,15 +11,42 @@ impl Led for MockLed {
     }
 }
 
+// TODO: Test screen logic
+#[derive(Default)]
+struct MockScreen;
+
+impl Screen for MockScreen {
+    fn width(&self) -> usize {
+        240
+    }
+
+    fn height(&self) -> usize {
+        320
+    }
+
+    fn fill(&mut self, _color: u16) {
+        // TODO: Store pixels
+    }
+
+    fn draw(&mut self, _left: usize, _right: usize, _top: usize, _bottom: usize, _data: &[u16]) {
+        // TODO: Store pixels
+    }
+}
+
 #[derive(Default)]
 struct MockOutputs {
     status_led: MockLed,
+    screen: MockScreen,
     last_message: String,
 }
 
 impl Outputs for MockOutputs {
     fn status_led(&mut self) -> &mut impl Led {
         &mut self.status_led
+    }
+
+    fn screen(&mut self) -> &mut impl Screen {
+        &mut self.screen
     }
 
     fn log(&mut self, message: &str) {
