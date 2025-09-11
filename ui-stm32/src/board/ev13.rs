@@ -13,7 +13,7 @@ use ui_app::{Led, Outputs};
 pub struct Board {
     status_led: StatusLed,
     screen: Screen,
-    net_tx: UartTx<'static, Async>,
+    pub net_tx: UartTx<'static, Async>, // XXX should not be pub
     pub ptt_button: Option<Button>,
     pub ai_button: Option<Button>,
     pub keyboard: Option<Keyboard>,

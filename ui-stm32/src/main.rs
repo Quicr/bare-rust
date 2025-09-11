@@ -90,8 +90,31 @@ async fn main(spawner: Spawner) {
     )));
 
     // Capture UART events from the NET chip
-    unwrap!(spawner.spawn(monitor_uart(board.net_rx.take().unwrap())));
+    // unwrap!(spawner.spawn(monitor_uart(board.net_rx.take().unwrap())));
 
+    // Send a Ping packet
+    info!("sending Ping");
+    const PING: u8 = 0x0e;
+    const PONG: u8 = 0x0f;
+    unwrap!(board.net_tx.write(&[PING, 0x00, 0x00, 0x00, 0x00]).await);
+
+    // Read a Pong packet (hopefully)
+    info!("awaiting Pong");
+    let mut net_rx = board.net_rx.take().unwrap();
+
+    let mut msg_type = [0_u8; 1];
+    let mut msg_len = [0_u8; 4];
+    unwrap!(net_rx.read(&mut msg_type).await);
+    unwrap!(net_rx.read(&mut msg_len).await);
+    info!(
+        "read T = {} =?= {}, L = {} =?= {}",
+        msg_type[0],
+        PONG,
+        u32::from_be_bytes(msg_len),
+        0
+    );
+
+    /*
     debug!("app start");
     app.start(&mut board);
 
@@ -100,4 +123,5 @@ async fn main(spawner: Spawner) {
         let event = EVENT_QUEUE.receive().await;
         app.handle(event, &mut board);
     }
+    */
 }
