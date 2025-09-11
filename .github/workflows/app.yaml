@@ -1,4 +1,4 @@
-name: Check the ui-app crate
+name: ui-app
 
 on:
   push:
