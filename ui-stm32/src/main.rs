@@ -4,6 +4,7 @@
 mod board;
 
 use board::{Board, Button, Keyboard};
+use ui_app::Button as ButtonId;
 use ui_app::{App, Event};
 
 use defmt::*;
@@ -25,12 +26,12 @@ type EventSender = Sender<'static, CriticalSectionRawMutex, Event, EVENT_QUEUE_D
 static EVENT_QUEUE: EventChannel = Channel::new();
 
 #[embassy_executor::task(pool_size = 2)]
-async fn monitor_button(mut button: Button, down: Event, up: Event, events: EventSender) {
+async fn monitor_button(mut button: Button, id: ButtonId, events: EventSender) {
     loop {
         button.wait_for_rising_edge().await;
-        events.send(down).await;
+        events.send(Event::ButtonDown(id)).await;
         button.wait_for_falling_edge().await;
-        events.send(up).await;
+        events.send(Event::ButtonUp(id)).await;
     }
 }
 
@@ -74,15 +75,13 @@ async fn main(spawner: Spawner) {
     // Capture button events
     unwrap!(spawner.spawn(monitor_button(
         board.ai_button.take().unwrap(),
-        Event::AiDown,
-        Event::AiUp,
+        ButtonId::A,
         EVENT_QUEUE.sender()
     )));
 
     unwrap!(spawner.spawn(monitor_button(
         board.ptt_button.take().unwrap(),
-        Event::PttDown,
-        Event::PttUp,
+        ButtonId::B,
         EVENT_QUEUE.sender()
     )));
 

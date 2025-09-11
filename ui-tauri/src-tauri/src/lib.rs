@@ -5,7 +5,7 @@ use core::ops::DerefMut;
 use once_cell::sync::OnceCell;
 use std::sync::Mutex;
 use tauri::Emitter;
-use ui_app::{App, Event, Key, KeyValue, Led, Outputs, Screen};
+use ui_app::{App, Button, Event, Key, KeyValue, Led, Outputs, Screen};
 
 mod hactar_vaporwave;
 
@@ -135,25 +135,31 @@ fn start() {
 }
 
 #[tauri::command]
-fn ptt_button_press(name: &str) {
-    println!("PTT button event: {}", name);
+fn button_a_press(name: &str) {
+    const DOWN: Event = Event::ButtonDown(Button::A);
+    const UP: Event = Event::ButtonUp(Button::A);
+
+    println!("Button A event: {}", name);
     let mut board = BOARD.get().unwrap().lock().unwrap();
     let mut ui_app = UI_APP.get().unwrap().lock().unwrap();
     match name {
-        "mousedown" => ui_app.handle(Event::PttDown, board.deref_mut()),
-        "mouseup" => ui_app.handle(Event::PttUp, board.deref_mut()),
+        "mousedown" => ui_app.handle(DOWN, board.deref_mut()),
+        "mouseup" => ui_app.handle(UP, board.deref_mut()),
         _ => {}
     }
 }
 
 #[tauri::command]
-fn ai_button_press(name: &str) {
-    println!("AI button press");
+fn button_b_press(name: &str) {
+    const DOWN: Event = Event::ButtonDown(Button::B);
+    const UP: Event = Event::ButtonUp(Button::B);
+
+    println!("Button B event: {}", name);
     let mut board = BOARD.get().unwrap().lock().unwrap();
     let mut ui_app = UI_APP.get().unwrap().lock().unwrap();
     match name {
-        "mousedown" => ui_app.handle(Event::AiDown, board.deref_mut()),
-        "mouseup" => ui_app.handle(Event::AiUp, board.deref_mut()),
+        "mousedown" => ui_app.handle(DOWN, board.deref_mut()),
+        "mouseup" => ui_app.handle(UP, board.deref_mut()),
         _ => {}
     }
 }
@@ -258,8 +264,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             start,
-            ai_button_press,
-            ptt_button_press,
+            button_a_press,
+            button_b_press,
             keydown,
             keyup
         ])

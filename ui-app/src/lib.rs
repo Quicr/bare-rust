@@ -56,11 +56,15 @@ pub enum KeyValue {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Format)]
+pub enum Button {
+    A,
+    B,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum Event {
-    PttDown,
-    PttUp,
-    AiDown,
-    AiUp,
+    ButtonDown(Button),
+    ButtonUp(Button),
     KeyDown(Key, KeyValue),
     KeyUp(Key),
 }
@@ -135,16 +139,16 @@ pub trait Outputs {
 
 #[derive(Debug)]
 pub struct App {
-    ptt_down: bool,
-    ai_down: bool,
+    a_down: bool,
+    b_down: bool,
 }
 
 impl App {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
-            ptt_down: false,
-            ai_down: false,
+            a_down: false,
+            b_down: false,
         }
     }
 
@@ -198,26 +202,33 @@ impl App {
 
     pub fn handle(&mut self, event: Event, out: &mut impl Outputs) {
         match event {
-            Event::PttDown => {
-                self.ptt_down = true;
-            }
-            Event::PttUp => {
-                self.ptt_down = false;
-            }
-            Event::AiDown => {
-                self.ai_down = true;
-            }
-            Event::AiUp => {
-                self.ai_down = false;
-            }
+            Event::ButtonDown(button) => match button {
+                Button::A => {
+                    self.a_down = true;
+                }
+                Button::B => {
+                    self.b_down = true;
+                }
+            },
+
+            Event::ButtonUp(button) => match button {
+                Button::A => {
+                    self.a_down = false;
+                }
+                Button::B => {
+                    self.b_down = false;
+                }
+            },
+
             Event::KeyDown(_key, _value) => {
                 out.log("key down");
             }
+
             Event::KeyUp(_key) => {
                 out.log("key up");
             }
         }
 
-        out.status_led().set(false, self.ptt_down, self.ai_down);
+        out.status_led().set(false, self.a_down, self.b_down);
     }
 }
