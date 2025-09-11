@@ -47,7 +47,7 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
 
 #[embassy_executor::task]
 async fn monitor_uart(mut from: UartRx<'static, Async>) {
-    const DMA_BUFFER_SIZE: usize = 1024;
+    // const DMA_BUFFER_SIZE: usize = 1024;
 
     // Configure a ring buffer on the DMA receiver
     // let mut dma_buf = [0u8; DMA_BUFFER_SIZE];
@@ -93,23 +93,15 @@ async fn main(spawner: Spawner) {
     )));
 
     // Capture UART events from the NET chip
-    // unwrap!(spawner.spawn(monitor_uart(board.net_rx.take().unwrap())));
+    unwrap!(spawner.spawn(monitor_uart(board.net_rx.take().unwrap())));
 
     // Send a Ping packet
-    info!("sending Ping");
     const PING: u8 = 0x0e;
-    const PONG: u8 = 0x0f;
-    // unwrap!(board.net_tx.write(&[PING, 0x00, 0x00, 0x00, 0x00]).await);
-
-    // Read a Pong packet (hopefully)
-    info!("awaiting Pong");
-    let mut net_rx = board.net_rx.take().unwrap();
-
-    let mut buf = [0u8; 128];
+    const PACKET: &[u8] = &[PING, 0x00, 0x00, 0x00, 0x00, 0xC0];
     loop {
-        let n = unwrap!(net_rx.read_until_idle(&mut buf).await);
-        let hex: heapless::String<256> = (&buf[..n]).encode_hex();
-        defmt::info!("net rx: [{}]", hex);
+        info!("ping");
+        Timer::after_millis(1000).await;
+        unwrap!(board.net_tx.write(PACKET).await);
     }
 
     /*
