@@ -43,9 +43,9 @@ jobs:
 #        run-tests: false
 #        args: --no-default-features -F ev12
 
-   - name: Verify the ui-tauri crate
-     uses: ./.github/actions/check-crate
-     with:
-       path: ./ui-tauri/src-tauri
-       run-tests: false
+    - name: Verify the ui-tauri crate
+      uses: ./.github/actions/check-crate
+      with:
+        path: ./ui-tauri/src-tauri
+        run-tests: false
 
