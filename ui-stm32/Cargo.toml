@@ -30,3 +30,7 @@ heapless = { version = "0.9.1", features = ["defmt"] }
 
 [profile.release]
 debug = 2
+
+[profile.release]
+debug = 2
+opt-level = "s"

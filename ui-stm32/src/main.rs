@@ -12,6 +12,7 @@ use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
+use hex::ToHex;
 use {defmt_rtt as _, panic_probe as _};
 
 // Configuration parameters
@@ -46,8 +47,6 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
 
 #[embassy_executor::task]
 async fn monitor_uart(mut from: UartRx<'static, Async>) {
-    use hex::ToHex;
-
     const DMA_BUFFER_SIZE: usize = 1024;
 
     // Configure a ring buffer on the DMA receiver
@@ -65,8 +64,12 @@ async fn monitor_uart(mut from: UartRx<'static, Async>) {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    info!("about to instantiate board");
+
     let mut board = Board::new().await;
     let mut app = App::new();
+
+    info!("done setting up board and app");
 
     // Capture button events
     unwrap!(spawner.spawn(monitor_button(
@@ -96,23 +99,18 @@ async fn main(spawner: Spawner) {
     info!("sending Ping");
     const PING: u8 = 0x0e;
     const PONG: u8 = 0x0f;
-    unwrap!(board.net_tx.write(&[PING, 0x00, 0x00, 0x00, 0x00]).await);
+    // unwrap!(board.net_tx.write(&[PING, 0x00, 0x00, 0x00, 0x00]).await);
 
     // Read a Pong packet (hopefully)
     info!("awaiting Pong");
     let mut net_rx = board.net_rx.take().unwrap();
 
-    let mut msg_type = [0_u8; 1];
-    let mut msg_len = [0_u8; 4];
-    unwrap!(net_rx.read(&mut msg_type).await);
-    unwrap!(net_rx.read(&mut msg_len).await);
-    info!(
-        "read T = {} =?= {}, L = {} =?= {}",
-        msg_type[0],
-        PONG,
-        u32::from_be_bytes(msg_len),
-        0
-    );
+    let mut buf = [0u8; 128];
+    loop {
+        let n = unwrap!(net_rx.read_until_idle(&mut buf).await);
+        let hex: heapless::String<256> = (&buf[..n]).encode_hex();
+        defmt::info!("net rx: [{}]", hex);
+    }
 
     /*
     debug!("app start");
