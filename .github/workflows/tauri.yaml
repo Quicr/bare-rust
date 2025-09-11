@@ -31,4 +31,3 @@ jobs:
       with:
         path: ./ui-tauri/src-tauri
         run-tests: false
-        args: --no-default-features -F ev13
