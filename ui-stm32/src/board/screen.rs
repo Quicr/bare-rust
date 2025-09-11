@@ -63,46 +63,36 @@ impl Screen {
         };
 
         // Chip select pin is always held low
-        defmt::debug!("chip_select");
         screen.chip_select.set_low();
 
         // Do hardware reset by holding reset low for at least 10us, then wait 5ms for the reset to
         // occur before sending more commands.
-        defmt::debug!("reset low");
         screen.reset.set_low();
-        defmt::debug!("after_millis");
         Timer::after_millis(200).await;
-        defmt::debug!("reset high");
         screen.reset.set_high();
         Timer::after_millis(200).await;
 
         // Do hardware reset, then wait 120ms for the reset to occur before sending more commands.
-        defmt::debug!("software reset");
         screen.send_command(Command::SoftwareReset, &[]);
         Timer::after_millis(200).await;
 
         // Set portrait orientation
-        defmt::debug!("set orientation");
         screen.send_command(
             Command::MemoryAccessControl,
             &[u8::from(Orientation::Portrait)],
         );
 
         // Set the pixel format to rgb565
-        defmt::debug!("set pixel format");
         screen.send_command(Command::SetPixelFormat, &[0x55]);
 
         // Have the display emerge from sleep, then wait 5ms for it to wake up
-        defmt::debug!("set sleep mode off");
         screen.send_command(Command::SleepModeOff, &[]);
         Timer::after_millis(200).await;
 
         // Turn the display on
-        defmt::debug!("display on");
         screen.send_command(Command::DisplayOn, &[]);
 
         // Turn on the backlight
-        defmt::debug!("backlight on");
         screen.set_backlight(true);
 
         screen

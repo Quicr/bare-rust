@@ -69,7 +69,6 @@ async fn main(spawner: Spawner) {
         EVENT_QUEUE.sender()
     )));
 
-    debug!("app start");
     app.start(&mut board);
 
     // Main event loop
