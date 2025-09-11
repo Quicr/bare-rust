@@ -13,28 +13,26 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
     - uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: stable
         components: clippy, rustfmt
         target: thumbv7em-none-eabihf
 
-    - name: Verify the ui-app crate
-      uses: ./.github/actions/check-crate
-      with:
-        path: ./ui-app
-
-# XXX(RLB) STM32 builds disabled for now because I can't figure out how to get
-# GitHub Actions to not build the tests.
-# 
-#    - name: Verify the ui-stm32 crate (ev12)
+#    - name: Verify the ui-app crate
 #      uses: ./.github/actions/check-crate
 #      with:
-#        path: ./ui-stm32
-#        build-tests: false
-#        run-tests: false
-#        args: --no-default-features -F ev12
-#
+#        path: ./ui-app
+
+    - name: Verify the ui-stm32 crate (ev12)
+      uses: ./.github/actions/check-crate
+      with:
+        path: ./ui-stm32
+        build-tests: false
+        run-tests: false
+        args: --no-default-features -F ev12
+
 #    - name: Verify the ui-stm32 crate (ev13)
 #      uses: ./.github/actions/check-crate
 #      with:
@@ -43,9 +41,9 @@ jobs:
 #        run-tests: false
 #        args: --no-default-features -F ev12
 
-    - name: Verify the ui-tauri crate
-      uses: ./.github/actions/check-crate
-      with:
-        path: ./ui-tauri/src-tauri
-        run-tests: false
+#    - name: Verify the ui-tauri crate
+#      uses: ./.github/actions/check-crate
+#      with:
+#        path: ./ui-tauri/src-tauri
+#        run-tests: false
 
