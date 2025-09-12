@@ -5,7 +5,7 @@ mod board;
 
 use board::{Board, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
-use ui_app::{App, Event, NetTx, Outputs, ToNet};
+use ui_app::{App, Event};
 
 use defmt::*;
 use embassy_executor::Spawner;

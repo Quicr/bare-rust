@@ -144,7 +144,7 @@ pub trait Screen {
 }
 
 pub trait NetTx {
-    async fn write(&mut self, to_net: &ToNet);
+    fn write(&mut self, to_net: &ToNet);
 }
 
 pub trait Outputs {
@@ -223,7 +223,7 @@ impl App {
                 Button::A => {
                     out.log("button a down");
                     self.a_down = true;
-                    out.net_tx().write(&ToNet::Ping).await;
+                    out.net_tx().write(&ToNet::Ping);
                 }
                 Button::B => {
                     out.log("button b down");

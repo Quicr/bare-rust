@@ -54,14 +54,14 @@ impl<Writer> NetTx<Writer> {
 
 impl<Writer> ui_app::NetTx for NetTx<Writer>
 where
-    Writer: embedded_io_async::Write,
+    Writer: embedded_io::Write,
 {
-    async fn write(&mut self, to_net: &ToNet) {
+    fn write(&mut self, to_net: &ToNet) {
         match to_net {
             ToNet::Ping => {
                 const PING: u8 = 0x0e;
                 const PACKET: &[u8] = &[PING, 0x00, 0x00, 0x00, 0x00, 0xC0];
-                self.tx.write_all(PACKET).await.unwrap();
+                self.tx.write(PACKET).unwrap();
             }
         }
     }
