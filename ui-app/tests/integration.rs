@@ -34,9 +34,21 @@ impl Screen for MockScreen {
 }
 
 #[derive(Default)]
+struct MockNetTx {
+    last_to_net: Option<ToNet>,
+}
+
+impl NetTx for MockNetTx {
+    fn write(&mut self, to_net: &ToNet) {
+        self.last_to_net = Some(*to_net);
+    }
+}
+
+#[derive(Default)]
 struct MockOutputs {
     status_led: MockLed,
     screen: MockScreen,
+    net_tx: MockNetTx,
     last_message: String,
 }
 
@@ -47,6 +59,10 @@ impl Outputs for MockOutputs {
 
     fn screen(&mut self) -> &mut impl Screen {
         &mut self.screen
+    }
+
+    fn net_tx(&mut self) -> &mut impl NetTx {
+        &mut self.net_tx
     }
 
     fn log(&mut self, message: &str) {
@@ -129,4 +145,14 @@ fn key_logging() {
 
     app.handle(Event::KeyUp(Key::A), &mut outputs);
     assert_eq!(outputs.last_message, "key up");
+}
+
+#[test]
+fn button_a_sends_ping() {
+    let mut outputs = MockOutputs::default();
+    let mut app = App::new();
+    app.start(&mut outputs);
+
+    app.handle(Event::ButtonDown(Button::A), &mut outputs);
+    assert_eq!(outputs.net_tx.last_to_net, Some(ToNet::Ping));
 }

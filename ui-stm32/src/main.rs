@@ -102,6 +102,6 @@ async fn main(spawner: Spawner) {
     // Main event loop
     loop {
         let event = EVENT_QUEUE.receive().await;
-        app.handle(event, &mut board).await;
+        app.handle(event, &mut board);
     }
 }

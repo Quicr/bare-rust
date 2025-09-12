@@ -3,9 +3,9 @@
 
 use core::ops::DerefMut;
 use once_cell::sync::OnceCell;
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
 use tauri::Emitter;
-use ui_app::{App, Button, Event, Key, KeyValue, Led, Outputs, Screen};
+use ui_app::{App, Button, Event, FromNet, Key, KeyValue, Led, NetTx, Outputs, Screen, ToNet};
 
 mod hactar_vaporwave;
 
@@ -37,11 +37,12 @@ const UI_LED_NAME: &str = "led-ui";
 #[derive(Debug)]
 struct Board {
     app: tauri::AppHandle,
+    to_net: mpsc::Sender<ToNet>,
 }
 
 impl Board {
-    fn new(app: tauri::AppHandle) -> Self {
-        Self { app }
+    fn new(app: tauri::AppHandle, to_net: mpsc::Sender<ToNet>) -> Self {
+        Self { app, to_net }
     }
 }
 
@@ -112,12 +113,22 @@ impl Screen for Board {
     }
 }
 
+impl NetTx for Board {
+    fn write(&mut self, to_net: &ToNet) {
+        self.to_net.send(*to_net).unwrap();
+    }
+}
+
 impl Outputs for Board {
     fn status_led(&mut self) -> &mut impl Led {
         self
     }
 
     fn screen(&mut self) -> &mut impl Screen {
+        self
+    }
+
+    fn net_tx(&mut self) -> &mut impl NetTx {
         self
     }
 
@@ -252,9 +263,32 @@ static UI_APP: OnceCell<Mutex<App>> = OnceCell::new();
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let (to_net, from_ui) = mpsc::channel::<ToNet>();
+    let (to_ui, from_net) = mpsc::channel::<FromNet>();
+
+    // Consume and process NET messages
+    std::thread::spawn(move || {
+        while let Ok(to_net) = from_ui.recv() {
+            match to_net {
+                ToNet::Ping => {
+                    to_ui.send(FromNet::Pong).unwrap();
+                }
+            }
+        }
+    });
+
+    // Forward messages to NET to the app
+    std::thread::spawn(move || {
+        while let Ok(from_net) = from_net.recv() {
+            let mut board = BOARD.get().unwrap().lock().unwrap();
+            let mut ui_app = UI_APP.get().unwrap().lock().unwrap();
+            ui_app.handle(Event::FromNet(from_net), board.deref_mut());
+        }
+    });
+
     tauri::Builder::default()
         .setup(|app| {
-            let board = Board::new(app.handle().clone());
+            let board = Board::new(app.handle().clone(), to_net);
             BOARD.set(Mutex::new(board)).unwrap();
 
             let ui_app = App::new();

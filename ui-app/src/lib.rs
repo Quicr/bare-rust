@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(async_fn_in_trait)]
 
 use defmt::Format;
 
@@ -217,7 +216,7 @@ impl App {
         screen.draw(x0, x1, y0, y1, &data);
     }
 
-    pub async fn handle(&mut self, event: Event, out: &mut impl Outputs) {
+    pub fn handle(&mut self, event: Event, out: &mut impl Outputs) {
         match event {
             Event::ButtonDown(button) => match button {
                 Button::A => {
