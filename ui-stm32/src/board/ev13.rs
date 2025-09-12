@@ -1,4 +1,4 @@
-use super::{Button, Keyboard, Screen, StatusLed};
+use super::{Button, Keyboard, NetTx, Screen, StatusLed};
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
@@ -13,9 +13,9 @@ use ui_app::{Led, Outputs};
 pub struct Board {
     status_led: StatusLed,
     screen: Screen,
-    pub net_tx: UartTx<'static, Async>, // XXX should not be pub
-    pub ptt_button: Option<Button>,
-    pub ai_button: Option<Button>,
+    net_tx: NetTx<UartTx<'static, Async>>,
+    pub button_a: Option<Button>,
+    pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
     pub net_rx: Option<UartRx<'static, Async>>,
 }
@@ -65,8 +65,8 @@ impl Board {
         let status_led = StatusLed { r, g, b };
 
         // Buttons
-        let ai_button = ExtiInput::new(p.PC0, p.EXTI0, Pull::Up);
-        let ptt_button = ExtiInput::new(p.PC1, p.EXTI1, Pull::Up);
+        let button_a = ExtiInput::new(p.PC1, p.EXTI1, Pull::Up);
+        let button_b = ExtiInput::new(p.PC0, p.EXTI0, Pull::Up);
 
         // Keyboard
         let cols = [
@@ -117,13 +117,14 @@ impl Board {
         };
 
         let (net_tx, net_rx) = net_uart.split();
+        let net_tx = NetTx::new(net_tx);
 
         Self {
             status_led,
             screen,
             net_tx,
-            ptt_button: Some(ptt_button),
-            ai_button: Some(ai_button),
+            button_a: Some(button_a),
+            button_b: Some(button_b),
             keyboard: Some(keyboard),
             net_rx: Some(net_rx),
         }
@@ -137,6 +138,10 @@ impl Outputs for Board {
 
     fn screen(&mut self) -> &mut impl ui_app::Screen {
         &mut self.screen
+    }
+
+    fn net_tx(&mut self) -> &mut impl ui_app::NetTx {
+        &mut self.net_tx
     }
 
     fn log(&mut self, message: &str) {

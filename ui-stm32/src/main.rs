@@ -3,9 +3,9 @@
 
 mod board;
 
-use board::{Board, Button, Keyboard};
+use board::{Board, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
-use ui_app::{App, Event};
+use ui_app::{App, Event, NetTx, Outputs, ToNet};
 
 use defmt::*;
 use embassy_executor::Spawner;
@@ -13,7 +13,6 @@ use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
-use hex::ToHex;
 use {defmt_rtt as _, panic_probe as _};
 
 // Configuration parameters
@@ -40,26 +39,26 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
     loop {
         let _ = Timer::after_millis(KEYBOARD_SCAN_MILLIS).await;
         for event in keyboard.scan() {
-            defmt::info!("kbd event: {:?}", event);
             events.send(event).await;
         }
     }
 }
 
 #[embassy_executor::task]
-async fn monitor_uart(mut from: UartRx<'static, Async>) {
-    // const DMA_BUFFER_SIZE: usize = 1024;
+async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
+    const DMA_BUFFER_SIZE: usize = 1024;
 
-    // Configure a ring buffer on the DMA receiver
-    // let mut dma_buf = [0u8; DMA_BUFFER_SIZE];
-    // let mut from = from.into_ring_buffered(&mut dma_buf);
+    // Wrap the raw receiver in a DMA-buffered, SLIP-parsing, TLV-parsing version
+    let mut dma_buf = [0u8; DMA_BUFFER_SIZE];
+    let mut from = from.into_ring_buffered(&mut dma_buf);
+    let mut from = NetRx::new(&mut from);
 
-    // Log results
-    let mut buf = [0u8; 128];
     loop {
-        let n = unwrap!(from.read_until_idle(&mut buf).await);
-        let hex: heapless::String<256> = (&buf[..n]).encode_hex();
-        defmt::info!("net rx: [{}]", hex);
+        let Some(from_net) = from.next().await else {
+            continue;
+        };
+
+        events.send(Event::FromNet(from_net)).await;
     }
 }
 
@@ -74,13 +73,13 @@ async fn main(spawner: Spawner) {
 
     // Capture button events
     unwrap!(spawner.spawn(monitor_button(
-        board.ai_button.take().unwrap(),
+        board.button_a.take().unwrap(),
         ButtonId::A,
         EVENT_QUEUE.sender()
     )));
 
     unwrap!(spawner.spawn(monitor_button(
-        board.ptt_button.take().unwrap(),
+        board.button_b.take().unwrap(),
         ButtonId::B,
         EVENT_QUEUE.sender()
     )));
@@ -92,25 +91,17 @@ async fn main(spawner: Spawner) {
     )));
 
     // Capture UART events from the NET chip
-    unwrap!(spawner.spawn(monitor_uart(board.net_rx.take().unwrap())));
+    unwrap!(spawner.spawn(monitor_net(
+        board.net_rx.take().unwrap(),
+        EVENT_QUEUE.sender()
+    )));
 
-    // Send a Ping packet
-    const PING: u8 = 0x0e;
-    const PACKET: &[u8] = &[PING, 0x00, 0x00, 0x00, 0x00, 0xC0];
-    loop {
-        info!("ping");
-        Timer::after_millis(1000).await;
-        unwrap!(board.net_tx.write(PACKET).await);
-    }
-
-    /*
     debug!("app start");
     app.start(&mut board);
 
     // Main event loop
     loop {
         let event = EVENT_QUEUE.receive().await;
-        app.handle(event, &mut board);
+        app.handle(event, &mut board).await;
     }
-    */
 }

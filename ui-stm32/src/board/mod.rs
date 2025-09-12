@@ -30,6 +30,9 @@ pub use keyboard::Keyboard;
 mod screen;
 pub use screen::Screen;
 
+mod net;
+pub use net::{NetRx, NetTx};
+
 struct StatusLed {
     r: Output<'static>,
     g: Output<'static>,
