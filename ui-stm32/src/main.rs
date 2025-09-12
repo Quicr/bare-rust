@@ -3,12 +3,13 @@
 
 mod board;
 
-use board::{Board, Button, Keyboard};
+use board::{Board, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
 use ui_app::{App, Event};
 
 use defmt::*;
 use embassy_executor::Spawner;
+use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
@@ -38,26 +39,47 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
     loop {
         let _ = Timer::after_millis(KEYBOARD_SCAN_MILLIS).await;
         for event in keyboard.scan() {
-            defmt::info!("kbd event: {:?}", event);
             events.send(event).await;
         }
     }
 }
 
+#[embassy_executor::task]
+async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
+    const DMA_BUFFER_SIZE: usize = 1024;
+
+    // Wrap the raw receiver in a DMA-buffered, SLIP-parsing, TLV-parsing version
+    let mut dma_buf = [0u8; DMA_BUFFER_SIZE];
+    let mut from = from.into_ring_buffered(&mut dma_buf);
+    let mut from = NetRx::new(&mut from);
+
+    loop {
+        let Some(from_net) = from.next().await else {
+            continue;
+        };
+
+        events.send(Event::FromNet(from_net)).await;
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    info!("about to instantiate board");
+
     let mut board = Board::new().await;
     let mut app = App::new();
 
+    info!("done setting up board and app");
+
     // Capture button events
     unwrap!(spawner.spawn(monitor_button(
-        board.ai_button.take().unwrap(),
+        board.button_a.take().unwrap(),
         ButtonId::A,
         EVENT_QUEUE.sender()
     )));
 
     unwrap!(spawner.spawn(monitor_button(
-        board.ptt_button.take().unwrap(),
+        board.button_b.take().unwrap(),
         ButtonId::B,
         EVENT_QUEUE.sender()
     )));
@@ -68,6 +90,13 @@ async fn main(spawner: Spawner) {
         EVENT_QUEUE.sender()
     )));
 
+    // Capture UART events from the NET chip
+    unwrap!(spawner.spawn(monitor_net(
+        board.net_rx.take().unwrap(),
+        EVENT_QUEUE.sender()
+    )));
+
+    debug!("app start");
     app.start(&mut board);
 
     // Main event loop

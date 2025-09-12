@@ -62,11 +62,22 @@ pub enum Button {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Format)]
+pub enum FromNet {
+    Pong,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Format)]
+pub enum ToNet {
+    Ping,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum Event {
     ButtonDown(Button),
     ButtonUp(Button),
     KeyDown(Key, KeyValue),
     KeyUp(Key),
+    FromNet(FromNet),
 }
 
 #[allow(dead_code)]
@@ -131,9 +142,14 @@ pub trait Screen {
     fn draw(&mut self, left: usize, right: usize, top: usize, bottom: usize, data: &[u16]);
 }
 
+pub trait NetTx {
+    fn write(&mut self, to_net: &ToNet);
+}
+
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
     fn screen(&mut self) -> &mut impl Screen;
+    fn net_tx(&mut self) -> &mut impl NetTx;
     fn log(&mut self, message: &str);
 }
 
@@ -204,18 +220,23 @@ impl App {
         match event {
             Event::ButtonDown(button) => match button {
                 Button::A => {
+                    out.log("button a down");
                     self.a_down = true;
+                    out.net_tx().write(&ToNet::Ping);
                 }
                 Button::B => {
+                    out.log("button b down");
                     self.b_down = true;
                 }
             },
 
             Event::ButtonUp(button) => match button {
                 Button::A => {
+                    out.log("button a up");
                     self.a_down = false;
                 }
                 Button::B => {
+                    out.log("button b up");
                     self.b_down = false;
                 }
             },
@@ -227,6 +248,12 @@ impl App {
             Event::KeyUp(_key) => {
                 out.log("key up");
             }
+
+            Event::FromNet(from_net) => match from_net {
+                FromNet::Pong => {
+                    out.log("pong");
+                }
+            },
         }
 
         out.status_led().set(false, self.a_down, self.b_down);

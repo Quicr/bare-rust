@@ -1,18 +1,28 @@
-use super::{Button, Keyboard, Screen, StatusLed};
+use super::{Button, Keyboard, NetTx, Screen, StatusLed};
 use embassy_stm32::{
+    bind_interrupts,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
+    mode::Async,
+    peripherals,
     spi::Spi,
+    usart::{self, UartRx, UartTx},
 };
 use ui_app::{Led, Outputs};
 
 pub struct Board {
     status_led: StatusLed,
     screen: Screen,
-    pub ptt_button: Option<Button>,
-    pub ai_button: Option<Button>,
+    net_tx: NetTx<UartTx<'static, Async>>,
+    pub button_a: Option<Button>,
+    pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
+    pub net_rx: Option<UartRx<'static, Async>>,
 }
+
+bind_interrupts!(struct Irqs {
+    USART2 => usart::InterruptHandler<peripherals::USART2>;
+});
 
 impl Board {
     pub async fn new() -> Self {
@@ -55,8 +65,8 @@ impl Board {
         let status_led = StatusLed { r, g, b };
 
         // Buttons
-        let ai_button = ExtiInput::new(p.PC0, p.EXTI0, Pull::Up);
-        let ptt_button = ExtiInput::new(p.PC1, p.EXTI1, Pull::Up);
+        let button_a = ExtiInput::new(p.PC1, p.EXTI1, Pull::Up);
+        let button_b = ExtiInput::new(p.PC0, p.EXTI0, Pull::Up);
 
         // Keyboard
         let cols = [
@@ -94,15 +104,29 @@ impl Board {
         let spi1 = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
         let screen = Screen::new(chip_select, data_command, reset, backlight, spi1).await;
 
-        // TODO(RLB): NET UART
-        // TODO(RLB): MGMT UART
+        // NET UART
+        let net_uart = {
+            use embassy_stm32::usart::*;
+            let mut config = Config::default();
+            config.baudrate = 460800;
+            config.data_bits = DataBits::DataBits8;
+            config.stop_bits = StopBits::STOP2;
+            config.parity = Parity::ParityNone;
+
+            Uart::new(p.USART2, p.PA3, p.PA2, Irqs, p.DMA1_CH6, p.DMA1_CH5, config).unwrap()
+        };
+
+        let (net_tx, net_rx) = net_uart.split();
+        let net_tx = NetTx::new(net_tx);
 
         Self {
             status_led,
             screen,
-            ptt_button: Some(ptt_button),
-            ai_button: Some(ai_button),
+            net_tx,
+            button_a: Some(button_a),
+            button_b: Some(button_b),
             keyboard: Some(keyboard),
+            net_rx: Some(net_rx),
         }
     }
 }
@@ -114,6 +138,10 @@ impl Outputs for Board {
 
     fn screen(&mut self) -> &mut impl ui_app::Screen {
         &mut self.screen
+    }
+
+    fn net_tx(&mut self) -> &mut impl ui_app::NetTx {
+        &mut self.net_tx
     }
 
     fn log(&mut self, message: &str) {
