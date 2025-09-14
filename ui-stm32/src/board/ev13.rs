@@ -15,7 +15,6 @@ pub struct Board {
     status_led: StatusLed,
     screen: Screen,
     net_tx: NetTx<UartTx<'static, Async>>,
-    pub i2s: I2S<'static, u8>,
     pub i2c: I2c<'static, Blocking, Master>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
@@ -56,6 +55,16 @@ impl Board {
                 lsi: true,
                 lse: None,
             };
+
+            // XXX(RLB) The prediv = M value here must be the same as the PLL config above.  The
+            // CubeMX clock tree shows one M value for both PLLs.
+            config.rcc.plli2s = Some(Pll {
+                prediv: PllPreDiv::DIV3,
+                mul: PllMul::MUL50,
+                divp: None,
+                divq: None,
+                divr: Some(PllRDiv::DIV2),
+            });
 
             config
         };

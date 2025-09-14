@@ -65,6 +65,7 @@ async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    /*
     info!("about to instantiate board");
 
     let mut board = Board::new().await;
@@ -97,12 +98,18 @@ async fn main(spawner: Spawner) {
         EVENT_QUEUE.sender()
     )));
 
-    ///// Audio Chip /////
+    debug!("app start");
+    app.start(&mut board);
 
-    // Skip I2C setup for now (?)
+    // Main event loop
+    loop {
+        let event = EVENT_QUEUE.receive().await;
+        app.handle(event, &mut board);
+    }
+    */
 
     /*
-    ///// EEPROM /////
+    ///// EEPROM Demo /////
 
     // Read the current contents of the EEPROM
     const I2C_ADDR: u8 = 0x50;
@@ -134,14 +141,82 @@ async fn main(spawner: Spawner) {
     info!("eeprom after {}", hex);
     */
 
-    /*
-    debug!("app start");
-    app.start(&mut board);
+    ///// Audio Chip /////
+    let config = {
+        use embassy_stm32::{rcc::*, time::Hertz};
 
-    // Main event loop
-    loop {
-        let event = EVENT_QUEUE.receive().await;
-        app.handle(event, &mut board);
+        let mut config = embassy_stm32::Config::default();
+
+        config.rcc.hse = Some(Hse {
+            freq: Hertz(6_000_000),
+            mode: HseMode::Bypass,
+        });
+        config.rcc.sys = Sysclk::PLL1_P;
+        config.rcc.pll_src = PllSource::HSE;
+        config.rcc.pll = Some(Pll {
+            prediv: PllPreDiv::DIV3,
+            mul: PllMul::MUL168,
+            divp: Some(PllPDiv::DIV2),
+            divq: Some(PllQDiv::DIV7),
+            divr: None,
+        });
+
+        config.rcc.ahb_pre = AHBPrescaler::DIV1;
+        config.rcc.apb1_pre = APBPrescaler::DIV4;
+        config.rcc.apb2_pre = APBPrescaler::DIV2;
+        config.rcc.ls = LsConfig {
+            rtc: RtcClockSource::LSI,
+            lsi: true,
+            lse: None,
+        };
+
+        // XXX(RLB) The prediv = M value here must be the same as the PLL config above.  The
+        // CubeMX clock tree shows one M value for both PLLs.
+        config.rcc.plli2s = Some(Pll {
+            prediv: PllPreDiv::DIV3,
+            mul: PllMul::MUL50,
+            divp: None,
+            divq: None,
+            divr: Some(PllRDiv::DIV2),
+        });
+
+        config
+    };
+    let p = embassy_stm32::init(config);
+
+    let mut wavetable = [0u16; 1200];
+    for (i, frame) in wavetable.chunks_mut(2).enumerate() {
+        frame[0] = ((((i / 150) % 2) * 2048) as i16 - 1024) as u16; // 160 Hz square wave L
+        frame[1] = ((((i / 100) % 2) * 2048) as i16 - 1024) as u16; // 240 Hz square wave R
     }
-    */
+
+    let mut dma_buffer = [0u16; 2400];
+
+    let mut config = {
+        use embassy_stm32::{i2s::*, time::Hertz};
+
+        let mut config = Config::default();
+        config.frequency = Hertz(8_000);
+        config.mode = Mode::Slave;
+        config.standard = Standard::Philips;
+        config.format = Format::Data16Channel32;
+        config.clock_polarity = ClockPolarity::IdleLow;
+        config.master_clock = false;
+        config
+    };
+    let mut i2s = embassy_stm32::i2s::I2S::new_txonly_nomck(
+        p.SPI3,
+        p.PB5,
+        p.PA15,
+        p.PC10,
+        p.DMA1_CH7,
+        &mut dma_buffer,
+        config,
+    );
+    i2s.start();
+
+    info!("playing...");
+    loop {
+        i2s.write(&wavetable).await.ok();
+    }
 }
