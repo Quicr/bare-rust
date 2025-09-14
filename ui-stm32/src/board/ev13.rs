@@ -3,7 +3,8 @@ use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
-    mode::Async,
+    i2c::{mode::Master, I2c},
+    mode::{Async, Blocking},
     peripherals,
     spi::Spi,
     usart::{self, UartRx, UartTx},
@@ -14,6 +15,8 @@ pub struct Board {
     status_led: StatusLed,
     screen: Screen,
     net_tx: NetTx<UartTx<'static, Async>>,
+    pub i2s: I2S<'static, u8>,
+    pub i2c: I2c<'static, Blocking, Master>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
@@ -119,10 +122,14 @@ impl Board {
         let (net_tx, net_rx) = net_uart.split();
         let net_tx = NetTx::new(net_tx);
 
+        // EEPROM I2C interface
+        let i2c = I2c::new_blocking(p.I2C1, p.PB6, p.PB7, Default::default());
+
         Self {
             status_led,
             screen,
             net_tx,
+            i2c,
             button_a: Some(button_a),
             button_b: Some(button_b),
             keyboard: Some(keyboard),
