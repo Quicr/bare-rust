@@ -3,17 +3,102 @@ use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
-    mode::Async,
+    mode::{Async, Blocking},
     peripherals,
-    spi::Spi,
+    spi::{Spi, Word},
     usart::{self, UartRx, UartTx},
 };
+use embassy_time::Delay;
+use embedded_graphics_core::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
+use ili9341::{Ili9341, Orientation};
+use itertools::Itertools;
 use ui_app::{Led, Outputs};
+
+struct NoopScreen;
+
+impl ui_app::Screen for NoopScreen {
+    fn width(&self) -> usize {
+        320
+    }
+
+    fn height(&self) -> usize {
+        240
+    }
+
+    fn fill(&mut self, color: u16) {}
+
+    fn draw(&mut self, left: usize, right: usize, top: usize, bottom: usize, data: &[u16]) {}
+}
+
+use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
+
+struct DisplayData {
+    data_command: Output<'static>,
+    spi: Spi<'static, Blocking>,
+}
+
+impl DisplayData {
+    fn write(&mut self, data: DataFormat<'_>) -> Result<(), DisplayError> {
+        use DataFormat::*;
+        match data {
+            U8(slice) => self.write_slice(slice),
+            U16(slice) => self.write_slice(slice),
+            U16BE(slice) => self.write_slice(slice),
+            U16LE(slice) => self.write_slice(slice),
+            U8Iter(iter) => self.write_iter(iter),
+            U16BEIter(iter) => self.write_iter(iter),
+            U16LEIter(iter) => self.write_iter(iter),
+            _ => unreachable!(),
+        }
+    }
+
+    fn write_slice<W: Word>(&mut self, data: &[W]) -> Result<(), DisplayError> {
+        self.spi.blocking_write(data).unwrap();
+        Ok(())
+    }
+
+    fn write_iter<W: Word>(
+        &mut self,
+        iter: &mut dyn Iterator<Item = W>,
+    ) -> Result<(), DisplayError> {
+        const CHUNK_SIZE: usize = 128;
+
+        // XXX(RLB) Very C-style iteration, could probably write this in a way that would optimize
+        // better.
+        let mut data = [W::default(); CHUNK_SIZE];
+        let mut n = 0;
+        for (i, x) in iter.enumerate() {
+            data[i % CHUNK_SIZE] = x;
+            n = i + 1;
+
+            if n > 0 && n % CHUNK_SIZE == 0 {
+                self.spi.blocking_write(&data).unwrap();
+                n = 0;
+            }
+        }
+
+        self.spi.blocking_write(&data[..n]).unwrap();
+        Ok(())
+    }
+}
+
+impl WriteOnlyDataCommand for DisplayData {
+    fn send_commands(&mut self, cmd: DataFormat<'_>) -> Result<(), DisplayError> {
+        self.data_command.set_low();
+        self.write(cmd)
+    }
+
+    fn send_data(&mut self, buf: DataFormat<'_>) -> Result<(), DisplayError> {
+        self.data_command.set_high();
+        self.write(buf)
+    }
+}
 
 pub struct Board {
     status_led: StatusLed,
-    screen: Screen,
+    screen: NoopScreen,
     net_tx: NetTx<UartTx<'static, Async>>,
+    display: Ili9341<DisplayData, Output<'static>>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
@@ -88,6 +173,7 @@ impl Board {
         let keyboard = Keyboard::new(cols, rows);
 
         // Screen
+        /*
         let chip_select = Output::new(p.PB8, Level::Low, Speed::Low);
         let data_command = Output::new(p.PB9, Level::Low, Speed::Low);
         let reset = Output::new(p.PC13, Level::Low, Speed::Low);
@@ -103,6 +189,46 @@ impl Board {
         };
         let spi1 = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
         let screen = Screen::new(chip_select, data_command, reset, backlight, spi1).await;
+        */
+
+        let chip_select = Output::new(p.PB8, Level::Low, Speed::Low);
+        let reset = Output::new(p.PC13, Level::Low, Speed::Low);
+        let data_command = Output::new(p.PB9, Level::Low, Speed::Low);
+        let mut backlight = Output::new(p.PC14, Level::Low, Speed::Low);
+
+        let config = {
+            use embassy_stm32::spi::*;
+            let mut config = Config::default();
+            config.mode.polarity = Polarity::IdleLow;
+            config.mode.phase = Phase::CaptureOnFirstTransition;
+            config.bit_order = BitOrder::MsbFirst;
+            config
+        };
+        let spi = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
+
+        let display_data = DisplayData { data_command, spi };
+
+        let mut display = Ili9341::new(
+            display_data,
+            reset,
+            &mut Delay,
+            Orientation::Portrait,
+            ili9341::DisplaySize240x320,
+        )
+        .unwrap();
+
+        display
+            .fill_solid(
+                &Rectangle {
+                    top_left: Point { x: 10, y: 10 },
+                    size: Size {
+                        width: 10,
+                        height: 10,
+                    },
+                },
+                Rgb565::new(0xbb, 0x00, 0xbb),
+            )
+            .unwrap();
 
         // NET UART
         let net_uart = {
@@ -121,8 +247,9 @@ impl Board {
 
         Self {
             status_led,
-            screen,
+            screen: NoopScreen,
             net_tx,
+            display,
             button_a: Some(button_a),
             button_b: Some(button_b),
             keyboard: Some(keyboard),
