@@ -78,7 +78,6 @@ impl DrawTarget for Board {
     type Color = Rgb565;
     type Error = String;
 
-    // Required method
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,

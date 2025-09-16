@@ -172,7 +172,6 @@ where
     type Color = BinaryColor;
     type Error = D::Error;
 
-    // Required method
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
