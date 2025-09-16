@@ -146,10 +146,10 @@ fn key_logging() {
     assert_eq!(outputs.last_message, "");
 
     app.handle(Event::KeyDown(Key::A, KeyValue::Char('a')), &mut outputs);
-    assert_eq!(outputs.last_message, "key down");
+    assert_eq!(outputs.last_message, "key down: A Char('a')");
 
     app.handle(Event::KeyUp(Key::A), &mut outputs);
-    assert_eq!(outputs.last_message, "key up");
+    assert_eq!(outputs.last_message, "key up: A");
 }
 
 #[test]
