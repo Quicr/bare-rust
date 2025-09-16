@@ -1,18 +1,106 @@
-use super::{Button, Keyboard, NetTx, Screen, StatusLed};
+use super::{Button, Keyboard, NetTx, StatusLed};
+use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
-    mode::Async,
+    mode::{Async, Blocking},
     peripherals,
-    spi::Spi,
+    spi::{Spi, Word},
     usart::{self, UartRx, UartTx},
 };
+use embassy_time::Delay;
+use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
+use ili9341::{Ili9341, Orientation};
 use ui_app::{Led, Outputs};
+
+struct DisplayData {
+    // These fields are not used, but we need to keep them alive so that the chip select output is
+    // held low and the backlight output is held high.
+    _chip_select: Output<'static>,
+    _backlight: Output<'static>,
+
+    data_command: Output<'static>,
+    spi: Spi<'static, Blocking>,
+}
+
+impl DisplayData {
+    fn new(
+        mut backlight: Output<'static>,
+        mut chip_select: Output<'static>,
+        data_command: Output<'static>,
+        spi: Spi<'static, Blocking>,
+    ) -> Self {
+        backlight.set_high();
+        chip_select.set_low();
+
+        Self {
+            _backlight: backlight,
+            _chip_select: chip_select,
+            data_command,
+            spi,
+        }
+    }
+
+    fn write(&mut self, data: DataFormat<'_>) -> Result<(), DisplayError> {
+        use DataFormat::*;
+        match data {
+            U8(slice) => self.write_slice(slice),
+            U16(slice) => self.write_slice(slice),
+            U16BE(slice) => self.write_slice(slice),
+            U16LE(slice) => self.write_slice(slice),
+            U8Iter(iter) => self.write_iter(iter),
+            U16BEIter(iter) => self.write_iter(iter),
+            U16LEIter(iter) => self.write_iter(iter),
+            _ => unreachable!(),
+        }
+    }
+
+    fn write_slice<W: Word>(&mut self, data: &[W]) -> Result<(), DisplayError> {
+        self.spi.blocking_write(data).unwrap();
+        Ok(())
+    }
+
+    fn write_iter<W: Word>(
+        &mut self,
+        iter: &mut dyn Iterator<Item = W>,
+    ) -> Result<(), DisplayError> {
+        const CHUNK_SIZE: usize = 128;
+
+        // XXX(RLB) Very C-style iteration, could probably write this in a way that would optimize
+        // better.
+        let mut data = [W::default(); CHUNK_SIZE];
+        let mut n = 0;
+        for (i, x) in iter.enumerate() {
+            data[i % CHUNK_SIZE] = x;
+            n = i + 1;
+
+            if n > 0 && n % CHUNK_SIZE == 0 {
+                self.spi.blocking_write(&data).unwrap();
+                n = 0;
+            }
+        }
+
+        self.spi.blocking_write(&data[..n]).unwrap();
+        Ok(())
+    }
+}
+
+impl WriteOnlyDataCommand for DisplayData {
+    fn send_commands(&mut self, cmd: DataFormat<'_>) -> Result<(), DisplayError> {
+        self.data_command.set_low();
+        self.write(cmd)
+    }
+
+    fn send_data(&mut self, buf: DataFormat<'_>) -> Result<(), DisplayError> {
+        self.data_command.set_high();
+        self.write(buf)
+    }
+}
 
 pub struct Board {
     status_led: StatusLed,
-    screen: Screen,
+    screen: Ili9341<DisplayData, Output<'static>>,
     net_tx: NetTx<UartTx<'static, Async>>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
@@ -101,8 +189,16 @@ impl Board {
             config.bit_order = BitOrder::MsbFirst;
             config
         };
-        let spi1 = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
-        let screen = Screen::new(chip_select, data_command, reset, backlight, spi1).await;
+        let spi = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
+
+        let screen = Ili9341::new(
+            DisplayData::new(backlight, chip_select, data_command, spi),
+            reset,
+            &mut Delay,
+            Orientation::Portrait,
+            ili9341::DisplaySize240x320,
+        )
+        .unwrap();
 
         // NET UART
         let net_uart = {
@@ -136,7 +232,7 @@ impl Outputs for Board {
         &mut self.status_led
     }
 
-    fn screen(&mut self) -> &mut impl ui_app::Screen {
+    fn screen(&mut self) -> &mut impl DrawTarget<Color = Rgb565> {
         &mut self.screen
     }
 
