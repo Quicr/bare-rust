@@ -222,17 +222,26 @@ impl App {
             .draw(out.screen())
             .unwrap_or_else(|_| panic!("graphics error"));
 
+        let pad: u32 = 10;
+        let diameter: u32 = 20;
+        let width = rect.size.width;
+        let height = rect.size.height;
+
         let mut dot = |left, top, color| {
-            Circle::new(Point::new(left, top), 20)
+            Circle::new(Point::new(left as i32, top as i32), diameter)
                 .into_styled(PrimitiveStyle::with_fill(color))
                 .draw(out.screen())
                 .unwrap_or_else(|_| panic!("graphics error"));
         };
 
-        dot(10, 10, Rgb565::RED);
-        dot(210, 10, Rgb565::GREEN);
-        dot(10, 290, Rgb565::BLUE);
-        dot(210, 290, Rgb565::YELLOW);
+        dot(pad, pad, Rgb565::RED);
+        dot(width - pad - diameter, pad, Rgb565::GREEN);
+        dot(pad, height - pad - diameter, Rgb565::BLUE);
+        dot(
+            width - pad - diameter,
+            height - pad - diameter,
+            Rgb565::YELLOW,
+        );
 
         let text = Text::new(
             "Hello World!",

@@ -67,26 +67,19 @@ async function handle_ptt(e) {
   }
 }
 
-async function handle_screen(e) {
-  let { left, right, top, bottom, data } = e.payload;
+async function handle_pixels(e) {
+  let { pixels } = e.payload;
 
   const screen = document.getElementById("screen");
   const ctx = screen.getContext("2d");
 
-  const width = right - left;
-  const height = bottom - top;
-  const imageData = ctx.createImageData(width, height);
+  const imageData = ctx.createImageData(1, 1);
+  for (let pixel of pixels) {
+    const { x, y, r, g, b } = pixel;
 
-  if (data.length != imageData.data.length) {
-    console.log(`malformed command ${data.length} != ${imageData.data.length}`);
-    return;
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b}, 1)`;
+    ctx.fillRect( x, y, 1, 1 );
   }
-
-  for (let i = 0; i < imageData.data.length; i ++) {
-    imageData.data[i] = data[i];
-  }
-  
-  ctx.putImageData(imageData, left, top);
 }
 
 async function handle_led(e) {
@@ -100,9 +93,9 @@ async function handle_led(e) {
 
 async function handle_events() {
   const ptt_state = listen('PttState', handle_ptt);
-  const screen = listen('Screen', handle_screen);
+  const pixels = listen('Pixels', handle_pixels);
   const led = listen('LED', handle_led);
-  return Promise.all([ptt_state, screen, led])
+  return Promise.all([ptt_state, pixels, led])
 }
 
 window.addEventListener("DOMContentLoaded", async () => {

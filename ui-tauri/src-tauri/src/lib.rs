@@ -2,10 +2,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use core::ops::DerefMut;
+use embedded_graphics::{
+    draw_target::DrawTarget,
+    pixelcolor::{Rgb565, Rgb888},
+    prelude::*,
+    primitives::Rectangle,
+};
 use once_cell::sync::OnceCell;
 use std::sync::{mpsc, Mutex};
 use tauri::Emitter;
-use ui_app::{App, Button, Event, FromNet, Key, KeyValue, Led, NetTx, Outputs, Screen, ToNet};
+use ui_app::{App, Button, Event, FromNet, Key, KeyValue, Led, NetTx, Outputs, ToNet};
 
 mod hactar_vaporwave;
 
@@ -21,14 +27,17 @@ mod cmd {
     }
 
     #[derive(Clone, Serialize)]
-    pub struct Draw<'a> {
-        pub left: usize,
-        pub right: usize,
-        pub top: usize,
-        pub bottom: usize,
+    pub struct Pixel {
+        pub x: usize,
+        pub y: usize,
+        pub r: u8,
+        pub g: u8,
+        pub b: u8,
+    }
 
-        /// Data in <canvas> RGBA format
-        pub data: &'a [u8],
+    #[derive(Clone, Serialize)]
+    pub struct Pixels {
+        pub pixels: Vec<Pixel>,
     }
 }
 
@@ -59,57 +68,39 @@ impl Led for Board {
     }
 }
 
-impl Screen for Board {
-    fn width(&self) -> usize {
-        320
+impl Dimensions for Board {
+    fn bounding_box(&self) -> Rectangle {
+        Rectangle::new(Point::new(0, 0), Size::new(240, 320))
     }
+}
 
-    fn height(&self) -> usize {
-        240
-    }
+impl DrawTarget for Board {
+    type Color = Rgb565;
+    type Error = String;
 
-    fn fill(&mut self, color: u16) {
-        let data = [color; 320 * 240];
-        self.draw(0, self.width(), 0, self.height(), &data);
-    }
-
-    fn draw(&mut self, left: usize, right: usize, top: usize, bottom: usize, data: &[u16]) {
-        println!(
-            "draw {} {} {} {} ({} x {} == {}? {})",
-            left,
-            right,
-            top,
-            bottom,
-            (right - left),
-            (bottom - top),
-            data.len(),
-            data.len() == (right - left) * (bottom - top)
-        );
-
-        // Unpack the rgb565 values to RGBA tuples
-        let data: Vec<u8> = data
-            .iter()
-            .map(|rgb565| {
-                [
-                    (((rgb565 & 0b11111_000000_00000) >> 11) << 3) as u8, // R
-                    (((rgb565 & 0b00000_111111_00000) >> 5) << 2) as u8,  // G
-                    (((rgb565 & 0b00000_000000_11111) >> 0) << 3) as u8,  // B
-                    (0xff as u8),                                         // A
-                ]
+    // Required method
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        let pixels = pixels
+            .into_iter()
+            .map(|Pixel(point, color)| {
+                let rgb = Rgb888::from(color);
+                cmd::Pixel {
+                    x: point.x as usize,
+                    y: point.y as usize,
+                    r: rgb.r(),
+                    g: rgb.g(),
+                    b: rgb.b(),
+                }
             })
-            .flatten()
             .collect();
 
-        // Send the draw command to the UI
-        let cmd = cmd::Draw {
-            left,
-            right,
-            top,
-            bottom,
-            data: data.as_slice(),
-        };
+        let cmd = cmd::Pixels { pixels };
 
-        self.app.emit("Screen", cmd).unwrap();
+        self.app.emit("Pixels", cmd).unwrap();
+        Ok(())
     }
 }
 
@@ -124,7 +115,7 @@ impl Outputs for Board {
         self
     }
 
-    fn screen(&mut self) -> &mut impl Screen {
+    fn screen(&mut self) -> &mut impl DrawTarget<Color = Rgb565> {
         self
     }
 
