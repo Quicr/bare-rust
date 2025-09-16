@@ -1,6 +1,6 @@
 #![no_std]
 
-use bitmap_font::{tamzen::FONT_14x26, TextStyle};
+use bitmap_font::{TextStyle, tamzen::FONT_14x26};
 use defmt::Format;
 use embedded_graphics::{
     draw_target::DrawTarget,
