@@ -1,6 +1,15 @@
 #![no_std]
 
+use bitmap_font::{tamzen::FONT_14x26, TextStyle};
 use defmt::Format;
+use embedded_graphics::{
+    draw_target::DrawTarget,
+    geometry::Dimensions,
+    pixelcolor::{BinaryColor, Rgb565},
+    prelude::*,
+    primitives::{Circle, PrimitiveStyle, Rectangle},
+    text::Text,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum Key {
@@ -130,16 +139,50 @@ pub trait Led {
     }
 }
 
-fn rgb565(r: u8, g: u8, b: u8) -> u16 {
-    // Discard the low-order bits of the colors
-    (((r as u16) >> 3) << 11) | (((g as u16) >> 2) << 5) | ((b as u16) >> 3)
+struct BinaryDisplay<'a, C, D> {
+    foreground: C,
+    background: C,
+    display: &'a mut D,
 }
 
-pub trait Screen {
-    fn width(&self) -> usize;
-    fn height(&self) -> usize;
-    fn fill(&mut self, color: u16);
-    fn draw(&mut self, left: usize, right: usize, top: usize, bottom: usize, data: &[u16]);
+impl<'a, C, D> BinaryDisplay<'a, C, D> {
+    fn new(foreground: C, background: C, display: &'a mut D) -> Self {
+        Self {
+            foreground,
+            background,
+            display,
+        }
+    }
+}
+
+impl<'a, C, D> Dimensions for BinaryDisplay<'a, C, D>
+where
+    D: Dimensions,
+{
+    fn bounding_box(&self) -> Rectangle {
+        self.display.bounding_box()
+    }
+}
+
+impl<'a, C, D> DrawTarget for BinaryDisplay<'a, C, D>
+where
+    C: PixelColor,
+    D: DrawTarget<Color = C>,
+{
+    type Color = BinaryColor;
+    type Error = D::Error;
+
+    // Required method
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        let rgb = pixels.into_iter().map(|Pixel(point, color)| match color {
+            BinaryColor::On => Pixel(point, self.foreground),
+            BinaryColor::Off => Pixel(point, self.background),
+        });
+        self.display.draw_iter(rgb)
+    }
 }
 
 pub trait NetTx {
@@ -148,7 +191,7 @@ pub trait NetTx {
 
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
-    fn screen(&mut self) -> &mut impl Screen;
+    fn screen(&mut self) -> &mut impl DrawTarget<Color = Rgb565>;
     fn net_tx(&mut self) -> &mut impl NetTx;
     fn log(&mut self, message: &str);
 }
@@ -173,47 +216,32 @@ impl App {
         out.status_led().set_color(Color::Black);
 
         // Draw a test pattern to the screen
-        const SIZE: usize = 10;
-        let screen = out.screen();
-        let mut data = [0_u16; SIZE * SIZE];
+        let rect = out.screen().bounding_box();
 
-        // Background
-        screen.fill(rgb565(0x88, 0x88, 0x88));
+        rect.into_styled(PrimitiveStyle::with_fill(Rgb565::new(0x88, 0x88, 0x88)))
+            .draw(out.screen())
+            .unwrap_or_else(|_| panic!("graphics error"));
 
-        // Upper left = R
-        let (x0, x1, y0, y1) = (SIZE, SIZE + SIZE, SIZE, SIZE + SIZE);
-        data.fill(rgb565(0xFF, 0x00, 0x00));
-        screen.draw(x0, x1, y0, y1, &data);
+        let mut dot = |left, top, color| {
+            Circle::new(Point::new(left, top), 20)
+                .into_styled(PrimitiveStyle::with_fill(color))
+                .draw(out.screen())
+                .unwrap_or_else(|_| panic!("graphics error"));
+        };
 
-        // Upper right = G
-        let (x0, x1, y0, y1) = (
-            screen.width() - SIZE - SIZE,
-            screen.width() - SIZE,
-            SIZE,
-            SIZE + SIZE,
+        dot(10, 10, Rgb565::RED);
+        dot(210, 10, Rgb565::GREEN);
+        dot(10, 290, Rgb565::BLUE);
+        dot(210, 290, Rgb565::YELLOW);
+
+        let text = Text::new(
+            "Hello World!",
+            Point { x: 10, y: 30 },
+            TextStyle::new(&FONT_14x26, BinaryColor::On),
         );
-        data.fill(rgb565(0x00, 0xFF, 0x00));
-        screen.draw(x0, x1, y0, y1, &data);
-
-        // Lower left = B
-        let (x0, x1, y0, y1) = (
-            SIZE,
-            SIZE + SIZE,
-            screen.height() - SIZE - SIZE,
-            screen.height() - SIZE,
-        );
-        data.fill(rgb565(0x00, 0x00, 0xFF));
-        screen.draw(x0, x1, y0, y1, &data);
-
-        // Lower right = Y
-        let (x0, x1, y0, y1) = (
-            screen.width() - SIZE - SIZE,
-            screen.width() - SIZE,
-            screen.height() - SIZE - SIZE,
-            screen.height() - SIZE,
-        );
-        data.fill(rgb565(0xFF, 0xFF, 0x00));
-        screen.draw(x0, x1, y0, y1, &data);
+        let mut binary_display = BinaryDisplay::new(Rgb565::WHITE, Rgb565::BLACK, out.screen());
+        text.draw(&mut binary_display)
+            .unwrap_or_else(|_| panic!("graphics error"));
     }
 
     pub fn handle(&mut self, event: Event, out: &mut impl Outputs) {

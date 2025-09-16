@@ -27,9 +27,6 @@ use ui_app::Led;
 mod keyboard;
 pub use keyboard::Keyboard;
 
-mod screen;
-pub use screen::Screen;
-
 mod net;
 pub use net::{NetRx, NetTx};
 

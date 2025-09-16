@@ -1,4 +1,5 @@
-use super::{Button, Keyboard, NetTx, Screen, StatusLed};
+use super::{Button, Keyboard, NetTx, StatusLed};
+use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
@@ -9,35 +10,38 @@ use embassy_stm32::{
     usart::{self, UartRx, UartTx},
 };
 use embassy_time::Delay;
-use embedded_graphics_core::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
+use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 use ili9341::{Ili9341, Orientation};
-use itertools::Itertools;
 use ui_app::{Led, Outputs};
 
-struct NoopScreen;
-
-impl ui_app::Screen for NoopScreen {
-    fn width(&self) -> usize {
-        320
-    }
-
-    fn height(&self) -> usize {
-        240
-    }
-
-    fn fill(&mut self, color: u16) {}
-
-    fn draw(&mut self, left: usize, right: usize, top: usize, bottom: usize, data: &[u16]) {}
-}
-
-use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
-
 struct DisplayData {
+    // These fields are not used, but we need to keep them alive so that the chip select output is
+    // held low and the backlight output is held high.
+    _chip_select: Output<'static>,
+    _backlight: Output<'static>,
+
     data_command: Output<'static>,
     spi: Spi<'static, Blocking>,
 }
 
 impl DisplayData {
+    fn new(
+        mut backlight: Output<'static>,
+        mut chip_select: Output<'static>,
+        data_command: Output<'static>,
+        spi: Spi<'static, Blocking>,
+    ) -> Self {
+        backlight.set_high();
+        chip_select.set_low();
+
+        Self {
+            _backlight: backlight,
+            _chip_select: chip_select,
+            data_command,
+            spi,
+        }
+    }
+
     fn write(&mut self, data: DataFormat<'_>) -> Result<(), DisplayError> {
         use DataFormat::*;
         match data {
@@ -96,9 +100,8 @@ impl WriteOnlyDataCommand for DisplayData {
 
 pub struct Board {
     status_led: StatusLed,
-    screen: NoopScreen,
+    screen: Ili9341<DisplayData, Output<'static>>,
     net_tx: NetTx<UartTx<'static, Async>>,
-    display: Ili9341<DisplayData, Output<'static>>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
@@ -173,7 +176,6 @@ impl Board {
         let keyboard = Keyboard::new(cols, rows);
 
         // Screen
-        /*
         let chip_select = Output::new(p.PB8, Level::Low, Speed::Low);
         let data_command = Output::new(p.PB9, Level::Low, Speed::Low);
         let reset = Output::new(p.PC13, Level::Low, Speed::Low);
@@ -187,48 +189,16 @@ impl Board {
             config.bit_order = BitOrder::MsbFirst;
             config
         };
-        let spi1 = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
-        let screen = Screen::new(chip_select, data_command, reset, backlight, spi1).await;
-        */
-
-        let chip_select = Output::new(p.PB8, Level::Low, Speed::Low);
-        let reset = Output::new(p.PC13, Level::Low, Speed::Low);
-        let data_command = Output::new(p.PB9, Level::Low, Speed::Low);
-        let mut backlight = Output::new(p.PC14, Level::Low, Speed::Low);
-
-        let config = {
-            use embassy_stm32::spi::*;
-            let mut config = Config::default();
-            config.mode.polarity = Polarity::IdleLow;
-            config.mode.phase = Phase::CaptureOnFirstTransition;
-            config.bit_order = BitOrder::MsbFirst;
-            config
-        };
         let spi = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
 
-        let display_data = DisplayData { data_command, spi };
-
-        let mut display = Ili9341::new(
-            display_data,
+        let screen = Ili9341::new(
+            DisplayData::new(backlight, chip_select, data_command, spi),
             reset,
             &mut Delay,
             Orientation::Portrait,
             ili9341::DisplaySize240x320,
         )
         .unwrap();
-
-        display
-            .fill_solid(
-                &Rectangle {
-                    top_left: Point { x: 10, y: 10 },
-                    size: Size {
-                        width: 10,
-                        height: 10,
-                    },
-                },
-                Rgb565::new(0xbb, 0x00, 0xbb),
-            )
-            .unwrap();
 
         // NET UART
         let net_uart = {
@@ -247,9 +217,8 @@ impl Board {
 
         Self {
             status_led,
-            screen: NoopScreen,
+            screen,
             net_tx,
-            display,
             button_a: Some(button_a),
             button_b: Some(button_b),
             keyboard: Some(keyboard),
@@ -263,7 +232,7 @@ impl Outputs for Board {
         &mut self.status_led
     }
 
-    fn screen(&mut self) -> &mut impl ui_app::Screen {
+    fn screen(&mut self) -> &mut impl DrawTarget<Color = Rgb565> {
         &mut self.screen
     }
 
