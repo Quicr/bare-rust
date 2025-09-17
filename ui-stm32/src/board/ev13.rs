@@ -65,7 +65,8 @@ impl DisplayData {
         &mut self,
         iter: &mut dyn Iterator<Item = W>,
     ) -> Result<(), DisplayError> {
-        const CHUNK_SIZE: usize = 128;
+        // 1kb of render buffer
+        const CHUNK_SIZE: usize = 512;
 
         // XXX(RLB) Very C-style iteration, could probably write this in a way that would optimize
         // better.
@@ -73,7 +74,7 @@ impl DisplayData {
         let mut n = 0;
         for (i, x) in iter.enumerate() {
             data[i % CHUNK_SIZE] = x;
-            n = i + 1;
+            n += 1;
 
             if n > 0 && n % CHUNK_SIZE == 0 {
                 self.spi.blocking_write(&data).unwrap();
