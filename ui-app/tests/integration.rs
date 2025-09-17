@@ -153,6 +153,23 @@ fn key_logging() {
 }
 
 #[test]
+fn message_buffer_tolerates_overflow() {
+    let mut outputs = MockOutputs::default();
+    let mut app = App::new();
+    app.start(&mut outputs);
+
+    for _i in 0..1000 {
+        app.handle(Event::KeyDown(Key::A, KeyValue::Char('a')), &mut outputs);
+    }
+
+    app.handle(Event::KeyDown(Key::Enter, KeyValue::Enter), &mut outputs);
+    assert_eq!(
+        outputs.last_message,
+        "sending message: aaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+}
+
+#[test]
 fn button_a_sends_ping() {
     let mut outputs = MockOutputs::default();
     let mut app = App::new();

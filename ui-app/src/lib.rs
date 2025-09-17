@@ -1,6 +1,6 @@
 #![no_std]
 
-use bitmap_font::{TextStyle, tamzen::FONT_14x26};
+use bitmap_font::{BitmapFont, TextStyle, tamzen::FONT_10x20};
 use core::fmt::Write;
 use defmt::Format;
 use embedded_graphics::{
@@ -11,6 +11,7 @@ use embedded_graphics::{
     primitives::{Circle, PrimitiveStyle, Rectangle},
     text::Text,
 };
+use heapless::String;
 
 #[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum Key {
@@ -200,14 +201,19 @@ pub trait Outputs {
 pub struct App {
     a_down: bool,
     b_down: bool,
+    message_buffer: String<24>,
 }
 
 impl App {
+    const BACKGROUND: Rgb565 = Rgb565::BLACK;
+    const FONT: BitmapFont<'static> = FONT_10x20;
+
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             a_down: false,
             b_down: false,
+            message_buffer: Default::default(),
         }
     }
 
@@ -218,7 +224,7 @@ impl App {
         // Draw a test pattern to the screen
         let rect = out.screen().bounding_box();
 
-        rect.into_styled(PrimitiveStyle::with_fill(Rgb565::new(0x88, 0x88, 0x88)))
+        rect.into_styled(PrimitiveStyle::with_fill(Self::BACKGROUND))
             .draw(out.screen())
             .unwrap_or_else(|_| panic!("graphics error"));
 
@@ -246,7 +252,7 @@ impl App {
         let text = Text::new(
             "Hello World!",
             Point { x: 10, y: 30 },
-            TextStyle::new(&FONT_14x26, BinaryColor::On),
+            TextStyle::new(&Self::FONT, BinaryColor::On),
         );
         let mut binary_display = BinaryDisplay::new(Rgb565::WHITE, Rgb565::BLACK, out.screen());
         text.draw(&mut binary_display)
@@ -279,13 +285,54 @@ impl App {
             },
 
             Event::KeyDown(key, value) => {
-                let mut msg: heapless::String<64> = Default::default();
+                // Log the key press
+                let mut msg: String<32> = Default::default();
                 write!(&mut msg, "key down: {:?} {:?}", key, value).unwrap();
                 out.log(&msg);
+
+                // If this key press is a return, then clear things out
+                if let Key::Enter = key {
+                    let mut msg: String<64> = Default::default();
+                    write!(&mut msg, "sending message: {}", self.message_buffer).unwrap();
+                    out.log(&msg);
+
+                    self.message_buffer.clear();
+
+                    let width = out.screen().bounding_box().size.width;
+                    let height = Self::FONT.height();
+                    Rectangle::new(Point::new(0, 0), Size::new(width, height))
+                        .into_styled(PrimitiveStyle::with_fill(Self::BACKGROUND))
+                        .draw(out.screen())
+                        .unwrap_or_else(|_| panic!("graphics error"));
+                    return;
+                }
+
+                // Otherwise, if it's a character, add it to the buffer and render it to the screen
+                let KeyValue::Char(c) = value else {
+                    return;
+                };
+
+                if self.message_buffer.len() == self.message_buffer.capacity() {
+                    // Ignore any characters beyond the capacity of the message buffer
+                    return;
+                }
+
+                self.message_buffer.push(c).unwrap();
+
+                let text = Text::new(
+                    &self.message_buffer,
+                    Point { x: 0, y: 0 },
+                    TextStyle::new(&Self::FONT, BinaryColor::On),
+                );
+
+                let mut binary_display =
+                    BinaryDisplay::new(Rgb565::WHITE, Rgb565::BLACK, out.screen());
+                text.draw(&mut binary_display)
+                    .unwrap_or_else(|_| panic!("graphics error"));
             }
 
             Event::KeyUp(key) => {
-                let mut msg: heapless::String<64> = Default::default();
+                let mut msg: heapless::String<32> = Default::default();
                 write!(&mut msg, "key up: {:?}", key).unwrap();
                 out.log(&msg);
             }
