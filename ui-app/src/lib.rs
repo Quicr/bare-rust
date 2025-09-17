@@ -1,6 +1,7 @@
 #![no_std]
 
 use bitmap_font::{TextStyle, tamzen::FONT_14x26};
+use core::fmt::Write;
 use defmt::Format;
 use embedded_graphics::{
     draw_target::DrawTarget,
@@ -277,12 +278,16 @@ impl App {
                 }
             },
 
-            Event::KeyDown(_key, _value) => {
-                out.log("key down");
+            Event::KeyDown(key, value) => {
+                let mut msg: heapless::String<64> = Default::default();
+                write!(&mut msg, "key down: {:?} {:?}", key, value).unwrap();
+                out.log(&msg);
             }
 
-            Event::KeyUp(_key) => {
-                out.log("key up");
+            Event::KeyUp(key) => {
+                let mut msg: heapless::String<64> = Default::default();
+                write!(&mut msg, "key up: {:?}", key).unwrap();
+                out.log(&msg);
             }
 
             Event::FromNet(from_net) => match from_net {
