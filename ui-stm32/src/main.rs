@@ -189,18 +189,45 @@ async fn main(spawner: Spawner) {
     let p = embassy_stm32::init(config);
 
     // Do audio chip setup over I2C
+    let config = {
+        use embassy_stm32::{gpio::Speed, i2c::*, time::Hertz};
+
+        let mut config = Config::default();
+
+        config.frequency = Hertz(100_000);
+        config.gpio_speed = Speed::VeryHigh;
+        config.sda_pullup = false;
+        config.scl_pullup = false;
+        config.timeout = embassy_time::Duration::from_millis(1000);
+
+        config
+    };
     let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, Default::default());
     let mut audio_control = AudioControl::new(i2c);
-    audio_control.init();
+    audio_control.init().await;
 
-    // Set up I2S
-    let mut wavetable = [0u16; 1200];
+    // Compute a sine wave
+    const WAVE_SAMPLES: usize = 8000;
+    let mut wavetable = [0u16; WAVE_SAMPLES];
+
+    let sample_freq: f32 = 8000.0;
+    let freq: f32 = 440.0;
+    let step: f32 = (2.0 * core::f32::consts::PI * freq) / sample_freq;
+    let amplitude: f32 = 8192.0;
     for (i, frame) in wavetable.chunks_mut(2).enumerate() {
-        frame[0] = ((((i / 150) % 2) * 2048) as i16 - 1024) as u16; // 160 Hz square wave L
-        frame[1] = ((((i / 100) % 2) * 2048) as i16 - 1024) as u16; // 240 Hz square wave R
+        frame[0] = ((libm::sinf(step * (i as f32)) * 2.0 * amplitude) - amplitude) as u16;
+        frame[1] = ((libm::sinf(step * (i as f32)) * 2.0 * amplitude) - amplitude) as u16;
     }
 
-    let mut dma_buffer = [0u16; 2400];
+    /*
+    for (i, frame) in wavetable.iter_mut().enumerate() {
+        *frame = ((((i / 18) % 2) * 8192) as i16 - 4096) as u16; // ~440 Hz square wave L
+    }
+    */
+
+    // Set up I2S
+
+    let mut dma_buffer = [0u16; 2 * WAVE_SAMPLES];
 
     let mut config = {
         use embassy_stm32::{i2s::*, time::Hertz};
@@ -292,7 +319,7 @@ impl AudioControl {
         self.set_register(0x22, 0b1_0000_0000);
         self.set_register(0x25, 0b1_0000_0000);
 
-        self.set_bits(0x2B, 0b0_0111_0000, 0b0_0111_000);
+        self.set_bits(0x2B, 0b0_0111_0000, 0b0_0111_0000); // XXX extra 0; typo in C?
 
         // Enable DAC softmute
         self.set_bit(0x06, 3, true);
