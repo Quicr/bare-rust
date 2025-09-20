@@ -32,6 +32,13 @@ jobs:
         components: clippy, rustfmt
         target: thumbv7em-none-eabihf
 
+    - name: Verify the cortex-m-stack crate
+      uses: ./.github/actions/check-crate
+      with:
+        path: ./cortex-m-stack
+        build-tests: false
+        run-tests: false
+
     - name: Verify the ui-stm32 crate (ev12)
       uses: ./.github/actions/check-crate
       with:
