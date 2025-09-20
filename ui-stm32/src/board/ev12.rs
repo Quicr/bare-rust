@@ -1,9 +1,10 @@
-use super::{Button, Keyboard, NetTx, StatusLed};
+use super::{Button, Eeprom, Keyboard, NetTx, StatusLed};
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
+    i2c::{mode::Master, I2c},
     mode::{Async, Blocking},
     peripherals,
     spi::{Spi, Word},
@@ -65,7 +66,8 @@ impl DisplayData {
         &mut self,
         iter: &mut dyn Iterator<Item = W>,
     ) -> Result<(), DisplayError> {
-        const CHUNK_SIZE: usize = 128;
+        // 1kb of render buffer
+        const CHUNK_SIZE: usize = 512;
 
         // XXX(RLB) Very C-style iteration, could probably write this in a way that would optimize
         // better.
@@ -73,7 +75,7 @@ impl DisplayData {
         let mut n = 0;
         for (i, x) in iter.enumerate() {
             data[i % CHUNK_SIZE] = x;
-            n = i + 1;
+            n += 1;
 
             if n > 0 && n % CHUNK_SIZE == 0 {
                 self.spi.blocking_write(&data).unwrap();
@@ -102,6 +104,7 @@ pub struct Board {
     status_led: StatusLed,
     screen: Ili9341<DisplayData, Output<'static>>,
     net_tx: NetTx<UartTx<'static, Async>>,
+    i2c: I2c<'static, Blocking, Master>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
@@ -215,10 +218,14 @@ impl Board {
         let (net_tx, net_rx) = net_uart.split();
         let net_tx = NetTx::new(net_tx);
 
+        // I2C interface for EEPROM and audio chip control
+        let i2c = I2c::new_blocking(p.I2C1, p.PB6, p.PB7, Default::default());
+
         Self {
             status_led,
             screen,
             net_tx,
+            i2c,
             button_a: Some(button_a),
             button_b: Some(button_b),
             keyboard: Some(keyboard),
@@ -238,6 +245,10 @@ impl Outputs for Board {
 
     fn net_tx(&mut self) -> &mut impl ui_app::NetTx {
         &mut self.net_tx
+    }
+
+    fn eeprom(&mut self) -> impl ui_app::Eeprom {
+        Eeprom { i2c: &mut self.i2c }
     }
 
     fn log(&mut self, message: &str) {

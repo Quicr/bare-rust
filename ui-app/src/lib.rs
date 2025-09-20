@@ -12,6 +12,7 @@ use embedded_graphics::{
     text::Text,
 };
 use heapless::String;
+use hex::ToHex;
 
 #[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum Key {
@@ -190,10 +191,16 @@ pub trait NetTx {
     fn write(&mut self, to_net: &ToNet);
 }
 
+pub trait Eeprom {
+    fn read(&mut self, data: &mut [u8; 256]);
+    fn write(&mut self, data: &[u8; 256]);
+}
+
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
     fn screen(&mut self) -> &mut impl DrawTarget<Color = Rgb565>;
     fn net_tx(&mut self) -> &mut impl NetTx;
+    fn eeprom(&mut self) -> impl Eeprom;
     fn log(&mut self, message: &str);
 }
 
@@ -220,6 +227,20 @@ impl App {
     pub fn start(&mut self, out: &mut impl Outputs) {
         // Extinguish the status LED
         out.status_led().set_color(Color::Black);
+
+        // Read the EEPROM, XOR with 0xFF, write it, then read it back
+        let mut eeprom_data = [0u8; 256];
+        out.eeprom().read(&mut eeprom_data);
+        let hex: heapless::String<1024> = eeprom_data.encode_hex();
+        defmt::info!("eeprom before {}", hex);
+
+        eeprom_data.iter_mut().for_each(|x| *x ^= 0xff);
+        out.eeprom().write(&eeprom_data);
+
+        eeprom_data.fill(0);
+        out.eeprom().read(&mut eeprom_data);
+        let hex: heapless::String<1024> = eeprom_data.encode_hex();
+        defmt::info!("eeprom after {}", hex);
 
         // Draw a test pattern to the screen
         let rect = out.screen().bounding_box();

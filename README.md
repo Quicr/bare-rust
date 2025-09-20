@@ -18,6 +18,11 @@ chip. It currently contains three primary crates:
       abstraction, and routes events from ISRs to the app.
 - `ui-tauri`: Code to instantiate the app in a Tauri webview
 
+## `cortex-m-stack`
+
+The `cortex-m-stack` crate contains some basic tools for measuring stack usage
+on STM32, leveraging the stack painting feature in the `cortex-m-rt` crate.
+
 ## CMOX
 
 The `cmox` directory contains crates that enable the use of the STM

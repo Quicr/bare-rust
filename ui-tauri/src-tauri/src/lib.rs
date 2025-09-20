@@ -11,9 +11,7 @@ use embedded_graphics::{
 use once_cell::sync::OnceCell;
 use std::sync::{mpsc, Mutex};
 use tauri::Emitter;
-use ui_app::{App, Button, Event, FromNet, Key, KeyValue, Led, NetTx, Outputs, ToNet};
-
-mod hactar_vaporwave;
+use ui_app::{App, Button, Eeprom, Event, FromNet, Key, KeyValue, Led, NetTx, Outputs, ToNet};
 
 mod cmd {
     use serde_derive::Serialize;
@@ -47,11 +45,16 @@ const UI_LED_NAME: &str = "led-ui";
 struct Board {
     app: tauri::AppHandle,
     to_net: mpsc::Sender<ToNet>,
+    eeprom: [u8; 256],
 }
 
 impl Board {
-    fn new(app: tauri::AppHandle, to_net: mpsc::Sender<ToNet>) -> Self {
-        Self { app, to_net }
+    fn new(app: tauri::AppHandle, to_net: mpsc::Sender<ToNet>, eeprom: [u8; 256]) -> Self {
+        Self {
+            app,
+            to_net,
+            eeprom,
+        }
     }
 }
 
@@ -109,6 +112,19 @@ impl NetTx for Board {
     }
 }
 
+// XXX(RLB) The initial value of the EEPROM is set in main(), so EEPROM is not persisted across
+// restarts.  We could use a file or something, but it wasn't clear, e.g., where such a file would
+// be stored.
+impl Eeprom for &mut Board {
+    fn read(&mut self, data: &mut [u8; 256]) {
+        data.copy_from_slice(&self.eeprom);
+    }
+
+    fn write(&mut self, data: &[u8; 256]) {
+        self.eeprom.copy_from_slice(data);
+    }
+}
+
 impl Outputs for Board {
     fn status_led(&mut self) -> &mut impl Led {
         self
@@ -119,6 +135,10 @@ impl Outputs for Board {
     }
 
     fn net_tx(&mut self) -> &mut impl NetTx {
+        self
+    }
+
+    fn eeprom(&mut self) -> impl Eeprom {
         self
     }
 
@@ -253,8 +273,12 @@ static UI_APP: OnceCell<Mutex<App>> = OnceCell::new();
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Channels to emulate connection to the NET chip
     let (to_net, from_ui) = mpsc::channel::<ToNet>();
     let (to_ui, from_net) = mpsc::channel::<FromNet>();
+
+    // Initial contents of the EEPROM
+    let eeprom = [0u8; 256];
 
     // Consume and process NET messages
     std::thread::spawn(move || {
@@ -277,8 +301,8 @@ pub fn run() {
     });
 
     tauri::Builder::default()
-        .setup(|app| {
-            let board = Board::new(app.handle().clone(), to_net);
+        .setup(move |app| {
+            let board = Board::new(app.handle().clone(), to_net, eeprom);
             BOARD.set(Mutex::new(board)).unwrap();
 
             let ui_app = App::new();
