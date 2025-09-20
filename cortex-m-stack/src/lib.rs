@@ -1,7 +1,18 @@
 #![no_std]
 #![no_main]
 
-// TODO Doc
+//! # cortex-m-stack
+//!
+//! This crate is a small addendum to the cortex-m crate's [`paint-stack`
+//! feature](https://docs.rs/cortex-m-rt/latest/cortex_m_rt/#paint-stack).  That feature enables
+//! stack measurement by filling the stack with the fixed value `STACK_PAINT_VALUE = 0xCCCCCCCC`.
+//! The tools in this crate allow you to read out stack usage at runtime, by identifying the
+//! high-water mark where the stack paint value ends -- whatever has been changed is stack that has
+//! been used.
+//!
+//! We also provide a `repaint()` function that resets memory below the current stack to
+//! `STACK_PAINT_VALUE`, and a `measure()` function that measures the stack usage of a function
+//! relative to the current function.
 
 use core::arch::asm;
 
@@ -24,7 +35,7 @@ extern "C" {
     static _stack_end: u32;
 }
 
-const STACK_PAINT_VALUE: u32 = 0xcccccccc;
+const STACK_PAINT_VALUE: u32 = 0xCCCCCCCC;
 
 /// This function reads the paint that has been installed by cortex-m-rt and by any calls to
 /// repaint().  It starts at the end of the stack and reads until it finds a location where the
@@ -41,8 +52,11 @@ unsafe fn high_water_mark() -> *const u32 {
     curr.offset(-1)
 }
 
-/// This function reports the maximum stack usage at any point up to the current moment, as the
-/// difference between the high water mark and the start of the stack.
+/// Measure stack usage up to this point
+///
+/// This function reports the maximum stack usage at any point up to the current moment (since
+/// start or since the last repaint), as the difference between the high water mark and the start
+/// of the stack.
 #[inline(always)]
 pub fn usage() -> usize {
     cortex_m::interrupt::free(|_cs| {
@@ -52,6 +66,8 @@ pub fn usage() -> usize {
     })
 }
 
+/// Repaint memory below the current stack frame
+///
 /// This function "repaints" the stack, starting from after the current stack.  It fills the entire
 /// remainder of main memory with STACK_PAINT_VALUE, so that calling usage() thereafter will report
 /// incremental memory usage.  In other words, this function resets the high water mark to the
@@ -70,6 +86,8 @@ pub fn repaint() {
     });
 }
 
+/// Measure the stack usage of a function
+///
 /// This function measures the stack usage of a specific function by repainting memory from the
 /// current stack pointer, then running the function, then measuring how the high-water mark has
 /// changed.
