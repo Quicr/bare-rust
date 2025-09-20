@@ -49,11 +49,32 @@ impl NetTx for MockNetTx {
     }
 }
 
+struct MockEeprom {
+    data: [u8; 256],
+}
+
+impl Default for MockEeprom {
+    fn default() -> Self {
+        Self { data: [0; 256] }
+    }
+}
+
+impl Eeprom for &mut MockEeprom {
+    fn read(&mut self, data: &mut [u8; 256]) {
+        data.copy_from_slice(&self.data);
+    }
+
+    fn write(&mut self, data: &[u8; 256]) {
+        self.data.copy_from_slice(data);
+    }
+}
+
 #[derive(Default)]
 struct MockOutputs {
     status_led: MockLed,
     screen: MockScreen,
     net_tx: MockNetTx,
+    eeprom: MockEeprom,
     last_message: String,
 }
 
@@ -68,6 +89,10 @@ impl Outputs for MockOutputs {
 
     fn net_tx(&mut self) -> &mut impl NetTx {
         &mut self.net_tx
+    }
+
+    fn eeprom(&mut self) -> impl Eeprom {
+        &mut self.eeprom
     }
 
     fn log(&mut self, message: &str) {
