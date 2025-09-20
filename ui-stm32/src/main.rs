@@ -206,29 +206,43 @@ async fn main(spawner: Spawner) {
     let mut audio_control = AudioControl::new(i2c);
     audio_control.init().await;
 
-    // Compute a sine wave
-    const WAVE_SAMPLES: usize = 8000;
-    let mut wavetable = [0u16; WAVE_SAMPLES];
+    // Receive audio over I2S
+    const SAMPLES_PER_SECOND: usize = 8000;
+    const SECONDS_TO_RECORD: usize = 2;
+    const RECORDING_SAMPLES: usize = SECONDS_TO_RECORD * SAMPLES_PER_SECOND;
+    const BUFFER_SIZE: usize = 1000;
 
-    let sample_freq: f32 = 8000.0;
-    let freq: f32 = 440.0;
-    let step: f32 = (2.0 * core::f32::consts::PI * freq) / sample_freq;
-    let amplitude: f32 = 8192.0;
-    for (i, frame) in wavetable.chunks_mut(2).enumerate() {
-        frame[0] = ((libm::sinf(step * (i as f32)) * 2.0 * amplitude) - amplitude) as u16;
-        frame[1] = ((libm::sinf(step * (i as f32)) * 2.0 * amplitude) - amplitude) as u16;
-    }
+    let mut recording = [0u16; RECORDING_SAMPLES];
+    let mut rx_buffer = [0u16; BUFFER_SIZE];
+    let mut tx_buffer = [0u16; BUFFER_SIZE];
 
-    /*
-    for (i, frame) in wavetable.iter_mut().enumerate() {
-        *frame = ((((i / 18) % 2) * 8192) as i16 - 4096) as u16; // ~440 Hz square wave L
-    }
-    */
+    let mut config = {
+        use embassy_stm32::{i2s::*, time::Hertz};
 
-    // Set up I2S
+        let mut config = Config::default();
+        config.frequency = Hertz(8_000);
+        config.mode = Mode::Slave;
+        config.standard = Standard::Philips;
+        config.format = Format::Data16Channel32;
+        config.clock_polarity = ClockPolarity::IdleLow;
+        config.master_clock = false;
+        config
+    };
+    let mut i2s = embassy_stm32::i2s::I2S::new_rxonly(
+        p.SPI3,
+        p.PB4,
+        p.PA15,
+        p.PC10,
+        p.PH0,
+        p.DMA1_CH3,
+        &mut tx_buffer,
+        config,
+    );
 
-    let mut dma_buffer = [0u16; 2 * WAVE_SAMPLES];
+    info!("start speaking");
+    i2s.start();
 
+    // Play out the recorded audio
     let mut config = {
         use embassy_stm32::{i2s::*, time::Hertz};
 
@@ -247,15 +261,17 @@ async fn main(spawner: Spawner) {
         p.PA15,
         p.PC10,
         p.DMA1_CH7,
-        &mut dma_buffer,
+        &mut tx_buffer,
         config,
     );
     i2s.start();
 
     info!("playing...");
-    loop {
-        i2s.write(&wavetable).await.ok();
+    for chunk in recording.chunks(BUFFER_SIZE / 2) {
+        i2s.write(&chunk).await.ok();
     }
+
+    i2s.stop().await;
 }
 
 struct AudioControl {
