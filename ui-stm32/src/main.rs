@@ -9,11 +9,10 @@ use ui_app::{App, Event};
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::{i2c::Error, mode::Async, usart::UartRx};
+use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
-use hex::ToHex;
 use {defmt_rtt as _, panic_probe as _};
 
 // Configuration parameters
@@ -97,47 +96,10 @@ async fn main(spawner: Spawner) {
         EVENT_QUEUE.sender()
     )));
 
-    ///// Audio Chip /////
-
-    // Skip I2C setup for now (?)
-
-    /*
-    ///// EEPROM /////
-
-    // Read the current contents of the EEPROM
-    const I2C_ADDR: u8 = 0x50;
-    const ADDR: u8 = 0x00;
-
-    let mut data = [0u8; 256];
-    board
-        .i2c
-        .blocking_write_read(I2C_ADDR, &[ADDR], &mut data)
-        .unwrap();
-    let hex: heapless::String<1024> = data.encode_hex();
-    info!("eeprom before {}", hex);
-
-    // Overwrite the EEPROM with a new value
-    let mut data = [0xA0; 17];
-    for i in (0_u8..=0xff).step_by(16) {
-        data[0] = i;
-        board.i2c.blocking_write(I2C_ADDR, &data).unwrap();
-        Timer::after_millis(10).await;
-    }
-
-    // Read the value back out of the EEPROM
-    let mut data = [0u8; 256];
-    board
-        .i2c
-        .blocking_write_read(I2C_ADDR, &[ADDR], &mut data)
-        .unwrap();
-    let hex: heapless::String<1024> = data.encode_hex();
-    info!("eeprom after {}", hex);
-    */
-
-    /*
     debug!("app start");
     app.start(&mut board);
 
+    /*
     // Main event loop
     loop {
         let event = EVENT_QUEUE.receive().await;

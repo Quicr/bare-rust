@@ -1,4 +1,4 @@
-use super::{Button, Keyboard, NetTx, StatusLed};
+use super::{Button, Eeprom, Keyboard, NetTx, StatusLed};
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_stm32::{
     bind_interrupts,
@@ -104,8 +104,7 @@ pub struct Board {
     status_led: StatusLed,
     screen: Ili9341<DisplayData, Output<'static>>,
     net_tx: NetTx<UartTx<'static, Async>>,
-    pub i2s: I2S<'static, u8>,
-    pub i2c: I2c<'static, Blocking, Master>,
+    i2c: I2c<'static, Blocking, Master>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
@@ -219,7 +218,7 @@ impl Board {
         let (net_tx, net_rx) = net_uart.split();
         let net_tx = NetTx::new(net_tx);
 
-        // EEPROM I2C interface
+        // I2C interface for EEPROM and audio chip control
         let i2c = I2c::new_blocking(p.I2C1, p.PB6, p.PB7, Default::default());
 
         Self {
@@ -246,6 +245,10 @@ impl Outputs for Board {
 
     fn net_tx(&mut self) -> &mut impl ui_app::NetTx {
         &mut self.net_tx
+    }
+
+    fn eeprom(&mut self) -> impl ui_app::Eeprom {
+        Eeprom { i2c: &mut self.i2c }
     }
 
     fn log(&mut self, message: &str) {
