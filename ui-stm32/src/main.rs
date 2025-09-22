@@ -207,42 +207,9 @@ async fn main(spawner: Spawner) {
     audio_control.init().await;
 
     // Receive audio over I2S
-    const SAMPLES_PER_SECOND: usize = 8000;
-    const SECONDS_TO_RECORD: usize = 2;
-    const RECORDING_SAMPLES: usize = SECONDS_TO_RECORD * SAMPLES_PER_SECOND;
-    const BUFFER_SIZE: usize = 1000;
-
-    let mut recording = [0u16; RECORDING_SAMPLES];
-    let mut rx_buffer = [0u16; BUFFER_SIZE];
-    let mut tx_buffer = [0u16; BUFFER_SIZE];
-
-    /*
-    let mut config = {
-        use embassy_stm32::{i2s::*, time::Hertz};
-
-        let mut config = Config::default();
-        config.frequency = Hertz(8_000);
-        config.mode = Mode::Slave;
-        config.standard = Standard::Philips;
-        config.format = Format::Data16Channel32;
-        config.clock_polarity = ClockPolarity::IdleLow;
-        config.master_clock = false;
-        config
-    };
-    let mut i2s = embassy_stm32::i2s::I2S::new_rxonly(
-        p.SPI3,
-        p.PB4,
-        p.PA15,
-        p.PC10,
-        p.PH0,
-        p.DMA1_CH3,
-        &mut tx_buffer,
-        config,
-    );
-
-    info!("start speaking");
-    i2s.start();
-    */
+    const I2S_BUFFER_SIZE: usize = 8000;
+    let mut rx_buffer = [0u16; I2S_BUFFER_SIZE];
+    let mut tx_buffer = [0u16; I2S_BUFFER_SIZE];
 
     // Play out the recorded audio
     let mut config = {
@@ -257,25 +224,31 @@ async fn main(spawner: Spawner) {
         config.master_clock = false;
         config
     };
-    let mut i2s = embassy_stm32::i2s::I2S::new_full_duplex(
-        p.SPI3,
-        p.PB5,
-        p.PA15,
-        p.PC10,
-        p.DMA1_CH7,
-        &mut tx_buffer,
+    let mut i2s = embassy_stm32::i2s::I2S::new_full_duplex_ex(
+        p.SPI3,         // peri
+        p.PB5,          // txsd
+        p.PB4,          // rxsd
+        p.PA15,         // ws
+        p.PC10,         // ck
+        p.DMA1_CH7,     // txdma
+        &mut tx_buffer, // txdma_buf
+        p.DMA1_CH0,     // rxdma
+        &mut rx_buffer, // rxdma_buf
         config,
     );
+
     i2s.start();
 
-    /*
-    info!("playing...");
-    for chunk in recording.chunks(BUFFER_SIZE / 2) {
+    trace!("loopback started...");
+    let mut chunk = [0u16; 160]; // 20ms chunks
+    loop {
+        trace!("awaiting chunk");
+        i2s.read(&mut chunk).await.ok();
+        trace!("chunk {}", chunk.iter().sum::<u16>());
         i2s.write(&chunk).await.ok();
     }
-    */
 
-    i2s.stop().await;
+    // i2s.stop().await;
 }
 
 struct AudioControl {
