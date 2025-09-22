@@ -216,6 +216,7 @@ async fn main(spawner: Spawner) {
     let mut rx_buffer = [0u16; BUFFER_SIZE];
     let mut tx_buffer = [0u16; BUFFER_SIZE];
 
+    /*
     let mut config = {
         use embassy_stm32::{i2s::*, time::Hertz};
 
@@ -241,6 +242,7 @@ async fn main(spawner: Spawner) {
 
     info!("start speaking");
     i2s.start();
+    */
 
     // Play out the recorded audio
     let mut config = {
@@ -255,7 +257,7 @@ async fn main(spawner: Spawner) {
         config.master_clock = false;
         config
     };
-    let mut i2s = embassy_stm32::i2s::I2S::new_txonly_nomck(
+    let mut i2s = embassy_stm32::i2s::I2S::new_full_duplex(
         p.SPI3,
         p.PB5,
         p.PA15,
@@ -266,10 +268,12 @@ async fn main(spawner: Spawner) {
     );
     i2s.start();
 
+    /*
     info!("playing...");
     for chunk in recording.chunks(BUFFER_SIZE / 2) {
         i2s.write(&chunk).await.ok();
     }
+    */
 
     i2s.stop().await;
 }
