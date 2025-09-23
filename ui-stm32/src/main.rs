@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![allow(dead_code)] // XXX
 
 mod board;
 
@@ -9,10 +10,7 @@ use ui_app::Event;
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::{
-    mode::Async,
-    usart::UartRx,
-};
+use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;

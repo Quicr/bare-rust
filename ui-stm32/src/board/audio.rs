@@ -1,493 +1,543 @@
+#![allow(dead_code)] // No need to use all of the fields on the device
+
 use embassy_stm32::i2c::I2c;
 use embassy_stm32::i2c::Master;
 use embassy_stm32::mode::Blocking;
 use embassy_time::Timer;
 
+type I2C = I2c<'static, Blocking, Master>;
+const I2C_ADDR: u8 = 0x1a;
+
 pub struct AudioControl {
     i2c: I2c<'static, Blocking, Master>,
-    r: [u16; 128],
+    regs: Registers,
 }
 
 impl AudioControl {
     const VALUE_MASK: u16 = 0x1ff;
 
     pub fn new(i2c: I2c<'static, Blocking, Master>) -> Self {
-        Self { i2c, r: [0; 128] }
+        Self {
+            i2c,
+            regs: Registers::default(),
+        }
+    }
+
+    async fn reset(&mut self) {
+        // address = 0x0f, value = 0b0_0000_0000
+        const RESET_SIGNAL: [u8; 2] = [0x1e, 0x00];
+        self.i2c.blocking_write(I2C_ADDR, &RESET_SIGNAL).unwrap();
+        Timer::after_millis(100).await;
     }
 
     pub async fn init(&mut self) {
-        // Reset the wm8960
-        self.set_register(0x0F, 0b1_0000_0000);
-        Timer::after_millis(100).await;
+        self.reset().await;
 
-        // Set the power
-        self.set_register(0x19, 0b0_1111_1110);
+        self.regs.modify(&mut self.i2c, |r| {
+            // Turn everything on
+            r.set::<PowerMgmt1VmidSelect>(0b01);
+            r.set::<PowerMgmt1VrefEnable>(true);
+            r.set::<PowerMgmt1AinLeftEnable>(true);
+            r.set::<PowerMgmt1AinRightEnable>(true);
+            r.set::<PowerMgmt1EnableAdcLeft>(true);
+            r.set::<PowerMgmt1EnableAdcRight>(true);
+            r.set::<MicrophoneBiasEnable>(true);
+            r.set::<MasterClockDisable>(false);
 
-        // Enable outputs
-        self.set_register(0x1A, 0b1_1110_0001);
+            r.set::<LeftDacEnable>(true);
+            r.set::<RightDacEnable>(true);
+            r.set::<LeftOutput1Enable>(true);
+            r.set::<RightOutput1Enable>(true);
+            r.set::<PllEnable>(true);
 
-        // Enable lr mixer ctrl
-        // self.set_register(0x2F, 0b0_0000_0000);
-        self.set_register(0x2F, 0b0_0010_1100);
+            r.set::<LeftMicEnable>(true);
+            r.set::<LeftOutputMixEnable>(true);
+            r.set::<RightOutputMixEnable>(true);
 
-        // Disable soft mute and ADC high pass filter
-        self.set_register(0x05, 0b0_0000_0000);
+            // Disable soft mut and ADC high pass filter
+            r.set::<DacSoftMuteEnable>(false);
+            r.set::<AdcHighPassDisable>(false);
 
-        // Set clocks for 8kHz
-        self.set_register(0x34, 0b0_0000_1000);
-        self.set_register(0x35, 0b0_0011_0001);
-        self.set_register(0x36, 0b0_0010_0110);
-        self.set_register(0x37, 0b0_1110_1001);
-        self.set_register(0x04, 0b1_1011_0001);
-        self.set_register(0x08, 0b1_1100_1100);
-        self.set_register(0x1B, 0b0_0000_0101);
+            // Set clocks for 8khz
+            r.set::<PllN>(0b1000);
+            r.set::<PllKMsb>(0b0011_0001);
+            r.set::<PllKMid>(0b0010_0110);
+            r.set::<PllKLsb>(0b1110_1001);
+            r.set::<Adc1Divider>(0b110);
+            r.set::<DacDivider>(0b110);
+            r.set::<SysClkDiv>(0b00);
+            r.set::<ClockSelect>(true);
+            r.set::<BclkFrequency>(0b1100);
+            r.set::<ClassDSysclkDivider>(0b111);
+            r.set::<AdcAlcSampleRateSelect>(0b101);
 
-        // Set mono
-        self.set_bit(0x17, 4, true);
-        self.set_bit(0x2A, 6, false);
+            // Set mono
+            r.set::<DacMonoMix>(true);
+            r.set::<MonoOutVolume>(false);
 
-        // Set volumes
-        const DEFAULT_VOLUME: u16 = 0b110_0111;
-        const DEFAULT_MIC_VOLUME: u16 = 0b11_1111;
-        self.set_bits(0x00, 0b1_0011_1111, 0x100 + DEFAULT_MIC_VOLUME);
-        self.set_bits(0x02, 0b1_0111_1111, DEFAULT_VOLUME);
-        self.set_bits(0x03, 0b1_0111_1111, 0x100 + DEFAULT_VOLUME);
+            // Set volumes
+            r.set::<InputPgaVolumeUpdate>(true);
+            r.set::<LeftPgaVolume>(0b11_1111);
+            r.set::<HeadphoneOutVolumeUpdate>(true);
+            r.set::<LeftHeadphoneVolume>(0b110_0111);
+            r.set::<RightHeadphoneVolume>(0b111_1111);
 
-        // Enable the outputs
-        self.set_register(0x31, 0b0_0111_0111);
+            // Enable the outputs
+            r.set::<ClassDSpeakerOutputEnable>(0b01);
 
-        // Set DAC left and right volumes
-        self.set_register(0x0A, 0b1_1111_1111);
-        self.set_register(0x0B, 0b1_1111_1111);
+            // Set the DAC left and right volumes
+            r.set::<DacVolumeUpdate>(true);
+            r.set::<LeftDacDigitalVolume>(0b1111_1111);
+            r.set::<RightDacDigitalVolume>(0b1111_1111);
 
-        // Set left and right mixer
-        self.set_register(0x22, 0b1_0000_0000);
-        self.set_register(0x25, 0b1_0000_0000);
+            // Set left and right mixer
+            r.set::<LeftDacToOutputMixer>(true);
+            r.set::<LeftInput3ToOutputMixer>(false);
+            r.set::<LeftInput3ToOutputMixerVolume>(0b000);
+            r.set::<RightDacToOutputMixer>(true);
+            r.set::<RightInput3ToOutputMixerVolume>(0b000);
+            r.set::<Linput3Boost>(0b111);
 
-        self.set_bits(0x2B, 0b0_0111_0000, 0b0_0111_0000); // XXX extra 0; typo in C?
+            // Enable DAC softmute
+            r.set::<DacSoftMuteMode>(true);
 
-        // Enable DAC softmute
-        self.set_bit(0x06, 3, true);
+            // Set master mode, I2S, 16-bit words
+            r.set::<AudioInterfaceMasterMode>(true);
+            r.set::<AudioWordLength>(0b00);
+            r.set::<AudioFormat>(0b10);
 
-        // Set the Master mode (1), I2S to 16 bit words
-        // Set audio data format to i2s mode
-        self.set_register(0x07, 0b0_0100_0010);
-
-        // Unmute the mic
-        self.set_bit(0x20, 6, false);
-        self.set_bit(0x20, 8, false);
-        self.set_bit(0x19, 5, true);
-        self.set_bit(0x2f, 5, true);
-        self.set_bit(0x20, 3, true);
-        self.set_bit(0x20, 7, false);
-        self.set_bit(0x20, 6, true);
-        self.set_bit(0x20, 8, true);
-        self.set_bits(0x00, 0b1_1000_0000, 0b1_0000_0000);
-        self.set_bits(0x2B, 0b0_0000_1110, 0b0_0000_1010);
-        self.set_bit(0x19, 1, true);
-    }
-
-    fn set_register(&mut self, addr: u8, value: u16) {
-        self.r[addr as usize] = value & Self::VALUE_MASK;
-        self.write_register(addr);
-    }
-
-    fn set_bit(&mut self, addr: u8, which: usize, value: bool) {
-        defmt::assert!(which < 9);
-        let mask = 1 << which;
-        let value: u16 = value.into();
-        self.r[addr as usize] = (self.r[addr as usize] & !mask) | (value << which);
-        self.write_register(addr);
-    }
-
-    fn set_bits(&mut self, addr: u8, mask: u16, value: u16) {
-        defmt::assert_eq!(mask & !Self::VALUE_MASK, 0);
-        defmt::assert_eq!(!mask & value, 0);
-        self.r[addr as usize] = (self.r[addr as usize] & !mask) | (mask & value);
-        self.write_register(addr);
-    }
-
-    fn write_register(&mut self, addr: u8) {
-        const ADDR_MASK: u16 = 0x7f;
-        const VALUE_MASK: u16 = 0x1ff;
-        const DEVICE_ADDR: u8 = 0x1a;
-
-        let to_write = (((addr as u16) & ADDR_MASK) << 9) | (self.r[addr as usize] & VALUE_MASK);
-        self.i2c
-            .blocking_write(DEVICE_ADDR, &to_write.to_be_bytes())
-            .unwrap();
+            // Unmute the mic
+            // XXX(RLB) These are done in the C version, but they get overwritten by the
+            // later writes in this version.  Does the order matter?
+            //r.set::<LeftInput1ToInverting>(false);
+            //r.set::<LeftInput3ToNonInverting>(false);
+            r.set::<PowerMgmt1EnableAdcLeft>(true);
+            r.set::<LeftMicEnable>(true);
+            r.set::<LeftInputToBoost>(true);
+            r.set::<LeftInput2ToNonInverting>(true);
+            r.set::<LeftInput3ToNonInverting>(true);
+            r.set::<LeftInput1ToInverting>(true);
+            r.set::<InputPgaVolumeUpdate>(true);
+            r.set::<Linput2Boost>(0b101);
+            r.set::<MicrophoneBiasEnable>(true);
+        });
     }
 }
 
-// Register map
-mod reg {
-    #![allow(dead_code)] // No need to use all of the fields on the device
-
-    /// WM8960 register address type (7 bits: 0..127)
-    pub type RegAddr = u8;
-
-    /// Trait implemented by each generated field (each field struct knows its addr/offset/width/type).
-    pub trait FieldAccess {
-        const ADDR: RegAddr;
-        const OFFSET: u8;
-        const WIDTH: u8;
-        type Ty;
-
-        /// Extract field value from raw register (u16 storing 9-bit register).
-        fn get(regval: u16) -> Self::Ty;
-
-        /// Insert field value into raw register, asserting on overflow.
-        fn set(regval: u16, val: Self::Ty) -> u16;
-    }
-
-    /// Macro to define fields: 1-bit bool and multi-bit unsigned fields.
-    /// Usage: define_field!(Name, reg_addr, bit_offset, bit_width, type);
-    macro_rules! define_field {
-        // 1-bit boolean field
-        ($name:ident, $addr:expr, $offset:expr, 1, bool) => {
-            pub struct $name;
-            impl FieldAccess for $name {
-                const ADDR: RegAddr = $addr;
-                const OFFSET: u8 = $offset;
-                const WIDTH: u8 = 1;
-                type Ty = bool;
-
-                #[inline]
-                fn get(regval: u16) -> bool {
-                    ((regval >> Self::OFFSET) & 1) != 0
-                }
-
-                #[inline]
-                fn set(regval: u16, value: bool) -> u16 {
-                    let bit = if value { 1u16 } else { 0u16 };
-                    (regval & !(1u16 << Self::OFFSET)) | (bit << Self::OFFSET)
-                }
-            }
-        };
-
-        // multi-bit unsigned field
-        ($name:ident, $addr:expr, $offset:expr, $width:expr, $ty:ty) => {
-            pub struct $name;
-            impl FieldAccess for $name {
-                const ADDR: RegAddr = $addr;
-                const OFFSET: u8 = $offset;
-                const WIDTH: u8 = $width;
-                type Ty = $ty;
-
-                #[inline]
-                fn get(regval: u16) -> $ty {
-                    (((regval >> Self::OFFSET) & ((1u16 << Self::WIDTH) - 1)) as $ty)
-                }
-
-                #[inline]
-                fn set(regval: u16, value: $ty) -> u16 {
-                    let v16 = value as u16;
-                    assert!(
-                        v16 < (1u16 << Self::WIDTH),
-                        concat!(stringify!($name), ": value out of range for width"),
-                    );
-                    let mask = ((1u16 << Self::WIDTH) - 1) << Self::OFFSET;
-                    (regval & !mask) | ((v16 << Self::OFFSET) & mask)
-                }
-            }
-        };
-    }
-
-    /// WM8960 register file in-memory representation.
-    ///
-    /// - `regs` stores the 9-bit register values in `u16` slots indexed by 7-bit register address.
-    /// - `modified` stores one byte per register: 0 = not changed, 1 = changed.
-    pub struct Wm8960<'a> {
-        regs: &'a mut [u16; 56],
-        modified: [bool; 56],
-    }
-
-    impl<'a> Wm8960<'a> {
-        /// Create a new WM8960 register image (all zeros).
-        pub const fn new(regs: &'a mut [u16; 56]) -> Self {
-            Self {
-                regs,
-                modified: [false; 56],
-            }
-        }
-
-        /// Generic getter for any defined field.
-        pub fn get_field<F: FieldAccess>(&self) -> F::Ty {
-            let reg = self.regs[F::ADDR as usize];
-            F::get(reg)
-        }
-
-        /// Generic setter for any defined field; asserts on value width and records modification.
-        pub fn set_field<F: FieldAccess>(&mut self, val: F::Ty) {
-            let idx = F::ADDR as usize;
-            let old = self.regs[idx];
-            let new = F::set(old, val);
-            if new != old {
-                self.regs[idx] = new;
-                self.modified[idx] = true;
-            }
-        }
-
-        /// Return whether register at address `addr` has been modified.
-        pub fn is_modified(&self, addr: RegAddr) -> bool {
-            self.modified[addr as usize]
-        }
-
-        /// Clear all modified flags.
-        pub fn clear_modified(&mut self) {
-            self.modified.iter_mut().for_each(|m| *m = false);
-        }
-
-        /// Read raw register value (9-bit in low bits).
-        pub fn raw_reg(&self, addr: RegAddr) -> u16 {
-            self.regs[addr as usize] & 0x01FF
-        }
-
-        /// Set raw register value (9-bit enforced).
-        pub fn set_raw_reg(&mut self, addr: RegAddr, value: u16) {
-            assert!(value < 0x0200, "raw register value must be 9-bit");
-            let idx = addr as usize;
-            if self.regs[idx] != value {
-                self.regs[idx] = value;
-                self.modified[idx] = true;
-            }
-        }
-    }
-
-    /* -----------------------------------------------------------------------------
-       Field definitions
-       I followed the datasheet register map and "Register bits by address" text.
-       Each field has a semantic name and /// doc comments above define_field!.
-       -----------------------------------------------------------------------------
-    */
-
-    /// R0 (0x00) Left Input PGA: IPVU (bit8) Input PGA Volume Update.
-    /// Writing 1 causes left and right input PGA volumes to be updated (LINVOL/RINVOL).
-    define_field!(InputPgaVolumeUpdate, 0x00, 8, 1, bool);
-
-    /// R0 (0x00) Left Input PGA: LINMUTE (bit7) Left analogue mute.
-    /// 1 = Enable mute, 0 = Disable mute. Note: IPVU must be set to un-mute.
-    define_field!(LeftInputAnalogMute, 0x00, 7, 1, bool);
-
-    /// R0 (0x00) Left Input PGA: LIZC (bit6) Zero-cross detect.
-    /// 1 = Change gain on zero cross only, 0 = Change gain immediately.
-    define_field!(LeftPgaZeroCross, 0x00, 6, 1, bool);
-
-    /// R0 (0x00) Left Input PGA: LINVOL [5:0] (bits 5..0) Left PGA volume control (6 bits).
-    /// Range 000000 = -17.25dB ... 111111 = +30dB, 0.75 dB steps. Default 010111 (0dB).
-    define_field!(LeftPgaVolume, 0x00, 0, 6, u8);
-
-    /// R1 (0x01) Right Input PGA: IPVU (bit8) Input PGA Volume Update.
-    /// Writing 1 causes left and right input PGA volumes to be updated.
-    define_field!(InputPgaVolumeUpdate_Right, 0x01, 8, 1, bool);
-
-    /// R1 (0x01) Right Input PGA: RINMUTE (bit7) Right analogue mute.
-    define_field!(RightInputAnalogMute, 0x01, 7, 1, bool);
-
-    /// R1 (0x01) Right Input PGA: RIZC (bit6) Zero-cross detect.
-    define_field!(RightPgaZeroCross, 0x01, 6, 1, bool);
-
-    /// R1 (0x01) Right Input PGA: RINVOL [5:0] Right PGA volume (6 bits).
-    define_field!(RightPgaVolume, 0x01, 0, 6, u8);
-
-    /// R2 (0x02) Left headphone/LOUT1 volume update (bit8) OUT1VU.
-    define_field!(HeadphoneOutVolumeUpdate, 0x02, 8, 1, bool);
-
-    /// R2 (0x02) Left headphone: LO1ZC (bit7) zero cross for LOUT1 volume updates.
-    define_field!(LeftOutZeroCross, 0x02, 7, 1, bool);
-
-    /// R2 (0x02) LOUT1VOL [6:0] (bits 6..0) Left headphone volume (7 bits).
-    define_field!(LeftHeadphoneVolume, 0x02, 0, 7, u8);
-
-    /// R3 (0x03) Right headphone ROUT1 volume update and zero-cross (mirror of R2)
-    define_field!(HeadphoneOutVolumeUpdate_Right, 0x03, 8, 1, bool);
-    define_field!(RightOutZeroCross, 0x03, 7, 1, bool);
-    define_field!(RightHeadphoneVolume, 0x03, 0, 7, u8);
-
-    /// R4 (0x04) Clocking (1) - CLKSEL bitfields in datasheet (bits layout reserved).
-    /// (table shows bit7..0 reserved/defaults) -- register kept as raw if needed.
-    define_field!(Clocking1_Raw, 0x04, 0, 9, u16);
-
-    /// R5 (0x05) ADC & DAC Control (1) — ADCHPD (bit0) ADC High Pass Filter Disable.
-    /// 0 = enable HP filter, 1 = disable.
-    define_field!(AdcHighPassDisable, 0x05, 0, 1, bool);
-
-    /// R5 (0x05) ADC & DAC Control (1) — DACMU (bit2) DAC soft-mute enable etc.
-    /// DACS related bits: DACMU at bit? (table shows pattern, we provide raw+specifics)
-    define_field!(AdcDacControl1_Raw, 0x05, 0, 9, u16);
-
-    /// R6 (0x06) ADC & DAC Control (2) — DACSLOPE (bit1) select DAC filter slope.
-    define_field!(DacSlopeMode, 0x06, 1, 1, bool);
-
-    /// R6 (0x06) ADC & DAC Control (2) — DACMR (bit2) DAC Soft Mute Ramp Rate.
-    define_field!(DacSoftMuteRampSlow, 0x06, 2, 1, bool);
-
-    /// R6 (0x06) ADC & DAC Control (2) — DACSMM (bit3) DAC Soft Mute Mode.
-    define_field!(DacSoftMuteMode, 0x06, 3, 1, bool);
-
-    /// R7 (0x07) Audio Interface — ALRSWAP (bit8) Left/Right ADC swap.
-    define_field!(AdcLeftRightSwap, 0x07, 8, 1, bool);
-
-    /// R7 (0x07) Audio Interface — BCLKINV (bit7) BCLK invert.
-    define_field!(BclkInvert, 0x07, 7, 1, bool);
-
-    /// R7 (0x07) Audio Interface — MS (bit6) Master/Slave mode (1 = master).
-    define_field!(AudioInterfaceMasterMode, 0x07, 6, 1, bool);
-
-    /// R7 (0x07) Audio Interface — DLRSWAP (bit5) DAC LR swap.
-    define_field!(DacLeftRightSwap, 0x07, 5, 1, bool);
-
-    /// R7 (0x07) Audio Interface — LRP (bit4) LRCLK polarity / DSP mode select.
-    define_field!(LrcPolarityOrDspMode, 0x07, 4, 1, bool);
-
-    /// R8 (0x08) Clocking (2) — BCLKDIV [3:0] bits 3..0 (4 bits) select BCLK divider in master mode.
-    define_field!(BclkDivider_Master, 0x08, 0, 4, u8);
-
-    /// R8 (0x08) Clocking (2) — DCLKDIV [2:0] bits 8..6 (class D switching clock divider)
-    define_field!(ClassDSysclkDivider, 0x08, 6, 3, u8);
-
-    /// R9 (0x09) Audio Interface — WL[1:0] (bits3..2) Word length selection (00=16,01=20,10=24,11=32)
-    define_field!(WordLength, 0x09, 2, 2, u8);
-
-    /// R9 (0x09) Audio Interface — DACCOMP[1:0] bits4..3 DAC companding
-    define_field!(DacCompanding, 0x09, 3, 2, u8);
-
-    /// R9 (0x09) Audio Interface — ADCCOMP[1:0] bits1..0 ADC companding
-    define_field!(AdcCompanding, 0x09, 0, 2, u8);
-
-    /// R10 (0x0A) Left DAC Digital Volume LDACVOL [7:0] (bits 7..0)
-    define_field!(LeftDacDigitalVolume, 0x0A, 0, 8, u8);
-
-    /// R10 (0x0A) Left DAC volume update (bit8) DACVU
-    define_field!(DacVolumeUpdate_Left, 0x0A, 8, 1, bool);
-
-    /// R11 (0x0B) Right DAC Digital Volume RDACVOL [7:0]
-    define_field!(RightDacDigitalVolume, 0x0B, 0, 8, u8);
-    define_field!(DacVolumeUpdate_Right, 0x0B, 8, 1, bool);
-
-    /// R12-R14 (0x0C-0x0E) Reserved — keep raw registers if needed.
-    define_field!(Reserved0C_Raw, 0x0C, 0, 9, u16);
-    define_field!(Reserved0D_Raw, 0x0D, 0, 9, u16);
-    define_field!(Reserved0E_Raw, 0x0E, 0, 9, u16);
-
-    /// R15 (0x0F) Reset register. Writing anything = reset to defaults (special behavior).
-    define_field!(ResetRegister, 0x0F, 0, 9, u16);
-
-    /// R16 (0x10) 3D control — 3DEN (bit2) 3D enable, 3DLC (bit1) lower cut-off, 3DUC (bit0) upper cut-off.
-    define_field!(ThreeDEnable, 0x10, 2, 1, bool);
-    define_field!(ThreeDLowerCutSelect, 0x10, 1, 1, bool);
-    define_field!(ThreeDUpperCutSelect, 0x10, 0, 1, bool);
-    define_field!(ThreeDControl_Raw, 0x10, 0, 9, u16);
-
-    /// R17 (0x11) — (register content used for various controls — provide raw and some named pieces)
-    define_field!(Reg17_Raw, 0x11, 0, 9, u16);
-
-    /// R18 (0x12) — some routing controls (raw)
-    define_field!(Reg18_Raw, 0x12, 0, 9, u16);
-
-    /// R19 (0x13) Power Management (1) register contains multiple bits:
-    /// VMIDSEL [8:7] (bits7-8) Vmid divider select, VREF (bit6) VREF enable, AINL (bit5) AINL enable, AINR (bit4)
-    define_field!(InputPowerVmidSelect, 0x13, 7, 2, u8);
-    define_field!(ReferenceVoltageEnable, 0x13, 6, 1, bool);
-    define_field!(LeftAnalogueInputPgaAndBoostEnable, 0x13, 5, 1, bool);
-    define_field!(RightAnalogueInputPgaAndBoostEnable, 0x13, 4, 1, bool);
-    define_field!(AdcLeftEnable, 0x13, 3, 1, bool); // ADCL
-    define_field!(AdcRightEnable, 0x13, 2, 1, bool); // ADCR
-
-    /// R20 (0x14) Noise gate: NGTH [7:3] bits — noise gate threshold(5 bits) and NGAT (bit0) enable.
-    define_field!(NoiseGateThreshold, 0x14, 3, 5, u8);
-    define_field!(NoiseGateEnable, 0x14, 0, 1, bool);
-
-    /// R21 (0x15) Left ADC digital volume LADCVOL [7:0] and ADCVU (bit8)
-    define_field!(LeftAdcDigitalVolume, 0x15, 0, 8, u8);
-    define_field!(AdcVolumeUpdate_Left, 0x15, 8, 1, bool);
-
-    /// R22 (0x16) Right ADC digital volume RADCVOL [7:0] and ADCVU (bit8)
-    define_field!(RightAdcDigitalVolume, 0x16, 0, 8, u8);
-    define_field!(AdcVolumeUpdate_Right, 0x16, 8, 1, bool);
-
-    /// R23 (0x17) Additional Control (1) — TOEN (bit0) Timeout Enable, TOCLKSEL (bit1) slow clock selection,
-    /// VSEL [7:6] bias optimise etc.
-    define_field!(TimeoutEnable, 0x17, 0, 1, bool);
-    define_field!(TimeoutClockSelect, 0x17, 1, 1, bool);
-    define_field!(BiasVsel, 0x17, 6, 2, u8);
-    define_field!(Reg23_Raw, 0x17, 0, 9, u16);
-
-    /// R24 (0x18) Additional Control (2) — LRCM (bit2) ADCLRC/DACLRC disable selector
-    define_field!(AdclrcDaclrcMode, 0x18, 2, 1, bool);
-    define_field!(Reg24_Raw, 0x18, 0, 9, u16);
-
-    /// R25 (0x19) Power Management (1) detailed bits (VMIDSEL, VREF, AINL, AINR, ADCL, ADCR, MICB)
-    /// NOTE: addresses in datasheet show R25(19h) used multiple times; here consolidate important bits:
-    define_field!(PowerMgmt1_VmidSelect, 0x19, 7, 2, u8);
-    define_field!(PowerMgmt1_VrefEnable, 0x19, 6, 1, bool);
-    define_field!(PowerMgmt1_AinLeftEnable, 0x19, 5, 1, bool);
-    define_field!(PowerMgmt1_AinRightEnable, 0x19, 4, 1, bool);
-    define_field!(PowerMgmt1_EnableAdcLeft, 0x19, 3, 1, bool);
-    define_field!(PowerMgmt1_EnableAdcRight, 0x19, 2, 1, bool);
-    define_field!(MicrophoneBiasEnable, 0x19, 1, 1, bool); // MICB (note: datasheet R25 had MICB in some table)
-    define_field!(PowerMgmt1_Raw, 0x19, 0, 9, u16);
-
-    /// R26 (0x1A) Power Management (2) — PLLEN (bit0) enable PLL; output enables, speaker outputs.
-    /// SPK_OP_EN [7:6] (in other registers) configure speaker enable — here pick key bits:
-    define_field!(PllEnable, 0x1A, 0, 1, bool);
-    define_field!(LeftOutput1Enable, 0x1A, 6, 1, bool);
-    define_field!(RightOutput1Enable, 0x1A, 5, 1, bool);
-    define_field!(LeftSpeakerVolumeEnable, 0x1A, 4, 1, bool);
-    define_field!(RightSpeakerVolumeEnable, 0x1A, 3, 1, bool);
-    define_field!(Out3Enable, 0x1A, 1, 1, bool);
-
-    /// R27 (0x1B) ADC ALC sample rate selection: ADC_ALC_SR [2:0] (bits2..0)
-    define_field!(AlcSampleRateSelect, 0x1B, 0, 3, u8);
-
-    /// R28..R31 (0x1C..0x1F) Various registers — keep raw access
-    define_field!(Reg1C_Raw, 0x1C, 0, 9, u16);
-    define_field!(Reg1D_Raw, 0x1D, 0, 9, u16);
-    define_field!(Reg1E_Raw, 0x1E, 0, 9, u16);
-    define_field!(Reg1F_Raw, 0x1F, 0, 9, u16);
-
-    /// R32 (0x20) ADCL signal path — LMICBOOST [5:4] left channel microphone boost (2 bits)
-    define_field!(LeftMicBoost, 0x20, 4, 2, u8);
-    define_field!(Adcl_SignalPath_Raw, 0x20, 0, 9, u16);
-
-    /// R33 (0x21) ADCR signal path — RMICBOOST [5:4] right channel mic boost
-    define_field!(RightMicBoost, 0x21, 4, 2, u8);
-    define_field!(Adcr_SignalPath_Raw, 0x21, 0, 9, u16);
-
-    /// R43 (0x2B) Input Boost Mixer 1 — LIN3BOOST [6:4], LIN2BOOST [3:1]
-    define_field!(Linput3Boost, 0x2B, 4, 3, u8);
-    define_field!(Linput2Boost, 0x2B, 1, 3, u8);
-
-    /// R44 (0x2C) Input Boost Mixer 2 — RIN3BOOST [6:4], RIN2BOOST [3:1]
-    define_field!(Rinput3Boost, 0x2C, 4, 3, u8);
-    define_field!(Rinput2Boost, 0x2C, 1, 3, u8);
-
-    /// R47 (0x2F) Power Management (3) — LMIC, RMIC (Left/Right PGA enable). Bits 5 and 4 per table.
-    define_field!(LeftPgaEnableIfAin, 0x2F, 5, 1, bool); // LMIC
-    define_field!(RightPgaEnableIfAin, 0x2F, 4, 1, bool); // RMIC
-
-    /// R49 (0x31) Class D Control (1) — SPK_OP_EN [7:6] enable class D speaker outputs
-    define_field!(SpeakerOutputsEnable, 0x31, 6, 2, u8);
-
-    /// R50 (0x32) Class D Control (2) raw
-    define_field!(ClassDControl2_Raw, 0x32, 0, 9, u16);
-
-    /// R51 (0x33) Class D Control (3) — DCGAIN [5:3], ACGAIN [2:0]
-    define_field!(SpeakerDcGain, 0x33, 3, 3, u8);
-    define_field!(SpeakerAcGain, 0x33, 0, 3, u8);
-
-    /// R52..R55 PLL registers and others (raw & pieces)
-    define_field!(PllControl1_Raw, 0x34, 0, 9, u16);
-    define_field!(PllControl2_Raw, 0x35, 0, 9, u16);
-    define_field!(PllK_Msb, 0x36, 0, 9, u16); // pieces of PLL K spread over several regs
-    define_field!(PllK_Mid, 0x37, 0, 9, u16);
-    define_field!(PllK_Lsb, 0x38, 0, 9, u16);
-
-    /// R54..R55 extra PLL pieces etc (raw)
-    define_field!(Reg54_Raw, 0x36, 0, 9, u16);
-    define_field!(Reg55_Raw, 0x37, 0, 9, u16);
-
-    /// R? other volume registers: speaker/headphone volumes (SPKLVOL/SPKRVOL)
-    define_field!(LeftSpeakerVolume, 0x40, 0, 7, u8); // address chosen as placeholder; please refer to table for exact addr
-    define_field!(RightSpeakerVolume, 0x41, 0, 7, u8);
+pub type RegAddr = u8;
+
+trait ToFromU16 {
+    fn from_u16(x: u16) -> Self;
+    fn into_u16(self) -> u16;
 }
+
+impl ToFromU16 for bool {
+    fn from_u16(x: u16) -> Self {
+        x != 0
+    }
+
+    fn into_u16(self) -> u16 {
+        if self {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+impl ToFromU16 for u8 {
+    fn from_u16(x: u16) -> Self {
+        x as Self
+    }
+
+    fn into_u16(self) -> u16 {
+        self.into()
+    }
+}
+
+impl ToFromU16 for u16 {
+    fn from_u16(x: u16) -> Self {
+        x
+    }
+
+    fn into_u16(self) -> u16 {
+        self
+    }
+}
+
+pub trait FieldAccess {
+    const ADDR: RegAddr;
+    const OFFSET: u8;
+    const WIDTH: u8;
+    const MAX: u16 = (1 << Self::WIDTH) - 1;
+    const MASK: u16 = Self::MAX << Self::OFFSET;
+    type Value;
+
+    fn get(regval: u16) -> Self::Value;
+    fn set(regval: u16, val: Self::Value) -> u16;
+}
+
+macro_rules! define_field {
+    ($name:ident, $addr:expr, $offset:expr, $width:expr, $val:ty) => {
+        pub struct $name;
+        impl FieldAccess for $name {
+            const ADDR: RegAddr = $addr;
+            const OFFSET: u8 = $offset;
+            const WIDTH: u8 = $width;
+            type Value = $val;
+
+            #[inline]
+            fn get(regval: u16) -> $val {
+                <$val>::from_u16((regval & Self::MASK) >> Self::OFFSET)
+            }
+
+            #[inline]
+            fn set(regval: u16, value: $val) -> u16 {
+                let v16 = value.into_u16();
+                assert!(
+                    v16 <= Self::MAX,
+                    concat!(stringify!($name), ": value out of range"),
+                );
+                let mask = ((1u16 << Self::WIDTH) - 1) << Self::OFFSET;
+                (regval & !mask) | ((v16 << Self::OFFSET) & mask)
+            }
+        }
+    };
+}
+
+#[derive(Clone)]
+pub struct Registers {
+    regs: [u16; 56],
+}
+
+impl Default for Registers {
+    fn default() -> Self {
+        let init: [(u8, u16); 56] = [
+            (0x00, 0b0_1001_0111), // R0  Left Input volume
+            (0x01, 0b0_1001_0111), // R1  Right Input volume
+            (0x02, 0b0_0000_0000), // R2  LOUT1 volume
+            (0x03, 0b0_0000_0000), // R3  ROUT1 volume
+            (0x04, 0b0_0000_0000), // R4  Clocking (1)
+            (0x05, 0b0_0000_1000), // R5  ADC & DAC Control (1)
+            (0x06, 0b0_0000_0000), // R6  ADC & DAC Control (2)
+            (0x07, 0b0_0000_1010), // R7  Audio Interface
+            (0x08, 0b1_1100_0000), // R8  Clocking (2)
+            (0x09, 0b0_0000_0000), // R9  Audio Interface
+            (0x0A, 0b0_1111_1111), // R10 Left DAC volume
+            (0x0B, 0b0_1111_1111), // R11 Right DAC volume
+            (0x0C, 0b0_0000_0000), // R12 Reserved
+            (0x0D, 0b0_0000_0000), // R13 Reserved
+            (0x0E, 0b0_0000_0000), // R14 Reserved
+            (0x0F, 0b0_0000_0000), // R15 Reset (not reset)
+            (0x10, 0b0_0000_0000), // R16 3D control
+            (0x11, 0b0_0111_1011), // R17 ALC1
+            (0x12, 0b1_0000_0000), // R18 ALC2
+            (0x13, 0b0_0011_0010), // R19 ALC3
+            (0x14, 0b0_0000_0000), // R20 Noise Gate
+            (0x15, 0b0_1100_0011), // R21 Left ADC volume
+            (0x16, 0b0_1100_0011), // R22 Right ADC volume
+            (0x17, 0b1_1100_0000), // R23 Additional control (1)
+            (0x18, 0b0_0000_0000), // R24 Additional control (2)
+            (0x19, 0b0_0000_0000), // R25 Power Mgmt (1)
+            (0x1A, 0b0_0000_0000), // R26 Power Mgmt (2)
+            (0x1B, 0b0_0000_0000), // R27 Additional Control (3)
+            (0x1C, 0b0_0000_0000), // R28 Anti-pop 1
+            (0x1D, 0b0_0000_0000), // R29 Anti-pop 2
+            (0x1E, 0b0_0000_0000), // R30 Reserved
+            (0x1F, 0b0_0000_0000), // R31 Reserved
+            (0x20, 0b1_0000_0000), // R32 ADCL signal path
+            (0x21, 0b1_0000_0000), // R33 ADCR signal path
+            (0x22, 0b0_0101_0000), // R34 Left out Mix (1)
+            (0x23, 0b0_0101_0000), // R35 Reserved
+            (0x24, 0b0_0101_0000), // R36 Reserved
+            (0x25, 0b0_0101_0000), // R37 Right out Mix (2)
+            (0x26, 0b0_0000_0000), // R38 Mono out Mix (1)
+            (0x27, 0b0_0000_0000), // R39 Mono out Mix (2)
+            (0x28, 0b0_0000_0000), // R40 LOUT2 volume
+            (0x29, 0b0_0000_0000), // R41 ROUT2 volume
+            (0x2A, 0b0_0100_0000), // R42 MONOOUT volume
+            (0x2B, 0b0_0000_0000), // R43 Input boost mixer (1)
+            (0x2C, 0b0_0000_0000), // R44 Input boost mixer (2)
+            (0x2D, 0b0_0101_0000), // R45 Bypass (1)
+            (0x2E, 0b0_0101_0000), // R46 Bypass (2)
+            (0x2F, 0b0_0000_0000), // R47 Power Mgmt (3)
+            (0x30, 0b0_0000_0010), // R48 Additional Control (4)
+            (0x31, 0b0_0011_0111), // R49 Class D Control (1)
+            (0x32, 0b0_0100_1101), // R50 Reserved
+            (0x33, 0b0_1000_0000), // R51 Class D Control (3)
+            (0x34, 0b0_0000_1000), // R52 PLL N
+            (0x35, 0b0_0011_0001), // R53 PLL K1
+            (0x36, 0b0_0010_0110), // R54 PLL K2
+            (0x37, 0b0_1110_1001), // R55 PLL K3
+        ];
+
+        let mut regs = [0u16; 56];
+        for (i, (addr, val)) in init.iter().enumerate() {
+            regs[i] = ((*addr as u16) << 9) | (val & 0x01FF);
+        }
+
+        Self { regs }
+    }
+}
+
+impl Registers {
+    fn modify<F>(&mut self, i2c: &mut I2C, f: F)
+    where
+        F: FnOnce(&mut RegisterView),
+    {
+        let mut r = RegisterView::new(&mut self.regs);
+        f(&mut r);
+
+        let modified = r
+            .modified
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| m.then_some(i));
+        for i in modified {
+            let addr = self.regs[i] >> 9;
+            i2c.blocking_write(I2C_ADDR, &self.regs[i].to_be_bytes())
+                .unwrap();
+        }
+    }
+}
+
+pub struct RegisterView<'a> {
+    regs: &'a mut [u16; 56],
+    modified: [bool; 56],
+}
+
+impl<'a> RegisterView<'a> {
+    pub const fn new(regs: &'a mut [u16; 56]) -> Self {
+        Self {
+            regs,
+            modified: [false; 56],
+        }
+    }
+
+    // Generic getter for any defined field.
+    pub fn get<F: FieldAccess>(&self) -> F::Value {
+        let reg = self.regs[F::ADDR as usize];
+        F::get(reg)
+    }
+
+    // Generic setter for any defined field; asserts on value width and records modification.
+    pub fn set<F: FieldAccess>(&mut self, val: F::Value) {
+        let idx = F::ADDR as usize;
+        let old = self.regs[idx];
+        let new = F::set(old, val);
+        if new != old {
+            self.regs[idx] = new;
+            self.modified[idx] = true;
+        }
+    }
+}
+
+// XXX(RLB) A first draft of these controls was generated by ChatGPT.  I have verified their
+// correctness for the registers that are touched in AudioControl::init().  If you're going to use
+// any other registers, you should verify that they match the data sheet.
+
+// R0 (0x00) Left Input Volume
+define_field!(InputPgaVolumeUpdate, 0x00, 8, 1, bool);
+define_field!(LeftInputAnalogMute, 0x00, 7, 1, bool);
+define_field!(LeftPgaZeroCross, 0x00, 6, 1, bool);
+define_field!(LeftPgaVolume, 0x00, 0, 6, u8);
+
+// R1 (0x01) Right Input Volume
+define_field!(InputPgaVolumeUpdateRight, 0x01, 8, 1, bool);
+define_field!(RightInputAnalogMute, 0x01, 7, 1, bool);
+define_field!(RightPgaZeroCross, 0x01, 6, 1, bool);
+define_field!(RightPgaVolume, 0x01, 0, 6, u8);
+
+// R2 (0x02) LOUT1 volume
+define_field!(HeadphoneOutVolumeUpdate, 0x02, 8, 1, bool);
+define_field!(LeftOutZeroCross, 0x02, 7, 1, bool);
+define_field!(LeftHeadphoneVolume, 0x02, 0, 7, u8);
+
+// R3 (0x03) ROUT1 volume
+define_field!(HeadphoneOutVolumeUpdateRight, 0x03, 8, 1, bool);
+define_field!(RightOutZeroCross, 0x03, 7, 1, bool);
+define_field!(RightHeadphoneVolume, 0x03, 0, 7, u8);
+
+// R4 (0x04) Clocking (1)
+define_field!(Adc1Divider, 0x04, 6, 3, u8);
+define_field!(DacDivider, 0x04, 3, 3, u8);
+define_field!(SysClkDiv, 0x04, 1, 2, u8);
+define_field!(ClockSelect, 0x04, 0, 1, bool);
+
+// R5 (0x05) ADC & DAC Control (CTR1)
+define_field!(Dac6dBAttenuateEnable, 0x05, 7, 1, bool);
+define_field!(AdcPolarityControl, 0x05, 5, 2, u8);
+define_field!(DacSoftMuteEnable, 0x05, 3, 1, bool);
+define_field!(DeEmphasisControl, 0x05, 3, 2, u8);
+define_field!(AdcHighPassDisable, 0x05, 0, 1, bool);
+
+// R6 (0x06) ADC & DAC Control (CTR2)
+define_field!(DacSlopeMode, 0x06, 1, 1, bool);
+define_field!(DacSoftMuteRampSlow, 0x06, 2, 1, bool);
+define_field!(DacSoftMuteMode, 0x06, 3, 1, bool);
+
+// R7 (0x07) Audio Interface
+define_field!(AdcLeftRightSwap, 0x07, 8, 1, bool);
+define_field!(BclkInvert, 0x07, 7, 1, bool);
+define_field!(AudioInterfaceMasterMode, 0x07, 6, 1, bool);
+define_field!(DacLeftRightSwap, 0x07, 5, 1, bool);
+define_field!(LrcPolarityOrDspMode, 0x07, 4, 1, bool);
+define_field!(AudioWordLength, 0x07, 2, 2, u8);
+define_field!(AudioFormat, 0x07, 0, 2, u8);
+
+// R8 (0x08) Clocking (2)
+define_field!(ClassDSysclkDivider, 0x08, 6, 3, u8);
+define_field!(BclkFrequency, 0x08, 0, 4, u8);
+
+// R9 (0x09) Audio Interface
+define_field!(WordLength, 0x09, 2, 2, u8);
+define_field!(DacCompanding, 0x09, 3, 2, u8);
+define_field!(AdcCompanding, 0x09, 0, 2, u8);
+
+// R10 (0x0A) Left DAC Volume
+define_field!(DacVolumeUpdate, 0x0A, 8, 1, bool);
+define_field!(LeftDacDigitalVolume, 0x0A, 0, 8, u8);
+
+// R11 (0x0B) Right DAC Volume
+define_field!(DacVolumeUpdateRight, 0x0B, 8, 1, bool);
+define_field!(RightDacDigitalVolume, 0x0B, 0, 8, u8);
+
+// R12-R14 (0x0C-0x0E) Reserved
+
+// R15 (0x0F) Reset register (special behavior).
+
+// R16 (0x10) 3D control
+define_field!(ThreeDEnable, 0x10, 2, 1, bool);
+define_field!(ThreeDLowerCutSelect, 0x10, 1, 1, bool);
+define_field!(ThreeDUpperCutSelect, 0x10, 0, 1, bool);
+define_field!(ThreeDControlRaw, 0x10, 0, 9, u16);
+
+// R17 (0x11) ALC1
+// R18 (0x12) ALC2
+// R19 (0x12) ALC3
+
+// R20 (0x14) Noise gate
+define_field!(NoiseGateThreshold, 0x14, 3, 5, u8);
+define_field!(NoiseGateEnable, 0x14, 0, 1, bool);
+
+// R21 (0x15) Left ADC volume
+define_field!(LeftAdcDigitalVolume, 0x15, 0, 8, u8);
+define_field!(AdcVolumeUpdateLeft, 0x15, 8, 1, bool);
+
+// R22 (0x16) Right ADC volume
+define_field!(RightAdcDigitalVolume, 0x16, 0, 8, u8);
+define_field!(AdcVolumeUpdateRight, 0x16, 8, 1, bool);
+
+// R23 (0x17) Additional Control (1)
+define_field!(ThermalShutDownEnable, 0x17, 8, 1, bool);
+define_field!(AnalogBiasOptimisation, 0x17, 6, 2, u8);
+define_field!(DacMonoMix, 0x17, 4, 1, bool);
+define_field!(AdcDataOutputSelect, 0x17, 2, 2, u8);
+define_field!(TimeoutClockSelect, 0x17, 1, 1, bool);
+define_field!(TimeoutEnable, 0x17, 0, 1, bool);
+
+// R24 (0x18) Additional Control (2)
+define_field!(AdclrcDaclrcMode, 0x18, 2, 1, bool);
+define_field!(Reg24Raw, 0x18, 0, 9, u16);
+
+// R25 (0x19) Power Management (1)
+define_field!(PowerMgmt1VmidSelect, 0x19, 7, 2, u8);
+define_field!(PowerMgmt1VrefEnable, 0x19, 6, 1, bool);
+define_field!(PowerMgmt1AinLeftEnable, 0x19, 5, 1, bool);
+define_field!(PowerMgmt1AinRightEnable, 0x19, 4, 1, bool);
+define_field!(PowerMgmt1EnableAdcLeft, 0x19, 3, 1, bool);
+define_field!(PowerMgmt1EnableAdcRight, 0x19, 2, 1, bool);
+define_field!(MicrophoneBiasEnable, 0x19, 1, 1, bool);
+define_field!(MasterClockDisable, 0x19, 0, 1, bool);
+
+// R26 (0x1A) Power Management (2)
+define_field!(LeftDacEnable, 0x1A, 8, 1, bool);
+define_field!(RightDacEnable, 0x1A, 7, 1, bool);
+define_field!(LeftOutput1Enable, 0x1A, 6, 1, bool);
+define_field!(RightOutput1Enable, 0x1A, 5, 1, bool);
+define_field!(LeftSpeakerEnable, 0x1A, 4, 1, bool);
+define_field!(RightSpeakerEnable, 0x1A, 3, 1, bool);
+define_field!(Out3Enable, 0x1A, 1, 1, bool);
+define_field!(PllEnable, 0x1A, 0, 1, bool);
+
+// R27 (0x1B) Additional Control (3)
+define_field!(VrefToAnalogueResistance, 0x1B, 6, 1, bool);
+define_field!(CaplessHeadphoneSwitchEnable, 0x1B, 3, 1, bool);
+define_field!(AdcAlcSampleRateSelect, 0x1B, 0, 3, u8);
+
+// R28 (0x1C) Anti-pop 1
+// R29 (0x1D) Anti-pop 2
+
+// R30 (0x1E) Reserved
+// R31 (0x1F) Reserved
+
+// R32 (0x20) ADCL signal path
+define_field!(LeftInput1ToInverting, 0x20, 8, 1, bool);
+define_field!(LeftInput3ToNonInverting, 0x20, 7, 1, bool);
+define_field!(LeftInput2ToNonInverting, 0x20, 6, 1, bool);
+define_field!(LeftBoostGain, 0x20, 4, 2, u8);
+define_field!(LeftInputToBoost, 0x20, 3, 1, bool);
+
+// R33 (0x21) ADCR signal path
+define_field!(RightMicBoost, 0x21, 4, 2, u8);
+define_field!(AdcrSignalPathRaw, 0x21, 0, 9, u16);
+
+// R34 (0x22) Left Out Mix (1)
+define_field!(LeftDacToOutputMixer, 0x22, 8, 1, bool);
+define_field!(LeftInput3ToOutputMixer, 0x22, 7, 1, bool);
+define_field!(LeftInput3ToOutputMixerVolume, 0x22, 4, 3, u8);
+
+// R35 (0x23) Reserved
+// R36 (0x24) Reserved
+
+// R37 (0x25) Right Out Mix (2)
+define_field!(RightDacToOutputMixer, 0x25, 8, 1, bool);
+define_field!(RightInput3ToOutputMixer, 0x25, 7, 1, bool);
+define_field!(RightInput3ToOutputMixerVolume, 0x25, 4, 3, u8);
+
+// R38 (0x26) Mono out Mix (1)
+// R39 (0x27) Mono out Mix (2)
+// R40 (0x28) LOUT2 volume
+// R41 (0x29) ROUT2 volume
+
+// R42 (0x2A) MONOOUT volume
+define_field!(MonoOutVolume, 0x2A, 6, 1, bool);
+
+// R43 (0x2B) Input Boost Mixer (1)
+define_field!(Linput3Boost, 0x2B, 4, 3, u8);
+define_field!(Linput2Boost, 0x2B, 1, 3, u8);
+
+// R44 (0x2C) Input Boost Mixer (2)
+define_field!(Rinput3Boost, 0x2C, 4, 3, u8);
+define_field!(Rinput2Boost, 0x2C, 1, 3, u8);
+
+// R45 (0x2D) Bypass (1)
+// R46 (0x2E) Bypass (2)
+
+// R47 (0x2F) Power Management (3)
+define_field!(LeftMicEnable, 0x2F, 5, 1, bool);
+define_field!(RightMicEnable, 0x2F, 4, 1, bool);
+define_field!(LeftOutputMixEnable, 0x2F, 3, 1, bool);
+define_field!(RightOutputMixEnable, 0x2F, 2, 1, bool);
+
+// R48 (0x30) Additional Control (4)
+
+// R49 (0x31) Class D Control (1)
+define_field!(ClassDSpeakerOutputEnable, 0x31, 6, 2, u8);
+
+// R50 (0x32) Reserved
+
+// R51 (0x33) Class D Control (3)
+define_field!(SpeakerDcGain, 0x33, 3, 3, u8);
+define_field!(SpeakerAcGain, 0x33, 0, 3, u8);
+
+// R52 (0x34) PLL N
+define_field!(OpClockDivider, 0x34, 6, 3, u8);
+define_field!(IntegerModeEnable, 0x34, 5, 1, bool);
+define_field!(PllRescale, 0x34, 4, 1, bool);
+define_field!(PllN, 0x34, 0, 4, u8);
+
+// R53, R54, R55 (0x35, 0x36, 0x37) PLL K
+define_field!(PllKMsb, 0x35, 0, 8, u8);
+define_field!(PllKMid, 0x36, 0, 8, u8);
+define_field!(PllKLsb, 0x37, 0, 8, u8);
