@@ -33,6 +33,9 @@ pub use screen::Screen;
 mod net;
 pub use net::{NetRx, NetTx};
 
+mod audio;
+pub use audio::AudioControl;
+
 struct StatusLed {
     r: Output<'static>,
     g: Output<'static>,
