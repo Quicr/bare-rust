@@ -1,107 +1,296 @@
-//! Direct translation of STM32F4xx HAL I2S from C to Rust
+//! # STM32F4xx HAL I2S Driver
 //!
-//! This is a 1-to-1 translation of stm32f4xx_hal_i2s.c and stm32f4xx_hal_i2s_ex.c
-//! from the STM32F4 HAL library into Rust.
+//! This module provides a direct Rust translation of the STM32F4xx HAL I2S driver,
+//! based on `stm32f4xx_hal_i2s.c` and `stm32f4xx_hal_i2s_ex.c` from ST's official HAL library.
+//!
+//! ## Features
+//!
+//! - **Full Duplex I2S**: Support for simultaneous transmit and receive using dual instances
+//! - **Extended Instance Support**: I2S2ext/I2S3ext peripheral support for STM32F4 series
+//! - **Multiple Standards**: Philips, MSB, LSB, and PCM standards
+//! - **Flexible Data Formats**: 16-bit, 24-bit, and 32-bit data formats
+//! - **Audio Frequencies**: Support for common audio sample rates (8kHz to 192kHz)
+//! - **Memory Safety**: Rust-safe implementation with controlled unsafe blocks
+//!
+//! ## Architecture
+//!
+//! The STM32F4 I2S implementation uses a dual-instance approach for full duplex operation:
+//! - **Main Instance** (SPI2/SPI3): Handles TX operations and clock generation
+//! - **Extended Instance** (I2S2ext/I2S3ext): Handles RX operations in full duplex mode
+//!
+//! ## Basic Usage
+//!
+//! ```rust,no_run
+//! # use crate::hal_i2s::*;
+//! // Initialize I2S handle for SPI3
+//! let mut i2s = I2sHandle::new_spi3();
+//!
+//! // Configure I2S parameters
+//! i2s.init.mode = I2S_MODE_SLAVE_TX;
+//! i2s.init.standard = I2S_STANDARD_PHILIPS;
+//! i2s.init.data_format = I2S_DATAFORMAT_16B;
+//! i2s.init.audio_freq = 48_000;
+//! i2s.init.full_duplex_mode = I2S_FULLDUPLEXMODE_ENABLE;
+//!
+//! // Initialize the I2S peripheral
+//! if hal_i2s_init(&mut i2s) == HalStatus::Ok {
+//!     // I2S is ready for use
+//! }
+//! ```
+//!
+//! ## Full Duplex Example
+//!
+//! ```rust,no_run
+//! # use crate::hal_i2s::*;
+//! # let mut i2s = I2sHandle::new_spi3();
+//! # hal_i2s_init(&mut i2s);
+//! // Transmit and receive simultaneously
+//! let tx_data = [0x1234u16; 100];
+//! let mut rx_data = [0u16; 100];
+//!
+//! match hal_i2s_transmit_receive(&mut i2s, &tx_data, &mut rx_data, 1000) {
+//!     HalStatus::Ok => {
+//!         // Full duplex transfer completed successfully
+//!     }
+//!     HalStatus::Timeout => {
+//!         // Transfer timed out
+//!     }
+//!     _ => {
+//!         // Handle other errors
+//!     }
+//! }
+//! ```
+//!
+//! ## Memory Mapping
+//!
+//! The driver uses direct memory access to STM32F4 registers:
+//! - **SPI2**: `0x40003800` (I2S2ext: `0x40003400`)
+//! - **SPI3**: `0x40003C00` (I2S3ext: `0x40004000`)
+//!
+//! ## Safety
+//!
+//! This module uses unsafe code for direct register access. All unsafe operations are
+//! contained within well-defined functions and are safe when used correctly with proper
+//! hardware initialization.
 
 use core::ptr;
+use defmt::Format;
 
-// Constants from the C HAL
+/// # I2S Configuration Constants
+///
+/// These constants define the various configuration options for the I2S peripheral,
+/// directly translated from the STM32F4xx HAL library.
 
-// I2S Mode definitions
+/// ## I2S Operating Mode
+///
+/// Defines whether the I2S operates as master or slave, and for transmission or reception.
+/// In master mode, the I2S generates the clock signals. In slave mode, it receives them.
+
+/// I2S Slave Transmitter mode - receives clock, transmits data
 pub const I2S_MODE_SLAVE_TX: u32 = 0x00000000;
+/// I2S Slave Receiver mode - receives clock and data
 pub const I2S_MODE_SLAVE_RX: u32 = 0x00000100;
+/// I2S Master Transmitter mode - generates clock, transmits data
 pub const I2S_MODE_MASTER_TX: u32 = 0x00000200;
+/// I2S Master Receiver mode - generates clock, receives data
 pub const I2S_MODE_MASTER_RX: u32 = 0x00000300;
 
-// I2S Standard definitions
+/// ## I2S Communication Standards
+///
+/// Different I2S standards define the timing relationships between clock, word select,
+/// and data signals.
+
+/// Philips I2S standard - most common, 1-bit offset between WS and data
 pub const I2S_STANDARD_PHILIPS: u32 = 0x00000000;
+/// MSB (Left) Justified standard - data starts immediately with WS transition
 pub const I2S_STANDARD_MSB: u32 = 0x00000010;
+/// LSB (Right) Justified standard - data ends with WS transition
 pub const I2S_STANDARD_LSB: u32 = 0x00000020;
+/// PCM Short Frame standard - 1 clock cycle pulse on WS
 pub const I2S_STANDARD_PCM_SHORT: u32 = 0x00000030;
+/// PCM Long Frame standard - WS active during entire frame
 pub const I2S_STANDARD_PCM_LONG: u32 = 0x000000B0;
 
-// I2S Data Format definitions
+/// ## I2S Data Format Options
+///
+/// Configures the bit width and channel length for I2S data transmission.
+
+/// 16-bit data on 16-bit channel width
 pub const I2S_DATAFORMAT_16B: u32 = 0x00000000;
+/// 16-bit data on 32-bit channel width (extended)
 pub const I2S_DATAFORMAT_16B_EXTENDED: u32 = 0x00000001;
+/// 24-bit data on 32-bit channel width
 pub const I2S_DATAFORMAT_24B: u32 = 0x00000003;
+/// 32-bit data on 32-bit channel width
 pub const I2S_DATAFORMAT_32B: u32 = 0x00000005;
 
-// I2S MCLK Output definitions
+/// ## Master Clock (MCLK) Output Control
+///
+/// MCLK is typically 256 times the sample rate and used by external audio codecs.
+
+/// Enable MCLK output for external devices
 pub const I2S_MCLKOUTPUT_ENABLE: u32 = 0x00000200;
+/// Disable MCLK output
 pub const I2S_MCLKOUTPUT_DISABLE: u32 = 0x00000000;
 
-// I2S Audio Frequency definitions
+/// ## Supported Audio Frequencies
+///
+/// Common audio sample rates supported by the I2S peripheral.
+
+/// 192 kHz sample rate
 pub const I2S_AUDIOFREQ_192K: u32 = 192000;
+/// 96 kHz sample rate
 pub const I2S_AUDIOFREQ_96K: u32 = 96000;
+/// 48 kHz sample rate (common for professional audio)
 pub const I2S_AUDIOFREQ_48K: u32 = 48000;
+/// 44.1 kHz sample rate (CD quality)
 pub const I2S_AUDIOFREQ_44K: u32 = 44100;
+/// 32 kHz sample rate
 pub const I2S_AUDIOFREQ_32K: u32 = 32000;
+/// 22.05 kHz sample rate
 pub const I2S_AUDIOFREQ_22K: u32 = 22050;
+/// 16 kHz sample rate (voice applications)
 pub const I2S_AUDIOFREQ_16K: u32 = 16000;
+/// 11.025 kHz sample rate
 pub const I2S_AUDIOFREQ_11K: u32 = 11025;
+/// 8 kHz sample rate (telephony)
 pub const I2S_AUDIOFREQ_8K: u32 = 8000;
+/// Default frequency setting (uses 2 as prescaler default)
 pub const I2S_AUDIOFREQ_DEFAULT: u32 = 2;
 
-// I2S Clock Polarity definitions
+/// ## Clock Polarity Options
+///
+/// Defines the idle state of the I2S clock signal.
+
+/// Clock idle state is low (0)
 pub const I2S_CPOL_LOW: u32 = 0x00000000;
+/// Clock idle state is high (1)
 pub const I2S_CPOL_HIGH: u32 = 0x00000008;
 
-// I2S Clock Source definitions
+/// ## Clock Source Selection
+///
+/// Choose between internal PLL or external clock source.
+
+/// Use PLLI2S internal clock source
 pub const I2S_CLOCKSOURCE_PLLI2S: u32 = 0x00000000;
+/// Use external clock source
 pub const I2S_CLOCKSOURCE_EXT: u32 = 0x00000001;
 
-// I2S Full Duplex Mode definitions
+/// ## Full Duplex Mode Control
+///
+/// Enable or disable simultaneous transmit and receive using extended instances.
+
+/// Disable full duplex mode (simplex operation)
 pub const I2S_FULLDUPLEXMODE_DISABLE: u32 = 0x00000000;
+/// Enable full duplex mode (uses I2S2ext/I2S3ext)
 pub const I2S_FULLDUPLEXMODE_ENABLE: u32 = 0x00000001;
 
-// HAL Status definitions
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// ## HAL Function Return Status
+///
+/// Standard return codes used by all HAL I2S functions to indicate success or failure.
+#[derive(Format, Debug, Clone, Copy, PartialEq)]
 pub enum HalStatus {
+    /// Operation completed successfully
     Ok = 0x00,
+    /// Generic error occurred
     Error = 0x01,
+    /// Resource is currently busy (operation in progress)
     Busy = 0x02,
+    /// Operation timed out
     Timeout = 0x03,
 }
 
-// HAL Lock definitions
+/// ## HAL Resource Locking
+///
+/// Simple mutex-like mechanism to prevent concurrent access to I2S resources.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HalLock {
+    /// Resource is available for use
     Unlocked = 0x00,
+    /// Resource is currently locked by an ongoing operation
     Locked = 0x01,
 }
 
-// I2S State definitions
+/// ## I2S Peripheral State
+///
+/// Tracks the current state of the I2S peripheral for proper state management
+/// and error detection.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HalI2sState {
+    /// I2S peripheral is in reset state (not initialized)
     Reset = 0x00,
+    /// I2S peripheral is initialized and ready for operation
     Ready = 0x01,
+    /// I2S peripheral is busy with some operation
     Busy = 0x02,
+    /// I2S peripheral is busy transmitting data
     BusyTx = 0x03,
+    /// I2S peripheral is busy receiving data
     BusyRx = 0x04,
+    /// I2S peripheral is busy with full-duplex operation (TX and RX)
     BusyTxRx = 0x05,
+    /// I2S peripheral operation timed out
     Timeout = 0x06,
+    /// I2S peripheral encountered an error
     Error = 0x07,
 }
 
-// I2S Error definitions
+/// ## I2S Error Codes
+///
+/// Bitmask values that can be combined to indicate multiple error conditions.
+
+/// No error occurred
 pub const HAL_I2S_ERROR_NONE: u32 = 0x00000000;
+/// Underrun error - TX FIFO is empty when data is needed
 pub const HAL_I2S_ERROR_UDR: u32 = 0x00000001;
+/// Overrun error - RX FIFO is full when new data arrives
 pub const HAL_I2S_ERROR_OVR: u32 = 0x00000002;
+/// Frame error - unexpected frame timing
 pub const HAL_I2S_ERROR_FRE: u32 = 0x00000008;
+/// DMA transfer error
 pub const HAL_I2S_ERROR_DMA: u32 = 0x00000010;
+pub const HAL_I2S_ERROR_TIMEOUT: u32 = 0x00000020;
+/// Invalid prescaler calculation error
 pub const HAL_I2S_ERROR_PRESCALER: u32 = 0x00000020;
 
-// I2S Init Structure (translated from C)
+/// ## I2S Initialization Configuration
+///
+/// This structure contains all the configuration parameters needed to initialize
+/// an I2S peripheral. It corresponds directly to `I2S_InitTypeDef` from the C HAL.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use crate::hal_i2s::*;
+/// let mut init_config = I2sInit {
+///     mode: I2S_MODE_SLAVE_TX,
+///     standard: I2S_STANDARD_PHILIPS,
+///     data_format: I2S_DATAFORMAT_16B,
+///     mclk_output: I2S_MCLKOUTPUT_DISABLE,
+///     audio_freq: I2S_AUDIOFREQ_48K,
+///     cpol: I2S_CPOL_LOW,
+///     clock_source: I2S_CLOCKSOURCE_PLLI2S,
+///     full_duplex_mode: I2S_FULLDUPLEXMODE_ENABLE,
+/// };
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct I2sInit {
-    pub mode: u32,           // I2S operating mode
-    pub standard: u32,       // Standard used for I2S communication
-    pub data_format: u32,    // Data format for I2S communication
-    pub mclk_output: u32,    // MCLK output enabled or disabled
-    pub audio_freq: u32,     // Frequency selected for I2S communication
-    pub cpol: u32,           // Idle state of I2S clock
-    pub clock_source: u32,   // I2S Clock Source
-    pub full_duplex_mode: u32, // I2S FullDuplex mode
+    /// I2S operating mode (master/slave, TX/RX) - use `I2S_MODE_*` constants
+    pub mode: u32,
+    /// Standard used for I2S communication - use `I2S_STANDARD_*` constants
+    pub standard: u32,
+    /// Data format for I2S communication - use `I2S_DATAFORMAT_*` constants
+    pub data_format: u32,
+    /// MCLK output control - use `I2S_MCLKOUTPUT_*` constants
+    pub mclk_output: u32,
+    /// Audio frequency in Hz - use `I2S_AUDIOFREQ_*` constants or actual frequency
+    pub audio_freq: u32,
+    /// Clock polarity (idle state) - use `I2S_CPOL_*` constants
+    pub cpol: u32,
+    /// Clock source selection - use `I2S_CLOCKSOURCE_*` constants
+    pub clock_source: u32,
+    /// Full duplex mode control - use `I2S_FULLDUPLEXMODE_*` constants
+    pub full_duplex_mode: u32,
 }
 
 impl Default for I2sInit {
@@ -125,22 +314,70 @@ pub const SPI3_BASE: u32 = 0x40003C00;
 pub const I2S2EXT_BASE: u32 = 0x40003400;
 pub const I2S3EXT_BASE: u32 = 0x40004000;
 
-// I2S Handle Structure (translated from C)
+/// ## I2S Handle Structure
+///
+/// This is the main structure that represents an I2S peripheral instance and contains
+/// all the necessary state and configuration information. It corresponds directly to
+/// `I2S_HandleTypeDef` from the C HAL.
+///
+/// The handle manages the peripheral state, tracks ongoing transfers, and provides
+/// thread-safety through locking mechanisms.
+///
+/// # Safety
+///
+/// This structure contains raw pointers to hardware registers and transfer buffers.
+/// Ensure proper initialization and synchronization when using in multi-threaded
+/// environments.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use crate::hal_i2s::*;
+/// // Create a handle for SPI3 peripheral
+/// let mut i2s = I2sHandle::new_spi3();
+///
+/// // Configure for audio operation
+/// i2s.init.audio_freq = I2S_AUDIOFREQ_44K;
+/// i2s.init.mode = I2S_MODE_SLAVE_TX;
+///
+/// // Initialize the peripheral
+/// if hal_i2s_init(&mut i2s) == HalStatus::Ok {
+///     println!("I2S initialized successfully");
+/// }
+/// ```
 pub struct I2sHandle {
-    pub instance: u32,                   // I2S registers base address
-    pub init: I2sInit,                   // I2S communication parameters
-    pub tx_buff_ptr: *mut u16,           // Pointer to I2S Tx transfer buffer
-    pub tx_xfer_size: u16,               // I2S Tx transfer size
-    pub tx_xfer_count: u16,              // I2S Tx transfer Counter
-    pub rx_buff_ptr: *mut u16,           // Pointer to I2S Rx transfer buffer
-    pub rx_xfer_size: u16,               // I2S Rx transfer size
-    pub rx_xfer_count: u16,              // I2S Rx transfer counter
-    pub lock: HalLock,                   // I2S locking object
-    pub state: HalI2sState,              // I2S communication state
-    pub error_code: u32,                 // I2S Error code
+    /// Base address of I2S registers (SPI2_BASE or SPI3_BASE)
+    pub instance: u32,
+    /// I2S initialization configuration parameters
+    pub init: I2sInit,
+    /// Pointer to current transmit buffer (managed internally)
+    pub tx_buff_ptr: *mut u16,
+    /// Size of transmit transfer in samples
+    pub tx_xfer_size: u16,
+    /// Current transmit transfer progress counter
+    pub tx_xfer_count: u16,
+    /// Pointer to current receive buffer (managed internally)
+    pub rx_buff_ptr: *mut u16,
+    /// Size of receive transfer in samples
+    pub rx_xfer_size: u16,
+    /// Current receive transfer progress counter
+    pub rx_xfer_count: u16,
+    /// Resource lock for thread safety
+    pub lock: HalLock,
+    /// Current state of the I2S peripheral
+    pub state: HalI2sState,
+    /// Current error condition (bitmask of HAL_I2S_ERROR_* values)
+    pub error_code: u32,
 }
 
 impl I2sHandle {
+    /// Create a new I2S handle for the given register base address
+    ///
+    /// # Arguments
+    /// * `instance` - Base address of the SPI/I2S peripheral registers
+    ///
+    /// # Returns
+    /// A new `I2sHandle` with default configuration and reset state
     pub fn new(instance: u32) -> Self {
         Self {
             instance,
@@ -157,10 +394,18 @@ impl I2sHandle {
         }
     }
 
+    /// Create a new I2S handle for SPI2/I2S2 peripheral
+    ///
+    /// SPI2 supports I2S2ext extended instance for full duplex operation.
+    /// Base address: 0x40003800, Extended: 0x40003400
     pub fn new_spi2() -> Self {
         Self::new(SPI2_BASE)
     }
 
+    /// Create a new I2S handle for SPI3/I2S3 peripheral
+    ///
+    /// SPI3 supports I2S3ext extended instance for full duplex operation.
+    /// Base address: 0x40003C00, Extended: 0x40004000
     pub fn new_spi3() -> Self {
         Self::new(SPI3_BASE)
     }
@@ -222,17 +467,46 @@ pub fn hal_i2s_ext_clear_ovr_flag(handle: &I2sHandle) {
 
 // Core I2S Functions (translated from C HAL)
 
-/// I2S Initialize
+/// ## Initialize I2S Peripheral
+///
+/// Configures the I2S peripheral according to the specified parameters in the
+/// `I2sHandle.init` structure. This function must be called before any I2S
+/// operations can be performed.
+///
+/// This function corresponds directly to `HAL_I2S_Init()` from the C HAL.
+///
+/// # Arguments
+/// * `handle` - Pointer to an I2S handle structure containing configuration
+///
+/// # Returns
+/// * `HalStatus::Ok` - Initialization successful
+/// * `HalStatus::Error` - Invalid parameters or configuration error
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use crate::hal_i2s::*;
+/// let mut i2s = I2sHandle::new_spi3();
+/// i2s.init.mode = I2S_MODE_SLAVE_TX;
+/// i2s.init.audio_freq = I2S_AUDIOFREQ_48K;
+///
+/// match hal_i2s_init(&mut i2s) {
+///     HalStatus::Ok => println!("I2S initialized successfully"),
+///     HalStatus::Error => println!("I2S initialization failed"),
+///     _ => {}
+/// }
+/// ```
 pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
     // Check the parameters
-    if !is_i2s_mode(handle.init.mode) ||
-       !is_i2s_standard(handle.init.standard) ||
-       !is_i2s_data_format(handle.init.data_format) ||
-       !is_i2s_mclk_output(handle.init.mclk_output) ||
-       !is_i2s_audio_freq(handle.init.audio_freq) ||
-       !is_i2s_cpol(handle.init.cpol) ||
-       !is_i2s_clock_source(handle.init.clock_source) ||
-       !is_i2s_full_duplex_mode(handle.init.full_duplex_mode) {
+    if !is_i2s_mode(handle.init.mode)
+        || !is_i2s_standard(handle.init.standard)
+        || !is_i2s_data_format(handle.init.data_format)
+        || !is_i2s_mclk_output(handle.init.mclk_output)
+        || !is_i2s_audio_freq(handle.init.audio_freq)
+        || !is_i2s_cpol(handle.init.cpol)
+        || !is_i2s_clock_source(handle.init.clock_source)
+        || !is_i2s_full_duplex_mode(handle.init.full_duplex_mode)
+    {
         return HalStatus::Error;
     }
 
@@ -275,106 +549,6 @@ pub fn hal_i2s_disable(handle: &I2sHandle) {
     }
 }
 
-/// Transmit an amount of data in blocking mode
-pub fn hal_i2s_transmit(handle: &mut I2sHandle, data: &[u16], _timeout: u32) -> HalStatus {
-    if handle.state != HalI2sState::Ready {
-        return HalStatus::Busy;
-    }
-
-    if data.is_empty() {
-        return HalStatus::Error;
-    }
-
-    // Process Locked
-    handle.lock = HalLock::Locked;
-    handle.state = HalI2sState::BusyTx;
-    handle.error_code = HAL_I2S_ERROR_NONE;
-
-    // Store buffer info (actual transmission would be implemented with DMA/interrupts)
-    handle.tx_buff_ptr = data.as_ptr() as *mut u16;
-    handle.tx_xfer_size = data.len() as u16;
-    handle.tx_xfer_count = 0;
-
-    // Enable I2S
-    hal_i2s_enable(handle);
-
-    // Simplified: just mark as complete (real implementation would do actual I2S transfer)
-    handle.state = HalI2sState::Ready;
-    handle.lock = HalLock::Unlocked;
-
-    HalStatus::Ok
-}
-
-/// Receive an amount of data in blocking mode
-pub fn hal_i2s_receive(handle: &mut I2sHandle, data: &mut [u16], _timeout: u32) -> HalStatus {
-    if handle.state != HalI2sState::Ready {
-        return HalStatus::Busy;
-    }
-
-    if data.is_empty() {
-        return HalStatus::Error;
-    }
-
-    // Process Locked
-    handle.lock = HalLock::Locked;
-    handle.state = HalI2sState::BusyRx;
-    handle.error_code = HAL_I2S_ERROR_NONE;
-
-    // Store buffer info
-    handle.rx_buff_ptr = data.as_mut_ptr();
-    handle.rx_xfer_size = data.len() as u16;
-    handle.rx_xfer_count = 0;
-
-    // Enable I2S
-    hal_i2s_enable(handle);
-
-    // Simplified: just mark as complete
-    handle.state = HalI2sState::Ready;
-    handle.lock = HalLock::Unlocked;
-
-    HalStatus::Ok
-}
-
-// Full Duplex Extended Functions
-
-/// Transmit and Receive data in full duplex mode
-pub fn hal_i2s_transmit_receive(
-    handle: &mut I2sHandle,
-    tx_data: &[u16],
-    rx_data: &mut [u16],
-    _timeout: u32
-) -> HalStatus {
-    if handle.state != HalI2sState::Ready {
-        return HalStatus::Busy;
-    }
-
-    if tx_data.is_empty() || rx_data.is_empty() || tx_data.len() != rx_data.len() {
-        return HalStatus::Error;
-    }
-
-    // Process Locked
-    handle.lock = HalLock::Locked;
-    handle.state = HalI2sState::BusyTxRx;
-    handle.error_code = HAL_I2S_ERROR_NONE;
-
-    // Enable both I2S and I2Sext
-    hal_i2s_enable(handle);
-    hal_i2s_ext_enable(handle);
-
-    // Store buffer info for both TX and RX
-    handle.tx_buff_ptr = tx_data.as_ptr() as *mut u16;
-    handle.tx_xfer_size = tx_data.len() as u16;
-    handle.rx_buff_ptr = rx_data.as_mut_ptr();
-    handle.rx_xfer_size = rx_data.len() as u16;
-
-    // Simplified: just mark as complete
-    hal_i2s_ext_disable(handle);
-    handle.state = HalI2sState::Ready;
-    handle.lock = HalLock::Unlocked;
-
-    HalStatus::Ok
-}
-
 // Internal helper functions
 
 fn i2s_init(handle: &mut I2sHandle) {
@@ -387,7 +561,7 @@ fn i2s_init(handle: &mut I2sHandle) {
         handle.init.audio_freq,
         handle.init.mclk_output,
         handle.init.data_format,
-        handle.init.standard
+        handle.init.standard,
     );
 
     // Configure I2S prescaler (simplified)
@@ -397,11 +571,11 @@ fn i2s_init(handle: &mut I2sHandle) {
     }
 
     // Configure I2S configuration register
-    let i2scfgr_value = handle.init.mode |
-                        handle.init.standard |
-                        handle.init.data_format |
-                        handle.init.cpol |
-                        0x00000800; // I2SMOD bit
+    let i2scfgr_value = handle.init.mode
+        | handle.init.standard
+        | handle.init.data_format
+        | handle.init.cpol
+        | 0x00000800; // I2SMOD bit
 
     unsafe {
         let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32; // I2SCFGR offset
@@ -414,7 +588,7 @@ fn i2s_compute_prescaler(
     audio_freq: u32,
     mclk_output: u32,
     data_format: u32,
-    standard: u32
+    standard: u32,
 ) -> (u8, u8) {
     let mut tmp: u32;
     let i2sdiv: u32;
@@ -471,25 +645,27 @@ fn get_i2s_clock_freq(_clock_source: u32) -> u32 {
 // Parameter validation functions
 
 fn is_i2s_mode(mode: u32) -> bool {
-    matches!(mode, I2S_MODE_SLAVE_TX | I2S_MODE_SLAVE_RX | I2S_MODE_MASTER_TX | I2S_MODE_MASTER_RX)
+    matches!(
+        mode,
+        I2S_MODE_SLAVE_TX | I2S_MODE_SLAVE_RX | I2S_MODE_MASTER_TX | I2S_MODE_MASTER_RX
+    )
 }
 
 fn is_i2s_standard(standard: u32) -> bool {
-    matches!(standard,
-        I2S_STANDARD_PHILIPS |
-        I2S_STANDARD_MSB |
-        I2S_STANDARD_LSB |
-        I2S_STANDARD_PCM_SHORT |
-        I2S_STANDARD_PCM_LONG
+    matches!(
+        standard,
+        I2S_STANDARD_PHILIPS
+            | I2S_STANDARD_MSB
+            | I2S_STANDARD_LSB
+            | I2S_STANDARD_PCM_SHORT
+            | I2S_STANDARD_PCM_LONG
     )
 }
 
 fn is_i2s_data_format(format: u32) -> bool {
-    matches!(format,
-        I2S_DATAFORMAT_16B |
-        I2S_DATAFORMAT_16B_EXTENDED |
-        I2S_DATAFORMAT_24B |
-        I2S_DATAFORMAT_32B
+    matches!(
+        format,
+        I2S_DATAFORMAT_16B | I2S_DATAFORMAT_16B_EXTENDED | I2S_DATAFORMAT_24B | I2S_DATAFORMAT_32B
     )
 }
 
@@ -498,17 +674,18 @@ fn is_i2s_mclk_output(mclk: u32) -> bool {
 }
 
 fn is_i2s_audio_freq(freq: u32) -> bool {
-    matches!(freq,
-        I2S_AUDIOFREQ_192K |
-        I2S_AUDIOFREQ_96K |
-        I2S_AUDIOFREQ_48K |
-        I2S_AUDIOFREQ_44K |
-        I2S_AUDIOFREQ_32K |
-        I2S_AUDIOFREQ_22K |
-        I2S_AUDIOFREQ_16K |
-        I2S_AUDIOFREQ_11K |
-        I2S_AUDIOFREQ_8K |
-        I2S_AUDIOFREQ_DEFAULT
+    matches!(
+        freq,
+        I2S_AUDIOFREQ_192K
+            | I2S_AUDIOFREQ_96K
+            | I2S_AUDIOFREQ_48K
+            | I2S_AUDIOFREQ_44K
+            | I2S_AUDIOFREQ_32K
+            | I2S_AUDIOFREQ_22K
+            | I2S_AUDIOFREQ_16K
+            | I2S_AUDIOFREQ_11K
+            | I2S_AUDIOFREQ_8K
+            | I2S_AUDIOFREQ_DEFAULT
     ) || (freq >= 8000 && freq <= 192000)
 }
 
@@ -532,3 +709,407 @@ pub const I2S_FLAG_OVR: u32 = 0x00000040;
 pub const I2S_FLAG_UDR: u32 = 0x00000008;
 pub const I2S_FLAG_FRE: u32 = 0x00000100;
 pub const I2S_FLAG_CHSIDE: u32 = 0x00000004;
+
+// Additional constants needed
+pub const HAL_MAX_DELAY: u32 = 0xFFFFFFFF;
+pub const SPI_I2SCFGR_I2SE: u32 = 0x00000400;
+pub const SPI_I2SCFGR_I2SCFG_0: u32 = 0x00000100;
+pub const SPI_I2SCFGR_I2SCFG_1: u32 = 0x00000200;
+
+// Helper functions for flag checking
+fn i2s_get_flag_status(hi2s: &I2sHandle, flag: u32) -> bool {
+    let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
+    (sr & flag) != 0
+}
+
+// SysTick register addresses for STM32F4
+const SYST_CSR: u32 = 0xE000E010; // SysTick Control and Status Register
+const SYST_RVR: u32 = 0xE000E014; // SysTick Reload Value Register
+const SYST_CVR: u32 = 0xE000E018; // SysTick Current Value Register
+
+// Global tick counter (would typically be in BSS section)
+static mut UWTICK: u32 = 0;
+
+/// Initialize SysTick timer for 1ms tick generation
+///
+/// This corresponds to HAL_InitTick() from the STM32 C HAL.
+/// Sets up SysTick to generate interrupts every 1ms for timekeeping.
+pub fn hal_init_tick(hclk_frequency: u32) {
+    // Configure SysTick to generate interrupt every 1ms
+    let reload_value = (hclk_frequency / 1000) - 1;
+
+    unsafe {
+        // Set reload value
+        ptr::write_volatile(SYST_RVR as *mut u32, reload_value);
+
+        // Clear current value
+        ptr::write_volatile(SYST_CVR as *mut u32, 0);
+
+        // Enable SysTick with processor clock and interrupt
+        ptr::write_volatile(SYST_CSR as *mut u32, 0x7); // CLKSOURCE | TICKINT | ENABLE
+    }
+}
+
+/// Get current system tick count (milliseconds since system start)
+///
+/// This function provides a monotonic millisecond counter, equivalent to HAL_GetTick()
+/// from the STM32 C HAL library.
+fn hal_get_tick() -> u32 {
+    unsafe { UWTICK }
+}
+
+/// Increment system tick (called from SysTick interrupt)
+///
+/// This corresponds to HAL_IncTick() from the STM32 C HAL.
+/// Should be called from the SysTick interrupt handler every 1ms.
+pub fn hal_inc_tick() {
+    unsafe {
+        UWTICK = UWTICK.wrapping_add(1);
+    }
+}
+
+/// Wait for I2S flag to reach specified state with timeout
+///
+/// This is a faithful implementation of I2S_WaitFlagStateUntilTimeout from the C HAL.
+/// It uses real time-based timeout checking instead of simple counter loops.
+///
+/// # Arguments
+/// * `hi2s` - I2S handle
+/// * `flag` - Flag to check (I2S_FLAG_*)
+/// * `state` - Expected flag state (true/false)
+/// * `timeout` - Timeout in milliseconds
+///
+/// # Returns
+/// * `HalStatus::Ok` - Flag reached expected state within timeout
+/// * `HalStatus::Timeout` - Timeout expired before flag reached expected state
+fn i2s_wait_flag_state_until_timeout(
+    hi2s: &mut I2sHandle,
+    flag: u32,
+    state: bool,
+    timeout: u32,
+) -> HalStatus {
+    let tick_start = hal_get_tick();
+
+    defmt::trace!("polling flag status");
+    let mut curr_state = i2s_get_flag_status(hi2s, flag);
+    while curr_state != state {
+        defmt::trace!("what time is it?");
+        let elapsed = hal_get_tick();
+        defmt::trace!("how long have we been going this?");
+        let elapsed = elapsed.wrapping_sub(tick_start);
+        defmt::trace!("not ready {} > {}", elapsed, timeout);
+
+        if timeout != HAL_MAX_DELAY && elapsed > timeout {
+            defmt::trace!("timeout");
+
+            hi2s.state = HalI2sState::Ready;
+            hi2s.lock = HalLock::Unlocked;
+
+            return HalStatus::Timeout;
+        }
+
+        defmt::trace!("about to poll");
+        curr_state = i2s_get_flag_status(hi2s, flag);
+        defmt::trace!("poll done {} =?= {}", curr_state, state);
+    }
+
+    defmt::trace!("ready");
+
+    HalStatus::Ok
+}
+
+/// Transmit data in blocking mode
+///
+/// # Arguments
+/// * `hi2s` - Pointer to I2S handle structure
+/// * `p_data` - Pointer to data buffer
+/// * `timeout` - Timeout duration
+///
+/// # Returns
+/// HAL status
+///
+/// # Example
+/// ```rust
+/// let mut i2s = I2sHandle::new_spi3();
+/// hal_i2s_init(&mut i2s);
+///
+/// let audio_data = [0x1234u16, 0x5678u16, 0x9abcu16];
+/// let result = hal_i2s_transmit(&mut i2s, &audio_data, 1000);
+/// assert_eq!(result, HalStatus::Ok);
+/// ```
+pub fn hal_i2s_transmit(hi2s: &mut I2sHandle, p_data: &[u16], timeout: u32) -> HalStatus {
+    if hi2s.state != HalI2sState::Ready {
+        return HalStatus::Busy;
+    }
+
+    if p_data.is_empty() {
+        return HalStatus::Error;
+    }
+
+    // Set state to busy transmission
+    hi2s.state = HalI2sState::BusyTx;
+    hi2s.error_code = HAL_I2S_ERROR_NONE;
+
+    let size = p_data.len();
+    let mut tx_data_ptr = p_data.as_ptr();
+    let mut tmp_size = size;
+
+    // Check if the I2S is already enabled
+    let i2scfgr = unsafe { ptr::read_volatile((hi2s.instance + 0x1C) as *const u32) };
+    if (i2scfgr & SPI_I2SCFGR_I2SE) == 0 {
+        // Enable I2S peripheral
+        unsafe {
+            ptr::write_volatile(
+                (hi2s.instance + 0x1C) as *mut u32,
+                i2scfgr | SPI_I2SCFGR_I2SE,
+            );
+        }
+    }
+
+    // Start the transfer
+    defmt::trace!("starting transfer...");
+    while tmp_size > 0 {
+        defmt::trace!("awaiting TXE...");
+        // Wait until TXE flag is set
+        if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_TXE, true, timeout) != HalStatus::Ok {
+            // Set the error code and state are already set by the timeout function
+            return HalStatus::Timeout;
+        }
+
+        // Write data to DR register
+        let data = unsafe { ptr::read(tx_data_ptr) };
+        unsafe {
+            ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, data);
+        }
+
+        tx_data_ptr = unsafe { tx_data_ptr.add(1) };
+        tmp_size -= 1;
+    }
+
+    // Wait until Busy flag is reset
+    if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_BSY, false, timeout) != HalStatus::Ok {
+        // Set the error code
+        hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+        hi2s.state = HalI2sState::Ready;
+        return HalStatus::Timeout;
+    }
+
+    hi2s.state = HalI2sState::Ready;
+    HalStatus::Ok
+}
+
+/// Receive data in blocking mode
+///
+/// # Arguments
+/// * `hi2s` - Pointer to I2S handle structure
+/// * `p_data` - Pointer to data buffer
+/// * `timeout` - Timeout duration
+///
+/// # Returns
+/// HAL status
+pub fn hal_i2s_receive(hi2s: &mut I2sHandle, p_data: &mut [u16], timeout: u32) -> HalStatus {
+    if hi2s.state != HalI2sState::Ready {
+        return HalStatus::Busy;
+    }
+
+    if p_data.is_empty() {
+        return HalStatus::Error;
+    }
+
+    // Set state to busy reception
+    hi2s.state = HalI2sState::BusyRx;
+    hi2s.error_code = HAL_I2S_ERROR_NONE;
+
+    let size = p_data.len();
+    let mut rx_data_ptr = p_data.as_mut_ptr();
+    let mut tmp_size = size;
+
+    // Check if the I2S is already enabled
+    let i2scfgr = unsafe { ptr::read_volatile((hi2s.instance + 0x1C) as *const u32) };
+    if (i2scfgr & SPI_I2SCFGR_I2SE) == 0 {
+        // Enable I2S peripheral
+        unsafe {
+            ptr::write_volatile(
+                (hi2s.instance + 0x1C) as *mut u32,
+                i2scfgr | SPI_I2SCFGR_I2SE,
+            );
+        }
+    }
+
+    // Check if Master Receiver mode is selected
+    let mode = (i2scfgr & (SPI_I2SCFGR_I2SCFG_1 | SPI_I2SCFGR_I2SCFG_0)) >> 8;
+    if mode == (I2S_MODE_MASTER_RX >> 8) {
+        // Clear the Overrun Flag by a read operation on the SPI_DR register followed by a read
+        // access to the SPI_SR register.
+        unsafe {
+            ptr::read_volatile((hi2s.instance + 0x0C) as *const u16);
+            ptr::read_volatile((hi2s.instance + 0x08) as *const u32);
+        }
+    }
+
+    // Start the transfer
+    while tmp_size > 0 {
+        // Wait until RXNE flag is set
+        if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_RXNE, true, timeout) != HalStatus::Ok {
+            // Set the error code
+            hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+            hi2s.state = HalI2sState::Ready;
+            return HalStatus::Timeout;
+        }
+
+        // Read data from DR register
+        let data = unsafe { ptr::read_volatile((hi2s.instance + 0x0C) as *const u16) };
+        unsafe {
+            ptr::write(rx_data_ptr, data);
+        }
+
+        rx_data_ptr = unsafe { rx_data_ptr.add(1) };
+        tmp_size -= 1;
+    }
+
+    hi2s.state = HalI2sState::Ready;
+    HalStatus::Ok
+}
+
+/// Full-Duplex Transmit/Receive data in blocking mode
+///
+/// # Arguments
+/// * `hi2s` - Pointer to I2S handle structure
+/// * `p_tx_data` - Pointer to TX data buffer
+/// * `p_rx_data` - Pointer to RX data buffer
+/// * `timeout` - Timeout duration
+///
+/// # Returns
+/// HAL status
+///
+/// # Example
+/// ```rust
+/// let mut i2s = I2sHandle::new_spi3();
+/// i2s.init.full_duplex_mode = I2S_FULLDUPLEXMODE_ENABLE;
+/// hal_i2s_init(&mut i2s);
+///
+/// let tx_data = [0x1234u16, 0x5678u16];
+/// let mut rx_data = [0u16; 2];
+/// let result = hal_i2s_transmit_receive(&mut i2s, &tx_data, &mut rx_data, 1000);
+/// assert_eq!(result, HalStatus::Ok);
+/// ```
+pub fn hal_i2s_transmit_receive(
+    hi2s: &mut I2sHandle,
+    p_tx_data: &[u16],
+    p_rx_data: &mut [u16],
+    timeout: u32,
+) -> HalStatus {
+    let tx_size = p_tx_data.len();
+    let rx_size = p_rx_data.len();
+
+    if hi2s.state != HalI2sState::Ready {
+        return HalStatus::Busy;
+    }
+
+    if p_tx_data.is_empty() || p_rx_data.is_empty() || tx_size != rx_size {
+        return HalStatus::Error;
+    }
+
+    // Set state to busy transmission and reception
+    hi2s.state = HalI2sState::BusyTxRx;
+    hi2s.error_code = HAL_I2S_ERROR_NONE;
+
+    let mut tx_data_ptr = p_tx_data.as_ptr();
+    let mut rx_data_ptr = p_rx_data.as_mut_ptr();
+    let mut tmp_size = tx_size;
+
+    // Check if the I2S is already enabled
+    let i2scfgr = unsafe { ptr::read_volatile((hi2s.instance + 0x1C) as *const u32) };
+    if (i2scfgr & SPI_I2SCFGR_I2SE) == 0 {
+        // Enable I2S peripheral
+        unsafe {
+            ptr::write_volatile(
+                (hi2s.instance + 0x1C) as *mut u32,
+                i2scfgr | SPI_I2SCFGR_I2SE,
+            );
+        }
+    }
+
+    // For SPI3, the extended instance is I2S3ext at 0x40004000
+    let ext_instance = if hi2s.instance == 0x40003C00 {
+        0x40004000 // I2S3ext
+    } else if hi2s.instance == 0x40003800 {
+        0x40003400 // I2S2ext
+    } else {
+        0 // No extended instance
+    };
+
+    // Check if I2S extended is already enabled
+    if ext_instance != 0 {
+        let i2scfgr_ext = unsafe { ptr::read_volatile((ext_instance + 0x1C) as *const u32) };
+        if (i2scfgr_ext & SPI_I2SCFGR_I2SE) == 0 {
+            // Enable I2S extended peripheral
+            unsafe {
+                ptr::write_volatile(
+                    (ext_instance + 0x1C) as *mut u32,
+                    i2scfgr_ext | SPI_I2SCFGR_I2SE,
+                );
+            }
+        }
+    }
+
+    // Start the transfer
+    while tmp_size > 0 {
+        // Wait until TXE flag is set (main instance)
+        if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_TXE, true, timeout) != HalStatus::Ok {
+            hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+            hi2s.state = HalI2sState::Ready;
+            return HalStatus::Timeout;
+        }
+
+        // Write data to main I2S DR register
+        let tx_data = unsafe { ptr::read(tx_data_ptr) };
+        unsafe {
+            ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, tx_data);
+        }
+
+        // Wait until RXNE flag is set (extended instance or main instance)
+        let rx_instance = if ext_instance != 0 {
+            ext_instance
+        } else {
+            hi2s.instance
+        };
+
+        // Check RXNE on the appropriate instance
+        let mut tick_start = 0u32;
+        loop {
+            let sr = unsafe { ptr::read_volatile((rx_instance + 0x08) as *const u32) };
+            if (sr & I2S_FLAG_RXNE) != 0 {
+                break;
+            }
+            if timeout != HAL_MAX_DELAY {
+                if timeout == 0 || (tick_start.wrapping_add(timeout) < tick_start) {
+                    hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+                    hi2s.state = HalI2sState::Ready;
+                    return HalStatus::Timeout;
+                }
+            }
+            tick_start = tick_start.wrapping_add(1);
+        }
+
+        // Read data from appropriate DR register
+        let rx_data = unsafe { ptr::read_volatile((rx_instance + 0x0C) as *const u16) };
+        unsafe {
+            ptr::write(rx_data_ptr, rx_data);
+        }
+
+        tx_data_ptr = unsafe { tx_data_ptr.add(1) };
+        rx_data_ptr = unsafe { rx_data_ptr.add(1) };
+        tmp_size -= 1;
+    }
+
+    // Wait until Busy flag is reset
+    if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_BSY, false, timeout) != HalStatus::Ok {
+        hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+        hi2s.state = HalI2sState::Ready;
+        return HalStatus::Timeout;
+    }
+
+    hi2s.state = HalI2sState::Ready;
+    HalStatus::Ok
+}

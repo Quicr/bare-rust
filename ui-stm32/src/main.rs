@@ -4,6 +4,7 @@
 
 mod board;
 mod hal_i2s;
+use hal_i2s::*;
 
 use board::{AudioControl, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
@@ -199,10 +200,54 @@ async fn main(spawner: Spawner) {
 
         config
     };
-    let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, Default::default());
+    let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, config);
     let mut audio_control = AudioControl::new(i2c);
     audio_control.init().await;
 
+    // Start the SysTick timer
+    hal_init_tick(168_000_000);
+
+    // Initialize I2S handle for SPI3
+    let mut i2s = I2sHandle::new_spi3();
+
+    // Configure I2S parameters
+    i2s.init.mode = I2S_MODE_MASTER_TX;
+    i2s.init.standard = I2S_STANDARD_PHILIPS;
+    i2s.init.data_format = I2S_DATAFORMAT_16B_EXTENDED;
+    i2s.init.audio_freq = 8_000;
+    i2s.init.full_duplex_mode = I2S_FULLDUPLEXMODE_ENABLE;
+
+    // Initialize the I2S peripheral
+    let rv = hal_i2s_init(&mut i2s);
+    if rv != HalStatus::Ok {
+        defmt::panic!("Failed to initialize I2S: {}", rv);
+    }
+
+    trace!("Ready to roll 😎");
+
+    let square_wave: [u16; 108] = [
+        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
+        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x0000, 0x0000, 0x0000, 0x0000,
+        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+        0x0000, 0x0000, 0x0000, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
+        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x0000,
+        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
+        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
+        0x1fff, 0x1fff, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    ];
+    trace!("before beep");
+    for _i in 0..(16_000 / square_wave.len()) {
+        let rv = hal_i2s_transmit(&mut i2s, &square_wave, 100);
+        if rv != HalStatus::Ok {
+            defmt::panic!("Failed to transmit: {}", rv);
+        }
+        trace!("Transmit OK");
+    }
+    trace!("after beep");
+
+    /*
     // Receive audio over I2S
     const I2S_BUFFER_SIZE: usize = 8000;
     let mut rx_buffer = [0u16; I2S_BUFFER_SIZE];
@@ -280,4 +325,10 @@ async fn main(spawner: Spawner) {
     }
 
     // i2s.stop().await;
+    */
+}
+
+#[cortex_m_rt::exception]
+fn SysTick() {
+    hal_inc_tick();
 }
