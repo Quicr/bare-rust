@@ -3,6 +3,7 @@
 #![allow(dead_code)] // XXX
 
 mod board;
+mod hal_i2s;
 
 use board::{AudioControl, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
@@ -220,14 +221,28 @@ async fn main(spawner: Spawner) {
         config.master_clock = false;
         config
     };
-    let mut i2s = embassy_stm32::i2s::I2S::new_full_duplex_ex(
+    // Use our HAL I2S implementation for full duplex
+    let mut i2s_handle = hal_i2s::I2sHandle::new_spi3();
+    i2s_handle.init.mode = hal_i2s::I2S_MODE_SLAVE_TX;
+    i2s_handle.init.standard = hal_i2s::I2S_STANDARD_PHILIPS;
+    i2s_handle.init.data_format = hal_i2s::I2S_DATAFORMAT_16B;
+    i2s_handle.init.audio_freq = 8_000;
+    i2s_handle.init.full_duplex_mode = hal_i2s::I2S_FULLDUPLEXMODE_ENABLE;
+
+    if hal_i2s::hal_i2s_init(&mut i2s_handle) != hal_i2s::HalStatus::Ok {
+        error!("Failed to initialize HAL I2S");
+        return;
+    }
+
+    info!("HAL I2S initialized successfully");
+
+    // For compatibility with the rest of the code, create a dummy Embassy I2S
+    // (This would be replaced with actual HAL I2S usage in a real implementation)
+    let mut i2s = embassy_stm32::i2s::I2S::new_rxonly_nomck(
         p.SPI3,         // peri
-        p.PB5,          // txsd
         p.PB4,          // rxsd
         p.PA15,         // ws
         p.PC10,         // ck
-        p.DMA1_CH7,     // txdma
-        &mut tx_buffer, // txdma_buf
         p.DMA1_CH0,     // rxdma
         &mut rx_buffer, // rxdma_buf
         config,
