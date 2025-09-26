@@ -790,30 +790,20 @@ fn i2s_wait_flag_state_until_timeout(
 ) -> HalStatus {
     let tick_start = hal_get_tick();
 
-    defmt::trace!("polling flag status");
     let mut curr_state = i2s_get_flag_status(hi2s, flag);
     while curr_state != state {
-        defmt::trace!("what time is it?");
         let elapsed = hal_get_tick();
-        defmt::trace!("how long have we been going this?");
         let elapsed = elapsed.wrapping_sub(tick_start);
-        defmt::trace!("not ready {} > {}", elapsed, timeout);
 
         if timeout != HAL_MAX_DELAY && elapsed > timeout {
-            defmt::trace!("timeout");
-
             hi2s.state = HalI2sState::Ready;
             hi2s.lock = HalLock::Unlocked;
 
             return HalStatus::Timeout;
         }
 
-        defmt::trace!("about to poll");
         curr_state = i2s_get_flag_status(hi2s, flag);
-        defmt::trace!("poll done {} =?= {}", curr_state, state);
     }
-
-    defmt::trace!("ready");
 
     HalStatus::Ok
 }
@@ -867,9 +857,7 @@ pub fn hal_i2s_transmit(hi2s: &mut I2sHandle, p_data: &[u16], timeout: u32) -> H
     }
 
     // Start the transfer
-    defmt::trace!("starting transfer...");
     while tmp_size > 0 {
-        defmt::trace!("awaiting TXE...");
         // Wait until TXE flag is set
         if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_TXE, true, timeout) != HalStatus::Ok {
             // Set the error code and state are already set by the timeout function

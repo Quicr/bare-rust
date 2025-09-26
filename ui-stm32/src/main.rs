@@ -207,17 +207,21 @@ async fn main(spawner: Spawner) {
     // Start the SysTick timer
     hal_init_tick(168_000_000);
 
-    // Initialize I2S handle for SPI3
+    // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
+    hal_i2s_msp_init();
+
+    // MX_I2S3_Init() - Configure I2S3 parameters
     let mut i2s = I2sHandle::new_spi3();
 
-    // Configure I2S parameters
-    i2s.init.mode = I2S_MODE_MASTER_TX;
+    i2s.init.mode = I2S_MODE_SLAVE_TX;
     i2s.init.standard = I2S_STANDARD_PHILIPS;
     i2s.init.data_format = I2S_DATAFORMAT_16B_EXTENDED;
-    i2s.init.audio_freq = 8_000;
+    i2s.init.mclk_output = I2S_MCLKOUTPUT_DISABLE;
+    i2s.init.audio_freq = I2S_AUDIOFREQ_8K;
+    i2s.init.cpol = I2S_CPOL_LOW;
+    i2s.init.clock_source = I2S_CLOCKSOURCE_PLLI2S;
     i2s.init.full_duplex_mode = I2S_FULLDUPLEXMODE_ENABLE;
 
-    // Initialize the I2S peripheral
     let rv = hal_i2s_init(&mut i2s);
     if rv != HalStatus::Ok {
         defmt::panic!("Failed to initialize I2S: {}", rv);
@@ -238,14 +242,30 @@ async fn main(spawner: Spawner) {
         0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
     ];
     trace!("before beep");
+    let mut curr_frame = [0; 108];
     for _i in 0..(16_000 / square_wave.len()) {
         let rv = hal_i2s_transmit(&mut i2s, &square_wave, 100);
         if rv != HalStatus::Ok {
-            defmt::panic!("Failed to transmit: {}", rv);
+            defmt::panic!("Failed to transmit: {} {}", rv, i2s.error_code);
         }
-        trace!("Transmit OK");
+
+        defmt::trace!("transmit OK");
     }
     trace!("after beep");
+
+    /*
+    trace!("loopback");
+    let mut last_frame = [0; 160];
+    let mut curr_frame = [0; 160];
+    for _i in 0..(16_000 / square_wave.len()) {
+        let rv = hal_i2s_transmit_receive(&mut i2s, &square_wave, &mut curr_frame, 100);
+        if rv != HalStatus::Ok {
+            defmt::panic!("Failed to transmit+receive: {}", rv);
+        }
+
+        last_frame.copy_from_slice(&curr_frame);
+    }
+    */
 
     /*
     // Receive audio over I2S
@@ -326,6 +346,183 @@ async fn main(spawner: Spawner) {
 
     // i2s.stop().await;
     */
+}
+
+/// HAL_I2S_MspInit - I2S3 Hardware Initialization
+///
+/// Direct translation of HAL_I2S_MspInit() from stm32f4xx_hal_msp.c
+/// Configures:
+/// - PLLI2S clock (N=50, R=2)
+/// - SPI3 peripheral clock
+/// - GPIO pins for I2S3 full duplex operation using direct register access
+/// - Skips DMA initialization as requested
+fn hal_i2s_msp_init() {
+    use core::ptr;
+
+    // STM32F4 Register base addresses
+    const RCC_BASE: u32 = 0x40023800;
+    const GPIOA_BASE: u32 = 0x40020000;
+    const GPIOB_BASE: u32 = 0x40020400;
+    const GPIOC_BASE: u32 = 0x40020800;
+
+    // RCC registers
+    const RCC_CR: u32 = RCC_BASE + 0x00; // RCC Clock Control Register
+    const RCC_PLLI2SCFGR: u32 = RCC_BASE + 0x84; // RCC PLLI2S Configuration Register
+    const RCC_APB1ENR: u32 = RCC_BASE + 0x40; // RCC APB1 Peripheral Clock Enable Register
+    const RCC_AHB1ENR: u32 = RCC_BASE + 0x30; // RCC AHB1 Peripheral Clock Enable Register
+
+    // GPIO register offsets
+    const GPIO_MODER_OFFSET: u32 = 0x00; // GPIO Port mode register
+    const GPIO_OTYPER_OFFSET: u32 = 0x04; // GPIO Port output type register
+    const GPIO_OSPEEDR_OFFSET: u32 = 0x08; // GPIO Port output speed register
+    const GPIO_PUPDR_OFFSET: u32 = 0x0C; // GPIO Port pull-up/pull-down register
+    const GPIO_AFRH_OFFSET: u32 = 0x24; // GPIO Alternate function high register
+    const GPIO_AFRL_OFFSET: u32 = 0x20; // GPIO Alternate function low register
+
+    // RCC bit definitions
+    const RCC_CR_PLLI2SON: u32 = 1 << 26; // PLLI2S Enable
+    const RCC_CR_PLLI2SRDY: u32 = 1 << 27; // PLLI2S Ready flag
+    const RCC_APB1ENR_SPI3EN: u32 = 1 << 15; // SPI3 clock enable
+    const RCC_AHB1ENR_GPIOAEN: u32 = 1 << 0; // GPIOA clock enable
+    const RCC_AHB1ENR_GPIOBEN: u32 = 1 << 1; // GPIOB clock enable
+    const RCC_AHB1ENR_GPIOCEN: u32 = 1 << 2; // GPIOC clock enable
+
+    unsafe {
+        // Configure PLLI2S Clock (PeriphClkInitStruct from C HAL)
+        let mut cr = ptr::read_volatile(RCC_CR as *const u32);
+        if (cr & RCC_CR_PLLI2SON) != 0 {
+            // Disable PLLI2S first
+            cr &= !RCC_CR_PLLI2SON;
+            ptr::write_volatile(RCC_CR as *mut u32, cr);
+            // Wait for PLLI2S to be disabled
+            while {
+                cr = ptr::read_volatile(RCC_CR as *const u32);
+                (cr & RCC_CR_PLLI2SRDY) != 0
+            } {}
+        }
+
+        // Configure PLLI2S: N=50, R=2 (matching C HAL)
+        let plli2s_n = 50 << 6; // PLLI2SN = 50
+        let plli2s_r = 0 << 28; // PLLI2SR = 2 (encoded as 0)
+        ptr::write_volatile(RCC_PLLI2SCFGR as *mut u32, plli2s_n | plli2s_r);
+
+        // Enable PLLI2S
+        cr = ptr::read_volatile(RCC_CR as *const u32);
+        ptr::write_volatile(RCC_CR as *mut u32, cr | RCC_CR_PLLI2SON);
+        // Wait for PLLI2S ready
+        while {
+            cr = ptr::read_volatile(RCC_CR as *const u32);
+            (cr & RCC_CR_PLLI2SRDY) == 0
+        } {}
+
+        // Enable peripheral clocks (from C HAL)
+        let apb1enr = ptr::read_volatile(RCC_APB1ENR as *const u32);
+        ptr::write_volatile(RCC_APB1ENR as *mut u32, apb1enr | RCC_APB1ENR_SPI3EN);
+
+        // Enable GPIO clocks
+        let ahb1enr = ptr::read_volatile(RCC_AHB1ENR as *const u32);
+        ptr::write_volatile(
+            RCC_AHB1ENR as *mut u32,
+            ahb1enr | RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN,
+        );
+
+        // Configure GPIO pins (direct translation from C HAL GPIO_InitStruct)
+
+        // PA15 -> I2S3_WS (AF6, Push-Pull, No Pull, Low Speed)
+        let mut moder = ptr::read_volatile((GPIOA_BASE + GPIO_MODER_OFFSET) as *const u32);
+        moder &= !(0x3 << (15 * 2)); // Clear PA15 mode bits
+        moder |= 0x2 << (15 * 2); // Set PA15 to alternate function mode
+        ptr::write_volatile((GPIOA_BASE + GPIO_MODER_OFFSET) as *mut u32, moder);
+
+        let mut otyper = ptr::read_volatile((GPIOA_BASE + GPIO_OTYPER_OFFSET) as *const u32);
+        otyper &= !(1 << 15); // PA15 push-pull
+        ptr::write_volatile((GPIOA_BASE + GPIO_OTYPER_OFFSET) as *mut u32, otyper);
+
+        let mut pupdr = ptr::read_volatile((GPIOA_BASE + GPIO_PUPDR_OFFSET) as *const u32);
+        pupdr &= !(0x3 << (15 * 2)); // No pull-up/pull-down
+        ptr::write_volatile((GPIOA_BASE + GPIO_PUPDR_OFFSET) as *mut u32, pupdr);
+
+        let mut ospeedr = ptr::read_volatile((GPIOA_BASE + GPIO_OSPEEDR_OFFSET) as *const u32);
+        ospeedr &= !(0x3 << (15 * 2)); // PA15 low speed
+        ptr::write_volatile((GPIOA_BASE + GPIO_OSPEEDR_OFFSET) as *mut u32, ospeedr);
+
+        let mut afrh = ptr::read_volatile((GPIOA_BASE + GPIO_AFRH_OFFSET) as *const u32);
+        afrh &= !(0xF << ((15 - 8) * 4)); // Clear PA15 AF
+        afrh |= 6 << ((15 - 8) * 4); // AF6 for PA15
+        ptr::write_volatile((GPIOA_BASE + GPIO_AFRH_OFFSET) as *mut u32, afrh);
+
+        // PC10 -> I2S3_CK (AF6, Push-Pull, No Pull, Low Speed)
+        moder = ptr::read_volatile((GPIOC_BASE + GPIO_MODER_OFFSET) as *const u32);
+        moder &= !(0x3 << (10 * 2));
+        moder |= 0x2 << (10 * 2);
+        ptr::write_volatile((GPIOC_BASE + GPIO_MODER_OFFSET) as *mut u32, moder);
+
+        otyper = ptr::read_volatile((GPIOC_BASE + GPIO_OTYPER_OFFSET) as *const u32);
+        otyper &= !(1 << 10);
+        ptr::write_volatile((GPIOC_BASE + GPIO_OTYPER_OFFSET) as *mut u32, otyper);
+
+        pupdr = ptr::read_volatile((GPIOC_BASE + GPIO_PUPDR_OFFSET) as *const u32);
+        pupdr &= !(0x3 << (10 * 2));
+        ptr::write_volatile((GPIOC_BASE + GPIO_PUPDR_OFFSET) as *mut u32, pupdr);
+
+        ospeedr = ptr::read_volatile((GPIOC_BASE + GPIO_OSPEEDR_OFFSET) as *const u32);
+        ospeedr &= !(0x3 << (10 * 2));
+        ptr::write_volatile((GPIOC_BASE + GPIO_OSPEEDR_OFFSET) as *mut u32, ospeedr);
+
+        afrh = ptr::read_volatile((GPIOC_BASE + GPIO_AFRH_OFFSET) as *const u32);
+        afrh &= !(0xF << ((10 - 8) * 4));
+        afrh |= 6 << ((10 - 8) * 4); // AF6 for PC10
+        ptr::write_volatile((GPIOC_BASE + GPIO_AFRH_OFFSET) as *mut u32, afrh);
+
+        // PB4 -> I2S3_ext_SD (AF7, Push-Pull, No Pull, Low Speed)
+        moder = ptr::read_volatile((GPIOB_BASE + GPIO_MODER_OFFSET) as *const u32);
+        moder &= !(0x3 << (4 * 2));
+        moder |= 0x2 << (4 * 2);
+        ptr::write_volatile((GPIOB_BASE + GPIO_MODER_OFFSET) as *mut u32, moder);
+
+        otyper = ptr::read_volatile((GPIOB_BASE + GPIO_OTYPER_OFFSET) as *const u32);
+        otyper &= !(1 << 4);
+        ptr::write_volatile((GPIOB_BASE + GPIO_OTYPER_OFFSET) as *mut u32, otyper);
+
+        pupdr = ptr::read_volatile((GPIOB_BASE + GPIO_PUPDR_OFFSET) as *const u32);
+        pupdr &= !(0x3 << (4 * 2));
+        ptr::write_volatile((GPIOB_BASE + GPIO_PUPDR_OFFSET) as *mut u32, pupdr);
+
+        ospeedr = ptr::read_volatile((GPIOB_BASE + GPIO_OSPEEDR_OFFSET) as *const u32);
+        ospeedr &= !(0x3 << (4 * 2));
+        ptr::write_volatile((GPIOB_BASE + GPIO_OSPEEDR_OFFSET) as *mut u32, ospeedr);
+
+        let mut afrl = ptr::read_volatile((GPIOB_BASE + GPIO_AFRL_OFFSET) as *const u32);
+        afrl &= !(0xF << (4 * 4));
+        afrl |= 7 << (4 * 4); // AF7 for PB4 (I2S3ext)
+        ptr::write_volatile((GPIOB_BASE + GPIO_AFRL_OFFSET) as *mut u32, afrl);
+
+        // PB5 -> I2S3_SD (AF6, Push-Pull, No Pull, Low Speed)
+        moder = ptr::read_volatile((GPIOB_BASE + GPIO_MODER_OFFSET) as *const u32);
+        moder &= !(0x3 << (5 * 2));
+        moder |= 0x2 << (5 * 2);
+        ptr::write_volatile((GPIOB_BASE + GPIO_MODER_OFFSET) as *mut u32, moder);
+
+        otyper = ptr::read_volatile((GPIOB_BASE + GPIO_OTYPER_OFFSET) as *const u32);
+        otyper &= !(1 << 5);
+        ptr::write_volatile((GPIOB_BASE + GPIO_OTYPER_OFFSET) as *mut u32, otyper);
+
+        pupdr = ptr::read_volatile((GPIOB_BASE + GPIO_PUPDR_OFFSET) as *const u32);
+        pupdr &= !(0x3 << (5 * 2));
+        ptr::write_volatile((GPIOB_BASE + GPIO_PUPDR_OFFSET) as *mut u32, pupdr);
+
+        ospeedr = ptr::read_volatile((GPIOB_BASE + GPIO_OSPEEDR_OFFSET) as *const u32);
+        ospeedr &= !(0x3 << (5 * 2));
+        ptr::write_volatile((GPIOB_BASE + GPIO_OSPEEDR_OFFSET) as *mut u32, ospeedr);
+
+        afrl = ptr::read_volatile((GPIOB_BASE + GPIO_AFRL_OFFSET) as *const u32);
+        afrl &= !(0xF << (5 * 4));
+        afrl |= 6 << (5 * 4); // AF6 for PB5
+        ptr::write_volatile((GPIOB_BASE + GPIO_AFRL_OFFSET) as *mut u32, afrl);
+    }
+
+    // Note: DMA initialization skipped as requested
+    // Note: I2S3 interrupt configuration skipped (HAL_NVIC_SetPriority/EnableIRQ)
 }
 
 #[cortex_m_rt::exception]
