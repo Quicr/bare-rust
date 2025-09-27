@@ -229,123 +229,39 @@ async fn main(spawner: Spawner) {
 
     trace!("Ready to roll 😎");
 
-    let square_wave: [u16; 108] = [
+    let square_wave: [u16; 36] = [
         0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
         0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x0000, 0x0000, 0x0000, 0x0000,
         0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
-        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
-        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
-        0x1fff, 0x1fff, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+        0x0000, 0x0000, 0x0000,
     ];
-    trace!("before beep");
-    let mut curr_frame = [0; 108];
-    for _i in 0..(16_000 / square_wave.len()) {
-        let rv = hal_i2s_transmit(&mut i2s, &square_wave, 100);
+    let square_frame: [u16; 16_000] = core::array::from_fn(|i| square_wave[i % square_wave.len()]);
+
+    trace!("before tx");
+    let rv = hal_i2s_transmit(&mut i2s, &square_frame, 100);
+    if rv != HalStatus::Ok {
+        defmt::panic!("Failed to transmit: {} {}", rv, i2s.error_code);
+    }
+    trace!("after tx");
+
+    trace!("before txrx");
+    let mut last_frame = [0; 16_000];
+    let mut curr_frame = [0; 16_000];
+    loop {
+        // for _i in 0..(16_000 / square_wave.len()) {
+        let rv = hal_i2sex_transmit_receive(&mut i2s, &last_frame, &mut curr_frame, 100);
         if rv != HalStatus::Ok {
             defmt::panic!("Failed to transmit: {} {}", rv, i2s.error_code);
         }
 
-        defmt::trace!("transmit OK");
-    }
-    trace!("after beep");
-
-    /*
-    trace!("loopback");
-    let mut last_frame = [0; 160];
-    let mut curr_frame = [0; 160];
-    for _i in 0..(16_000 / square_wave.len()) {
-        let rv = hal_i2s_transmit_receive(&mut i2s, &square_wave, &mut curr_frame, 100);
-        if rv != HalStatus::Ok {
-            defmt::panic!("Failed to transmit+receive: {}", rv);
-        }
-
         last_frame.copy_from_slice(&curr_frame);
+
+        defmt::trace!(
+            "energy: {:?}",
+            curr_frame.iter().map(|x| *x as u32).sum::<u32>()
+        );
     }
-    */
-
-    /*
-    // Receive audio over I2S
-    const I2S_BUFFER_SIZE: usize = 8000;
-    let mut rx_buffer = [0u16; I2S_BUFFER_SIZE];
-    let mut tx_buffer = [0u16; I2S_BUFFER_SIZE];
-
-    // Play out the recorded audio
-    let config = {
-        use embassy_stm32::{i2s::*, time::Hertz};
-
-        let mut config = Config::default();
-        config.frequency = Hertz(8_000);
-        config.mode = Mode::Slave;
-        config.standard = Standard::Philips;
-        config.format = Format::Data16Channel32;
-        config.clock_polarity = ClockPolarity::IdleLow;
-        config.master_clock = false;
-        config
-    };
-    // Use our HAL I2S implementation for full duplex
-    let mut i2s_handle = hal_i2s::I2sHandle::new_spi3();
-    i2s_handle.init.mode = hal_i2s::I2S_MODE_SLAVE_TX;
-    i2s_handle.init.standard = hal_i2s::I2S_STANDARD_PHILIPS;
-    i2s_handle.init.data_format = hal_i2s::I2S_DATAFORMAT_16B;
-    i2s_handle.init.audio_freq = 8_000;
-    i2s_handle.init.full_duplex_mode = hal_i2s::I2S_FULLDUPLEXMODE_ENABLE;
-
-    if hal_i2s::hal_i2s_init(&mut i2s_handle) != hal_i2s::HalStatus::Ok {
-        error!("Failed to initialize HAL I2S");
-        return;
-    }
-
-    info!("HAL I2S initialized successfully");
-
-    // For compatibility with the rest of the code, create a dummy Embassy I2S
-    // (This would be replaced with actual HAL I2S usage in a real implementation)
-    let mut i2s = embassy_stm32::i2s::I2S::new_rxonly_nomck(
-        p.SPI3,         // peri
-        p.PB4,          // rxsd
-        p.PA15,         // ws
-        p.PC10,         // ck
-        p.DMA1_CH0,     // rxdma
-        &mut rx_buffer, // rxdma_buf
-        config,
-    );
-
-    i2s.start();
-
-    // Play a 444Hz square wave => 18 samples per cycle
-    let square_wave: [u16; 108] = [
-        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
-        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
-        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
-        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
-        0x1fff, 0x1fff, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-    ];
-    trace!("before beep");
-    for _i in 0..(16_000 / square_wave.len()) {
-        i2s.write(&square_wave).await.ok();
-    }
-    trace!("after beep");
-
-    trace!("starting loopback...");
-    let mut chunk = [0u16; 160]; // 20ms chunks
-    loop {
-        trace!("awaiting chunk");
-        i2s.read(&mut chunk).await.unwrap();
-        trace!("chunk {}", chunk.iter().sum::<u16>());
-        // i2s.write(&chunk).await.unwrap();
-        break;
-    }
-
-    // i2s.stop().await;
-    */
+    trace!("after txrx");
 }
 
 /// HAL_I2S_MspInit - I2S3 Hardware Initialization
@@ -409,6 +325,7 @@ fn hal_i2s_msp_init() {
         // Enable PLLI2S
         cr = ptr::read_volatile(RCC_CR as *const u32);
         ptr::write_volatile(RCC_CR as *mut u32, cr | RCC_CR_PLLI2SON);
+
         // Wait for PLLI2S ready
         while {
             cr = ptr::read_volatile(RCC_CR as *const u32);

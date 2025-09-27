@@ -497,7 +497,13 @@ pub fn hal_i2s_ext_clear_ovr_flag(handle: &I2sHandle) {
 /// }
 /// ```
 pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
-    // Check the parameters
+    let mut i2sdiv: u32;
+    let mut i2sodd: u32;
+    let mut packetlength: u32;
+    let mut tmp: u32;
+    let mut i2sclk: u32;
+
+    // Check the I2S parameters (simplified - assuming all parameters are valid)
     if !is_i2s_mode(handle.init.mode)
         || !is_i2s_standard(handle.init.standard)
         || !is_i2s_data_format(handle.init.data_format)
@@ -513,15 +519,154 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
     if handle.state == HalI2sState::Reset {
         // Allocate lock resource and initialize it
         handle.lock = HalLock::Unlocked;
+
+        // Init the low level hardware: GPIO, CLOCK, NVIC... (already done by hal_i2s_msp_init)
     }
 
     handle.state = HalI2sState::Busy;
 
-    // Disable the selected I2S peripheral
-    hal_i2s_disable(handle);
+    // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits
+    unsafe {
+        let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32;
+        let mut i2scfgr = ptr::read_volatile(i2scfgr_ptr);
+        i2scfgr &= !(SPI_I2SCFGR_CHLEN | SPI_I2SCFGR_DATLEN | 0x00000080 | // CKPOL
+                     0x00000030 | 0x00000002 | SPI_I2SCFGR_I2SCFG | // I2SSTD, PCMSYNC, I2SCFG
+                     SPI_I2SCFGR_I2SE | 0x00000800); // I2SMOD
+        ptr::write_volatile(i2scfgr_ptr, i2scfgr);
 
-    // Configure I2S peripheral
-    i2s_init(handle);
+        // Reset I2SPR register
+        let i2spr_ptr = (handle.instance + 0x20) as *mut u32;
+        ptr::write_volatile(i2spr_ptr, 0x0002);
+    }
+
+    // I2SPR: I2SDIV and ODD Calculation
+    // If the requested audio frequency is not the default, compute the prescaler
+    if handle.init.audio_freq != I2S_AUDIOFREQ_DEFAULT {
+        // Check the frame length (For the Prescaler computing)
+        if handle.init.data_format == I2S_DATAFORMAT_16B {
+            // Packet length is 16 bits
+            packetlength = 16;
+        } else {
+            // Packet length is 32 bits
+            packetlength = 32;
+        }
+
+        // I2S standard
+        if handle.init.standard <= I2S_STANDARD_LSB {
+            // In I2S standard packet length is multiplied by 2
+            packetlength = packetlength * 2;
+        }
+
+        // Get the source clock value (simplified - use PLLI2S)
+        i2sclk = get_i2s_clock_freq(handle.init.clock_source);
+
+        // Compute the Real divider depending on the MCLK output state, with a floating point
+        if handle.init.mclk_output == I2S_MCLKOUTPUT_ENABLE {
+            // MCLK output is enabled
+            tmp = (((i2sclk / 256) * 10) / handle.init.audio_freq) + 5;
+        } else {
+            // MCLK output is disabled
+            tmp = (((i2sclk / packetlength) * 10) / handle.init.audio_freq) + 5;
+        }
+
+        // Remove the flatting point
+        tmp = tmp / 10;
+
+        // Check the parity of the divider
+        i2sodd = tmp & 0x1;
+
+        // Compute the i2sdiv prescaler
+        i2sdiv = ((tmp - i2sodd) / 2) & 0xFF;
+
+        // Get the Mask for the Odd bit (SPI_I2SPR[8]) register
+        i2sodd = i2sodd << 8;
+    } else {
+        // Set the default values
+        i2sdiv = 2;
+        i2sodd = 0;
+    }
+
+    // Test if the divider is 1 or 0 or greater than 0xFF
+    if (i2sdiv < 2) || (i2sdiv > 0xFF) {
+        // Set the error code
+        handle.error_code = HAL_I2S_ERROR_PRESCALER;
+        return HalStatus::Error;
+    }
+
+    // Write to SPIx I2SPR register the computed value
+    unsafe {
+        let i2spr_ptr = (handle.instance + 0x20) as *mut u32;
+        ptr::write_volatile(i2spr_ptr, i2sdiv | i2sodd | handle.init.mclk_output);
+    }
+
+    // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits
+    // And configure the I2S with the InitStruct values
+    unsafe {
+        let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32;
+        let mut i2scfgr = ptr::read_volatile(i2scfgr_ptr);
+
+        // Clear all configuration bits
+        i2scfgr &= !(SPI_I2SCFGR_CHLEN | SPI_I2SCFGR_DATLEN |
+                     0x00000080 | 0x00000030 | 0x00000002 | // CKPOL, I2SSTD, PCMSYNC
+                     SPI_I2SCFGR_I2SCFG | SPI_I2SCFGR_I2SE | 0x00000800); // I2SMOD
+
+        // Set new configuration
+        i2scfgr |= 0x00000800 | handle.init.mode | // I2SMOD
+                   handle.init.standard | handle.init.data_format | handle.init.cpol;
+
+        ptr::write_volatile(i2scfgr_ptr, i2scfgr);
+    }
+
+    // Configure the I2S extended if the full duplex mode is enabled
+    if handle.init.full_duplex_mode == I2S_FULLDUPLEXMODE_ENABLE {
+        // EXT INIT HERE
+
+        // Determine extended instance address
+        let ext_instance = if handle.instance == 0x40003C00 {
+            0x40004000 // I2S3ext
+        } else if handle.instance == 0x40003800 {
+            0x40003400 // I2S2ext
+        } else {
+            handle.error_code = HAL_I2S_ERROR_PRESCALER;
+            return HalStatus::Error;
+        };
+
+        // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits for extended instance
+        unsafe {
+            let ext_i2scfgr_ptr = (ext_instance + 0x1C) as *mut u32;
+            let mut ext_i2scfgr = ptr::read_volatile(ext_i2scfgr_ptr);
+            ext_i2scfgr &= !(SPI_I2SCFGR_CHLEN | SPI_I2SCFGR_DATLEN | 0x00000080 | // CKPOL
+                           0x00000030 | 0x00000002 | SPI_I2SCFGR_I2SCFG | // I2SSTD, PCMSYNC, I2SCFG
+                           SPI_I2SCFGR_I2SE | 0x00000800); // I2SMOD
+            ptr::write_volatile(ext_i2scfgr_ptr, ext_i2scfgr);
+
+            // Reset extended I2SPR register
+            let ext_i2spr_ptr = (ext_instance + 0x20) as *mut u32;
+            ptr::write_volatile(ext_i2spr_ptr, 2);
+        }
+
+        // Get the mode to be configured for the extended I2S
+        if (handle.init.mode == I2S_MODE_MASTER_TX) || (handle.init.mode == I2S_MODE_SLAVE_TX) {
+            tmp = I2S_MODE_SLAVE_RX;
+        } else {
+            // I2S_MODE_MASTER_RX || I2S_MODE_SLAVE_RX
+            tmp = I2S_MODE_SLAVE_TX;
+        }
+
+        // Configure the I2S Slave with the I2S Master parameter values
+        unsafe {
+            let ext_i2scfgr_ptr = (ext_instance + 0x1C) as *mut u32;
+            let mut ext_i2scfgr = ptr::read_volatile(ext_i2scfgr_ptr);
+
+            ext_i2scfgr |= 0x00000800 | // I2SMOD
+                          tmp |
+                          handle.init.standard |
+                          handle.init.data_format |
+                          handle.init.cpol;
+
+            ptr::write_volatile(ext_i2scfgr_ptr, ext_i2scfgr);
+        }
+    }
 
     handle.error_code = HAL_I2S_ERROR_NONE;
     handle.state = HalI2sState::Ready;
@@ -715,6 +860,9 @@ pub const HAL_MAX_DELAY: u32 = 0xFFFFFFFF;
 pub const SPI_I2SCFGR_I2SE: u32 = 0x00000400;
 pub const SPI_I2SCFGR_I2SCFG_0: u32 = 0x00000100;
 pub const SPI_I2SCFGR_I2SCFG_1: u32 = 0x00000200;
+pub const SPI_I2SCFGR_I2SCFG: u32 = 0x00000300; // I2SCFG mask
+pub const SPI_I2SCFGR_DATLEN: u32 = 0x00000030; // Data length mask
+pub const SPI_I2SCFGR_CHLEN: u32 = 0x00000001; // Channel length
 
 // Helper functions for flag checking
 fn i2s_get_flag_status(hi2s: &I2sHandle, flag: u32) -> bool {
@@ -806,6 +954,37 @@ fn i2s_wait_flag_state_until_timeout(
     }
 
     HalStatus::Ok
+}
+
+fn i2s_wait_flag_state_until_timeout_instance(
+    instance: u32,
+    flag: u32,
+    state: bool,
+    timeout: u32,
+) -> HalStatus {
+    let tick_start = hal_get_tick();
+
+    let mut curr_state = i2s_get_flag_status_instance(instance, flag);
+    while curr_state != state {
+        let elapsed = hal_get_tick();
+        let elapsed = elapsed.wrapping_sub(tick_start);
+
+        if timeout != HAL_MAX_DELAY && elapsed > timeout {
+            return HalStatus::Timeout;
+        }
+
+        curr_state = i2s_get_flag_status_instance(instance, flag);
+    }
+
+    HalStatus::Ok
+}
+
+fn i2s_get_flag_status_instance(instance: u32, i2s_flag: u32) -> bool {
+    unsafe {
+        let sr_ptr = (instance + 0x08) as *const u32; // SR offset
+        let sr = ptr::read_volatile(sr_ptr);
+        (sr & i2s_flag) != 0
+    }
 }
 
 /// Transmit data in blocking mode
@@ -1099,5 +1278,312 @@ pub fn hal_i2s_transmit_receive(
     }
 
     hi2s.state = HalI2sState::Ready;
+    HalStatus::Ok
+}
+
+/// I2S Extended Transmit and Receive data in blocking mode (Full Duplex)
+///
+/// Direct translation of HAL_I2SEx_TransmitReceive() from STM32F4 HAL
+/// This function uses the I2S3 main instance and I2S3ext extended instance
+/// for full duplex communication.
+///
+/// # Arguments
+/// * `hi2s` - Pointer to I2S handle structure (main instance)
+/// * `p_tx_data` - Pointer to transmission data buffer
+/// * `p_rx_data` - Pointer to reception data buffer
+/// * `timeout` - Timeout duration
+///
+/// # Returns
+/// HAL status
+///
+/// # Example
+/// ```rust
+/// let mut i2s = I2sHandle::new_spi3();
+/// hal_i2s_init(&mut i2s);
+///
+/// let tx_data = [0x1234, 0x5678];
+/// let mut rx_data = [0; 2];
+/// let result = hal_i2sex_transmit_receive(&mut i2s, &tx_data, &mut rx_data, 1000);
+/// ```
+pub fn hal_i2sex_transmit_receive(
+    hi2s: &mut I2sHandle,
+    p_tx_data: &[u16],
+    p_rx_data: &mut [u16],
+    timeout: u32,
+) -> HalStatus {
+    let size = p_tx_data.len().min(p_rx_data.len());
+
+    if hi2s.state != HalI2sState::Ready {
+        return HalStatus::Busy;
+    }
+
+    if p_tx_data.is_empty() || p_rx_data.is_empty() || size == 0 {
+        defmt::trace!("exit 1");
+        return HalStatus::Error;
+    }
+
+    // Process Locked
+    hi2s.lock = HalLock::Locked;
+
+    // Check the data format to determine transfer size
+    let i2scfgr = unsafe { ptr::read_volatile((hi2s.instance + 0x1C) as *const u32) };
+    let tmp1 = i2scfgr & (SPI_I2SCFGR_DATLEN | SPI_I2SCFGR_CHLEN);
+
+    let (tx_xfer_size, rx_xfer_size) =
+        if (tmp1 == I2S_DATAFORMAT_24B) || (tmp1 == I2S_DATAFORMAT_32B) {
+            (size << 1, size << 1) // Double the size for 24/32-bit formats
+        } else {
+            (size, size) // Normal size for 16-bit formats
+        };
+
+    let mut tx_xfer_count = tx_xfer_size;
+    let mut rx_xfer_count = rx_xfer_size;
+    let mut tx_data_ptr = p_tx_data.as_ptr();
+    let mut rx_data_ptr = p_rx_data.as_mut_ptr();
+
+    // Set state and reset error code
+    hi2s.error_code = HAL_I2S_ERROR_NONE;
+    hi2s.state = HalI2sState::BusyTxRx;
+
+    // Get the I2S mode configuration
+    let i2s_mode = i2scfgr & SPI_I2SCFGR_I2SCFG;
+
+    // Determine extended instance address
+    let ext_instance = if hi2s.instance == 0x40003C00 {
+        0x40004000 // I2S3ext
+    } else if hi2s.instance == 0x40003800 {
+        0x40003400 // I2S2ext
+    } else {
+        defmt::trace!("exit 2");
+        hi2s.state = HalI2sState::Ready;
+        hi2s.lock = HalLock::Unlocked;
+        return HalStatus::Error;
+    };
+
+    // Check if the I2S_MODE_MASTER_TX or I2S_MODE_SLAVE_TX Mode is selected
+    if (i2s_mode == I2S_MODE_MASTER_TX) || (i2s_mode == I2S_MODE_SLAVE_TX) {
+        // Prepare the First Data before enabling the I2S
+        unsafe {
+            ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, *tx_data_ptr);
+        }
+        tx_data_ptr = unsafe { tx_data_ptr.add(1) };
+        tx_xfer_count -= 1;
+
+        // Enable I2Sext(receiver) before enabling I2Sx peripheral
+        unsafe {
+            let i2scfgr_ext_ptr = (ext_instance + 0x1C) as *mut u32;
+            let i2scfgr_ext = ptr::read_volatile(i2scfgr_ext_ptr);
+            ptr::write_volatile(i2scfgr_ext_ptr, i2scfgr_ext | SPI_I2SCFGR_I2SE);
+        }
+
+        // Enable I2Sx peripheral
+        unsafe {
+            ptr::write_volatile(
+                (hi2s.instance + 0x1C) as *mut u32,
+                i2scfgr | SPI_I2SCFGR_I2SE,
+            );
+        }
+
+        // Clear the Overrun Flag if in master TX mode
+        if i2s_mode == I2S_MODE_MASTER_TX {
+            // Clear overrun flag by reading DR then SR of extended instance
+            unsafe {
+                let _dummy = ptr::read_volatile((ext_instance + 0x0C) as *const u32);
+                let _dummy = ptr::read_volatile((ext_instance + 0x08) as *const u32);
+            }
+        }
+
+        // Main transfer loop
+        while (rx_xfer_count > 0) || (tx_xfer_count > 0) {
+            // Transmit data if available
+            if tx_xfer_count > 0 {
+                // Wait until TXE flag is set on main instance
+                if i2s_wait_flag_state_until_timeout_instance(
+                    hi2s.instance,
+                    I2S_FLAG_TXE,
+                    true,
+                    timeout,
+                ) != HalStatus::Ok
+                {
+                    defmt::trace!("exit 3");
+                    hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+                    hi2s.state = HalI2sState::Ready;
+                    hi2s.lock = HalLock::Unlocked;
+                    return HalStatus::Error;
+                }
+
+                // Write Data on DR register of main instance
+                unsafe {
+                    ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, *tx_data_ptr);
+                }
+                tx_data_ptr = unsafe { tx_data_ptr.add(1) };
+                tx_xfer_count -= 1;
+
+                // Check if an underrun occurs (only for slave TX mode)
+                if i2s_mode == I2S_MODE_SLAVE_TX {
+                    let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
+                    if (sr & I2S_FLAG_UDR) != 0 {
+                        // Clear Underrun flag
+                        unsafe {
+                            let _dummy = ptr::read_volatile((hi2s.instance + 0x08) as *const u32);
+                        }
+                        hi2s.error_code |= HAL_I2S_ERROR_UDR;
+                    }
+                }
+            }
+
+            // Receive data if available
+            if rx_xfer_count > 0 {
+                // Wait until RXNE flag is set on extended instance
+                if i2s_wait_flag_state_until_timeout_instance(
+                    ext_instance,
+                    I2S_FLAG_RXNE,
+                    true,
+                    timeout,
+                ) != HalStatus::Ok
+                {
+                    defmt::trace!("exit 4");
+                    hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+                    hi2s.state = HalI2sState::Ready;
+                    hi2s.lock = HalLock::Unlocked;
+                    return HalStatus::Error;
+                }
+
+                // Read Data from DR register of extended instance
+                let rx_data = unsafe { ptr::read_volatile((ext_instance + 0x0C) as *const u16) };
+                unsafe {
+                    ptr::write(rx_data_ptr, rx_data);
+                }
+                rx_data_ptr = unsafe { rx_data_ptr.add(1) };
+                rx_xfer_count -= 1;
+
+                // Check if an overrun occurs on extended instance
+                let sr_ext = unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
+                if (sr_ext & I2S_FLAG_OVR) != 0 {
+                    // Clear Overrun flag
+                    unsafe {
+                        let _dummy = ptr::read_volatile((ext_instance + 0x0C) as *const u32);
+                        let _dummy = ptr::read_volatile((ext_instance + 0x08) as *const u32);
+                    }
+                    hi2s.error_code |= HAL_I2S_ERROR_OVR;
+                }
+            }
+        }
+    } else {
+        // The I2S_MODE_MASTER_RX or I2S_MODE_SLAVE_RX Mode is selected
+
+        // Prepare the First Data before enabling the I2S (write to extended instance)
+        unsafe {
+            ptr::write_volatile((ext_instance + 0x0C) as *mut u16, *tx_data_ptr);
+        }
+        tx_data_ptr = unsafe { tx_data_ptr.add(1) };
+        tx_xfer_count -= 1;
+
+        // Enable I2Sext(transmitter) after enabling I2Sx peripheral
+        unsafe {
+            let i2scfgr_ext_ptr = (ext_instance + 0x1C) as *mut u32;
+            let i2scfgr_ext = ptr::read_volatile(i2scfgr_ext_ptr);
+            ptr::write_volatile(i2scfgr_ext_ptr, i2scfgr_ext | SPI_I2SCFGR_I2SE);
+        }
+
+        // Enable I2S peripheral before the I2Sext
+        unsafe {
+            ptr::write_volatile(
+                (hi2s.instance + 0x1C) as *mut u32,
+                i2scfgr | SPI_I2SCFGR_I2SE,
+            );
+        }
+
+        // Clear the Overrun Flag if in master RX mode
+        if i2s_mode == I2S_MODE_MASTER_RX {
+            // Clear overrun flag by reading DR then SR of main instance
+            unsafe {
+                let _dummy = ptr::read_volatile((hi2s.instance + 0x0C) as *const u32);
+                let _dummy = ptr::read_volatile((hi2s.instance + 0x08) as *const u32);
+            }
+        }
+
+        // Main transfer loop
+        while (rx_xfer_count > 0) || (tx_xfer_count > 0) {
+            // Transmit data if available (use extended instance)
+            if tx_xfer_count > 0 {
+                // Wait until TXE flag is set on extended instance
+                if i2s_wait_flag_state_until_timeout_instance(
+                    ext_instance,
+                    I2S_FLAG_TXE,
+                    true,
+                    timeout,
+                ) != HalStatus::Ok
+                {
+                    defmt::trace!("exit 5");
+                    hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+                    hi2s.state = HalI2sState::Ready;
+                    hi2s.lock = HalLock::Unlocked;
+                    return HalStatus::Error;
+                }
+
+                // Write Data on DR register of extended instance
+                unsafe {
+                    ptr::write_volatile((ext_instance + 0x0C) as *mut u16, *tx_data_ptr);
+                }
+                tx_data_ptr = unsafe { tx_data_ptr.add(1) };
+                tx_xfer_count -= 1;
+
+                // Check if an underrun occurs on extended instance (only for slave RX mode)
+                if i2s_mode == I2S_MODE_SLAVE_RX {
+                    let sr_ext = unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
+                    if (sr_ext & I2S_FLAG_UDR) != 0 {
+                        // Clear Underrun flag
+                        unsafe {
+                            let _dummy = ptr::read_volatile((ext_instance + 0x08) as *const u32);
+                        }
+                        hi2s.error_code |= HAL_I2S_ERROR_UDR;
+                    }
+                }
+            }
+
+            // Receive data if available (use main instance)
+            if rx_xfer_count > 0 {
+                // Wait until RXNE flag is set on main instance
+                if i2s_wait_flag_state_until_timeout_instance(
+                    hi2s.instance,
+                    I2S_FLAG_RXNE,
+                    true,
+                    timeout,
+                ) != HalStatus::Ok
+                {
+                    defmt::trace!("exit 6");
+                    hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
+                    hi2s.state = HalI2sState::Ready;
+                    hi2s.lock = HalLock::Unlocked;
+                    return HalStatus::Error;
+                }
+
+                // Read Data from DR register of main instance
+                let rx_data = unsafe { ptr::read_volatile((hi2s.instance + 0x0C) as *const u16) };
+                unsafe {
+                    ptr::write(rx_data_ptr, rx_data);
+                }
+                rx_data_ptr = unsafe { rx_data_ptr.add(1) };
+                rx_xfer_count -= 1;
+
+                // Check if an overrun occurs on main instance
+                let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
+                if (sr & I2S_FLAG_OVR) != 0 {
+                    // Clear Overrun flag
+                    unsafe {
+                        let _dummy = ptr::read_volatile((hi2s.instance + 0x0C) as *const u32);
+                        let _dummy = ptr::read_volatile((hi2s.instance + 0x08) as *const u32);
+                    }
+                    hi2s.error_code |= HAL_I2S_ERROR_OVR;
+                }
+            }
+        }
+    }
+
+    // Process Unlocked
+    hi2s.lock = HalLock::Unlocked;
+    hi2s.state = HalI2sState::Ready;
+
     HalStatus::Ok
 }
