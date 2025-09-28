@@ -529,9 +529,14 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
     unsafe {
         let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32;
         let mut i2scfgr = ptr::read_volatile(i2scfgr_ptr);
-        i2scfgr &= !(SPI_I2SCFGR_CHLEN | SPI_I2SCFGR_DATLEN | 0x00000080 | // CKPOL
-                     0x00000030 | 0x00000002 | SPI_I2SCFGR_I2SCFG | // I2SSTD, PCMSYNC, I2SCFG
-                     SPI_I2SCFGR_I2SE | 0x00000800); // I2SMOD
+        i2scfgr &= !(SPI_I2SCFGR_CHLEN
+            | SPI_I2SCFGR_DATLEN
+            | SPI_I2SCFGR_CKPOL
+            | SPI_I2SCFGR_I2SSTD
+            | SPI_I2SCFGR_PCMSYNC
+            | SPI_I2SCFGR_I2SCFG
+            | SPI_I2SCFGR_I2SE
+            | SPI_I2SCFGR_I2SMOD);
         ptr::write_volatile(i2scfgr_ptr, i2scfgr);
 
         // Reset I2SPR register
@@ -606,13 +611,21 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
         let mut i2scfgr = ptr::read_volatile(i2scfgr_ptr);
 
         // Clear all configuration bits
-        i2scfgr &= !(SPI_I2SCFGR_CHLEN | SPI_I2SCFGR_DATLEN |
-                     0x00000080 | 0x00000030 | 0x00000002 | // CKPOL, I2SSTD, PCMSYNC
-                     SPI_I2SCFGR_I2SCFG | SPI_I2SCFGR_I2SE | 0x00000800); // I2SMOD
+        i2scfgr &= !(SPI_I2SCFGR_CHLEN
+            | SPI_I2SCFGR_DATLEN
+            | SPI_I2SCFGR_CKPOL
+            | SPI_I2SCFGR_I2SSTD
+            | SPI_I2SCFGR_PCMSYNC
+            | SPI_I2SCFGR_I2SCFG
+            | SPI_I2SCFGR_I2SE
+            | SPI_I2SCFGR_I2SMOD);
 
         // Set new configuration
-        i2scfgr |= 0x00000800 | handle.init.mode | // I2SMOD
-                   handle.init.standard | handle.init.data_format | handle.init.cpol;
+        i2scfgr |= SPI_I2SCFGR_I2SMOD
+            | handle.init.mode
+            | handle.init.standard
+            | handle.init.data_format
+            | handle.init.cpol;
 
         ptr::write_volatile(i2scfgr_ptr, i2scfgr);
     }
@@ -635,9 +648,14 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
         unsafe {
             let ext_i2scfgr_ptr = (ext_instance + 0x1C) as *mut u32;
             let mut ext_i2scfgr = ptr::read_volatile(ext_i2scfgr_ptr);
-            ext_i2scfgr &= !(SPI_I2SCFGR_CHLEN | SPI_I2SCFGR_DATLEN | 0x00000080 | // CKPOL
-                           0x00000030 | 0x00000002 | SPI_I2SCFGR_I2SCFG | // I2SSTD, PCMSYNC, I2SCFG
-                           SPI_I2SCFGR_I2SE | 0x00000800); // I2SMOD
+            ext_i2scfgr &= !(SPI_I2SCFGR_CHLEN
+                | SPI_I2SCFGR_DATLEN
+                | SPI_I2SCFGR_CKPOL
+                | SPI_I2SCFGR_I2SSTD
+                | SPI_I2SCFGR_PCMSYNC
+                | SPI_I2SCFGR_I2SCFG
+                | SPI_I2SCFGR_I2SE
+                | SPI_I2SCFGR_I2SMOD);
             ptr::write_volatile(ext_i2scfgr_ptr, ext_i2scfgr);
 
             // Reset extended I2SPR register
@@ -658,11 +676,11 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
             let ext_i2scfgr_ptr = (ext_instance + 0x1C) as *mut u32;
             let mut ext_i2scfgr = ptr::read_volatile(ext_i2scfgr_ptr);
 
-            ext_i2scfgr |= 0x00000800 | // I2SMOD
-                          tmp |
-                          handle.init.standard |
-                          handle.init.data_format |
-                          handle.init.cpol;
+            ext_i2scfgr |= SPI_I2SCFGR_I2SMOD
+                | tmp
+                | handle.init.standard
+                | handle.init.data_format
+                | handle.init.cpol;
 
             ptr::write_volatile(ext_i2scfgr_ptr, ext_i2scfgr);
         }
@@ -679,7 +697,7 @@ pub fn hal_i2s_enable(handle: &I2sHandle) {
     unsafe {
         let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32; // I2SCFGR offset
         let mut reg = ptr::read_volatile(i2scfgr_ptr);
-        reg |= 0x00000400; // Set I2SE bit
+        reg |= SPI_I2SCFGR_I2SE; // Set I2SE bit
         ptr::write_volatile(i2scfgr_ptr, reg);
     }
 }
@@ -689,7 +707,7 @@ pub fn hal_i2s_disable(handle: &I2sHandle) {
     unsafe {
         let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32; // I2SCFGR offset
         let mut reg = ptr::read_volatile(i2scfgr_ptr);
-        reg &= !0x00000400; // Clear I2SE bit
+        reg &= !SPI_I2SCFGR_I2SE; // Clear I2SE bit
         ptr::write_volatile(i2scfgr_ptr, reg);
     }
 }
@@ -857,12 +875,31 @@ pub const I2S_FLAG_CHSIDE: u32 = 0x00000004;
 
 // Additional constants needed
 pub const HAL_MAX_DELAY: u32 = 0xFFFFFFFF;
-pub const SPI_I2SCFGR_I2SE: u32 = 0x00000400;
-pub const SPI_I2SCFGR_I2SCFG_0: u32 = 0x00000100;
-pub const SPI_I2SCFGR_I2SCFG_1: u32 = 0x00000200;
-pub const SPI_I2SCFGR_I2SCFG: u32 = 0x00000300; // I2SCFG mask
-pub const SPI_I2SCFGR_DATLEN: u32 = 0x00000030; // Data length mask
+// SPI I2S Configuration Register (I2SCFGR) bit definitions
 pub const SPI_I2SCFGR_CHLEN: u32 = 0x00000001; // Channel length
+pub const SPI_I2SCFGR_DATLEN: u32 = 0x00000006; // Data length mask
+pub const SPI_I2SCFGR_DATLEN_0: u32 = 0x00000002; // Data length bit 0
+pub const SPI_I2SCFGR_DATLEN_1: u32 = 0x00000004; // Data length bit 1
+pub const SPI_I2SCFGR_CKPOL: u32 = 0x00000008; // Clock polarity
+pub const SPI_I2SCFGR_I2SSTD: u32 = 0x00000030; // I2S standard selection mask
+pub const SPI_I2SCFGR_I2SSTD_0: u32 = 0x00000010; // I2S standard bit 0
+pub const SPI_I2SCFGR_I2SSTD_1: u32 = 0x00000020; // I2S standard bit 1
+pub const SPI_I2SCFGR_PCMSYNC: u32 = 0x00000080; // PCM frame synchronization
+pub const SPI_I2SCFGR_I2SCFG: u32 = 0x00000300; // I2S configuration mode mask
+pub const SPI_I2SCFGR_I2SCFG_0: u32 = 0x00000100; // I2S configuration mode bit 0
+pub const SPI_I2SCFGR_I2SCFG_1: u32 = 0x00000200; // I2S configuration mode bit 1
+pub const SPI_I2SCFGR_I2SE: u32 = 0x00000400; // I2S Enable
+pub const SPI_I2SCFGR_I2SMOD: u32 = 0x00000800; // I2S mode selection
+
+// Combined masks for clearing multiple bits
+pub const SPI_I2SCFGR_CLEAR_MASK: u32 = SPI_I2SCFGR_CHLEN
+    | SPI_I2SCFGR_DATLEN
+    | SPI_I2SCFGR_CKPOL
+    | SPI_I2SCFGR_I2SSTD
+    | SPI_I2SCFGR_PCMSYNC
+    | SPI_I2SCFGR_I2SCFG
+    | SPI_I2SCFGR_I2SE
+    | SPI_I2SCFGR_I2SMOD;
 
 // Helper functions for flag checking
 fn i2s_get_flag_status(hi2s: &I2sHandle, flag: u32) -> bool {

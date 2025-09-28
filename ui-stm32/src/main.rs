@@ -248,7 +248,6 @@ async fn main(spawner: Spawner) {
     let mut last_frame = [0; 16_000];
     let mut curr_frame = [0; 16_000];
     loop {
-        // for _i in 0..(16_000 / square_wave.len()) {
         let rv = hal_i2sex_transmit_receive(&mut i2s, &last_frame, &mut curr_frame, 100);
         if rv != HalStatus::Ok {
             defmt::panic!("Failed to transmit: {} {}", rv, i2s.error_code);
@@ -256,10 +255,9 @@ async fn main(spawner: Spawner) {
 
         last_frame.copy_from_slice(&curr_frame);
 
-        defmt::trace!(
-            "energy: {:?}",
-            curr_frame.iter().map(|x| *x as u32).sum::<u32>()
-        );
+        let total_energy = curr_frame.iter().map(|x| *x as u32).sum::<u32>();
+        let avg_energy = total_energy / 16000;
+        defmt::trace!("energy: {:?} {:?}", total_energy, avg_energy);
     }
     trace!("after txrx");
 }
