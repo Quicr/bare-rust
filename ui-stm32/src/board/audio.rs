@@ -33,6 +33,64 @@ impl AudioControl {
     pub async fn init(&mut self) {
         self.reset().await;
 
+        // Route input to output
+        self.regs.modify(&mut self.i2c, |r| {
+            // 0. Enable Vref and master clock
+            r.set::<PowerMgmt1VrefEnable>(true);
+            r.set::<MasterClockDisable>(false); // ???
+            r.set::<MicrophoneBiasEnable>(true); // ???
+
+            // 1. Configure the input path
+            // 1.1. Power on input devices
+            r.set::<PowerMgmt1VmidSelect>(0b01);
+            r.set::<PowerMgmt1AinLeftEnable>(true);
+            r.set::<LeftMicEnable>(true);
+
+            // 2.2. Disable unused inputs on the left side
+            r.set::<Linput2Boost>(0b000);
+            r.set::<Linput3Boost>(0b000);
+            r.set::<LeftInput3ToOutputMixer>(false);
+            r.set::<LeftInput3ToOutputMixerVolume>(0b000);
+
+            // 2.3. Disable the right side inputs
+            r.set::<RightInputAnalogMute>(true);
+            r.set::<Rinput2Boost>(0b000);
+            r.set::<Rinput3Boost>(0b000);
+            r.set::<RightInput3ToOutputMixer>(false);
+            r.set::<RightInput3ToOutputMixerVolume>(0b000);
+
+            // 2.4. Enable the left side
+            r.set::<LeftInput1ToInverting>(true);
+            r.set::<LeftInput3ToNonInverting>(false);
+            r.set::<LeftInput2ToNonInverting>(true);
+            r.set::<LeftInputToBoost>(true);
+            r.set::<InputPgaVolumeUpdateRight>(true);
+            r.set::<LeftPgaVolume>(0b01_0111); // 0dB
+            r.set::<LeftBoostGain>(0b10); // 20dB
+            r.set::<LeftInputAnalogMute>(false);
+
+            // 3. Configure the output path
+            // 3.1. Power out output devices
+            r.set::<LeftOutput1Enable>(true);
+            r.set::<LeftOutputMixEnable>(true);
+
+            // 3.2. Disable unused paths on the left side
+            r.set::<LeftDacToOutputMixer>(false);
+            r.set::<LeftInput3ToOutputMixer>(false);
+            r.set::<LeftInput3ToOutputMixerVolume>(0b000);
+            r.set::<LeftSpeakerVolumeUpdate>(true);
+            r.set::<LeftSpeakerVolume>(0b000_0000);
+
+            // 3.3. Disable the right side (NOOP)
+            // 3.4. Enable the good path on the left side
+            r.set::<LeftBoostToLeftOutputMix>(true);
+            r.set::<LeftBoostToLeftOutputMixVolume>(0b000); // 0dB
+            r.set::<HeadphoneOutVolumeUpdate>(true);
+            r.set::<LeftHeadphoneVolume>(0b111_1111); // 6dB
+        });
+
+        /*
+        // Startup classic
         self.regs.modify(&mut self.i2c, |r| {
             // Turn everything on
             r.set::<PowerMgmt1VmidSelect>(0b01);
@@ -121,6 +179,7 @@ impl AudioControl {
             r.set::<Linput2Boost>(0b101);
             r.set::<MicrophoneBiasEnable>(true);
         });
+        */
     }
 }
 
@@ -497,8 +556,16 @@ define_field!(RightInput3ToOutputMixerVolume, 0x25, 4, 3, u8);
 
 // R38 (0x26) Mono out Mix (1)
 // R39 (0x27) Mono out Mix (2)
+
 // R40 (0x28) LOUT2 volume
+define_field!(LeftSpeakerVolumeUpdate, 0x28, 8, 1, bool);
+define_field!(LeftSpeakerZeroCross, 0x28, 7, 1, bool);
+define_field!(LeftSpeakerVolume, 0x28, 0, 7, u8);
+
 // R41 (0x29) ROUT2 volume
+define_field!(RightSpeakerVolumeUpdate, 0x28, 8, 1, bool);
+define_field!(RightSpeakerZeroCross, 0x28, 7, 1, bool);
+define_field!(RightSpeakerVolume, 0x28, 0, 7, u8);
 
 // R42 (0x2A) MONOOUT volume
 define_field!(MonoOutVolume, 0x2A, 6, 1, bool);
@@ -512,7 +579,12 @@ define_field!(Rinput3Boost, 0x2C, 4, 3, u8);
 define_field!(Rinput2Boost, 0x2C, 1, 3, u8);
 
 // R45 (0x2D) Bypass (1)
+define_field!(LeftBoostToLeftOutputMix, 0x2D, 7, 1, bool);
+define_field!(LeftBoostToLeftOutputMixVolume, 0x2D, 4, 3, u8);
+
 // R46 (0x2E) Bypass (2)
+define_field!(RightBoostToRightOutputMix, 0x2E, 7, 1, bool);
+define_field!(RightBoostToRightOutputMixVolume, 0x2E, 4, 3, u8);
 
 // R47 (0x2F) Power Management (3)
 define_field!(LeftMicEnable, 0x2F, 5, 1, bool);

@@ -204,6 +204,7 @@ async fn main(spawner: Spawner) {
     let mut audio_control = AudioControl::new(i2c);
     audio_control.init().await;
 
+    /*
     // Start the SysTick timer
     hal_init_tick(168_000_000);
 
@@ -268,6 +269,7 @@ async fn main(spawner: Spawner) {
         //last_frame.iter_mut().for_each(|x| *x *= amp);
     }
     trace!("after txrx");
+    */
 }
 
 /// HAL_I2S_MspInit - I2S3 Hardware Initialization
