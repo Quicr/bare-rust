@@ -253,11 +253,19 @@ async fn main(spawner: Spawner) {
             defmt::panic!("Failed to transmit: {} {}", rv, i2s.error_code);
         }
 
-        last_frame.copy_from_slice(&curr_frame);
+        defmt::trace!("raw: {:?}", curr_frame);
 
         let total_energy = curr_frame.iter().map(|x| *x as u32).sum::<u32>();
         let avg_energy = total_energy / 16000;
-        defmt::trace!("energy: {:?} {:?}", total_energy, avg_energy);
+        let max_energy = *curr_frame.iter().max().unwrap();
+        defmt::trace!("energy: {:?} {:?} {}", total_energy, avg_energy, max_energy);
+
+        last_frame.copy_from_slice(&curr_frame);
+
+        // Amplify noise to make it audible
+        //
+        //let amp = 0x1fff / max_energy as u16;
+        //last_frame.iter_mut().for_each(|x| *x *= amp);
     }
     trace!("after txrx");
 }
