@@ -244,7 +244,6 @@ async fn main(_spawner: Spawner) {
     }
     trace!("after tx");
 
-    /*
     trace!("before txrx");
     let mut last_frame = [0; 16_000];
     let mut curr_frame = [0; 16_000];
@@ -254,22 +253,13 @@ async fn main(_spawner: Spawner) {
             defmt::panic!("Failed to transmit: {} {}", rv, i2s.error_code);
         }
 
-        defmt::trace!("raw: {:?}", curr_frame);
-
-        let total_energy = curr_frame.iter().map(|x| *x as u32).sum::<u32>();
-        let avg_energy = total_energy / 16000;
-        let max_energy = *curr_frame.iter().max().unwrap();
-        defmt::trace!("energy: {:?} {:?} {}", total_energy, avg_energy, max_energy);
+        // XXX(RLB): When I try to remove this line, things stop working.  The headset plays loud
+        // noise.  Presumably there needs to be some delay here, but why?
+        let _total_energy = curr_frame.iter().map(|x| *x as u32).sum::<u32>();
 
         last_frame.copy_from_slice(&curr_frame);
-
-        // Amplify noise to make it audible
-        //
-        //let amp = 0x1fff / max_energy as u16;
-        //last_frame.iter_mut().for_each(|x| *x *= amp);
     }
     trace!("after txrx");
-    */
 }
 
 /// HAL_I2S_MspInit - I2S3 Hardware Initialization

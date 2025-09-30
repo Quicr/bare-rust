@@ -156,6 +156,8 @@ impl AudioControl {
             r.set(AudioFormat(0b10));
 
             // Set clocks for 8khz
+            // XXX This needs to be done whenever DAC or ADC is done.  Maybe move to a core init
+            // function, or one that is shared between the DAC and ADC methods.
             r.set(PllEnable(true));
             r.set(MasterClockDisable(false));
             r.set(PllN(0b1000));
@@ -244,10 +246,12 @@ impl AudioControl {
         */
 
         // Digital tone generation experiment
+        /*
         self.left_output_path(true);
         self.left_dac(true);
         self.configure_dac(true, true, false);
         self.enable_i2s();
+        */
 
         // Digital loopback experiment
         /*
@@ -255,26 +259,18 @@ impl AudioControl {
         self.left_output_path(true);
         self.left_adc(true);
         self.left_dac(true);
-        self.dac_config(true, true, false);
+        self.configure_dac(true, true, false);
         self.digital_loopback(true);
-        */
-
-        // Input read experiment
-        /*
-        self.left_input_path(true);
-        self.left_adc(true);
         self.enable_i2s();
         */
 
-        // Device loopback experiment
-        /*
+        // Txrx experiment
         self.left_input_path(true);
         self.left_output_path(true);
         self.left_adc(true);
         self.left_dac(true);
-        self.dac_config(true, true, false);
+        self.configure_dac(true, true, false);
         self.enable_i2s();
-        */
 
         /*
         // Startup classic
