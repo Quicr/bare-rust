@@ -66,7 +66,7 @@ async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
 }
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     /*
     info!("about to instantiate board");
 

@@ -31,10 +31,10 @@ impl AudioControl {
         Timer::after_millis(100).await;
 
         self.regs.modify(&mut self.i2c, |r| {
-            r.set::<PowerMgmt1VrefEnable>(true);
+            r.set(PowerMgmt1VrefEnable(true));
 
             // XXX(RLB) This is enabled in Brett's code, but it's not clear that it does anything
-            // r.set::<MicrophoneBiasEnable>(true);
+            // r.set(MicrophoneBiasEnable(true));
         });
     }
 
@@ -46,36 +46,71 @@ impl AudioControl {
     /// `right_input_path()`.
     pub fn left_input_path(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
+            /*
             // Power on/off input devices
-            r.set::<PowerMgmt1VmidSelect>(0b01);
-            r.set::<PowerMgmt1AinLeftEnable>(enable);
-            r.set::<LeftMicEnable>(enable);
+            r.set(PowerMgmt1VmidSelect(0b01));
+            r.set(PowerMgmt1AinLeftEnable(enable));
+            r.set(LeftMicEnable(enable));
 
             // Left input 3 is always disabled
-            r.set::<Linput3Boost>(0b000);
-            r.set::<LeftInput3ToOutputMixer>(false);
-            r.set::<LeftInput3ToOutputMixerVolume>(0b000);
-            r.set::<LeftInput3ToNonInverting>(false);
+            r.set(Linput3Boost(0b000));
+            r.set(LeftInput3ToOutputMixer(false));
+            r.set(LeftInput3ToOutputMixerVolume(0b000));
+            r.set(LeftInput3ToNonInverting(false));
 
             // Right side inputs are always disabled
-            r.set::<RightInputAnalogMute>(true);
-            r.set::<Rinput2Boost>(0b000);
-            r.set::<Rinput3Boost>(0b000);
-            r.set::<RightInput3ToOutputMixer>(false);
-            r.set::<RightInput3ToOutputMixerVolume>(0b000);
+            r.set(RightInputAnalogMute(true));
+            r.set(Rinput2Boost(0b000));
+            r.set(Rinput3Boost(0b000));
+            r.set(RightInput3ToOutputMixer(false));
+            r.set(RightInput3ToOutputMixerVolume(0b000));
 
             // Enable the left side
-            r.set::<LeftInput1ToInverting>(enable);
-            r.set::<LeftInput2ToNonInverting>(enable);
-            r.set::<LeftInputToBoost>(enable);
-            r.set::<LeftInputAnalogMute>(!enable);
+            r.set(LeftInput1ToInverting(enable));
+            r.set(LeftInput2ToNonInverting(enable));
+            r.set(LeftInputToBoost(enable));
+            r.set(LeftInputAnalogMute(!enable));
 
             // Set volumes
             // TODO: Factor this out
-            r.set::<InputPgaVolumeUpdate>(enable);
-            r.set::<LeftPgaVolume>(0b01_0111); // 0dB
-            r.set::<Linput2Boost>(0b000); // 0dB
-            r.set::<LeftBoostGain>(0b00); // 0dB
+            r.set(InputPgaVolumeUpdate(enable));
+            r.set(LeftPgaVolume(0b01_0111)); // 0dB
+            r.set(Linput2Boost(0b101)); // 0dB
+            r.set(LeftBoostGain(0b10)); // 29dB
+            */
+            // 0. Enable Vref and master clock
+            //r.set(PowerMgmt1VrefEnable(true));
+            //r.set(MasterClockDisable(false)); // ???
+            //r.set(MicrophoneBiasEnable(true)); // ???
+
+            // 1. Configure the input path
+            // 1.1. Power on input devices
+            r.set(PowerMgmt1VmidSelect(0b01));
+            r.set(PowerMgmt1AinLeftEnable(true));
+            r.set(LeftMicEnable(true));
+
+            // 2.2. Disable unused inputs on the left side
+            r.set(Linput2Boost(0b000));
+            r.set(Linput3Boost(0b000));
+            r.set(LeftInput3ToOutputMixer(false));
+            r.set(LeftInput3ToOutputMixerVolume(0b000));
+
+            // 2.3. Disable the right side inputs
+            r.set(RightInputAnalogMute(true));
+            r.set(Rinput2Boost(0b000));
+            r.set(Rinput3Boost(0b000));
+            r.set(RightInput3ToOutputMixer(false));
+            r.set(RightInput3ToOutputMixerVolume(0b000));
+
+            // 2.4. Enable the left side
+            r.set(LeftInput1ToInverting(true));
+            r.set(LeftInput3ToNonInverting(false));
+            r.set(LeftInput2ToNonInverting(true));
+            r.set(LeftInputToBoost(true));
+            r.set(InputPgaVolumeUpdateRight(true));
+            r.set(LeftPgaVolume(0b01_0111)); // 0dB
+            r.set(LeftBoostGain(0b10)); // 20dB
+            r.set(LeftInputAnalogMute(false));
         });
     }
 
@@ -83,19 +118,19 @@ impl AudioControl {
     pub fn left_output_path(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on/off output devices
-            r.set::<LeftOutput1Enable>(enable);
-            r.set::<LeftOutputMixEnable>(enable);
+            r.set(LeftOutput1Enable(enable));
+            r.set(LeftOutputMixEnable(enable));
 
             // Left input 3 bypass and speaker output are always disabled
-            r.set::<LeftInput3ToOutputMixer>(false);
-            r.set::<LeftInput3ToOutputMixerVolume>(0b000);
-            r.set::<LeftSpeakerVolumeUpdate>(true);
-            r.set::<LeftSpeakerVolume>(0b000_0000);
+            r.set(LeftInput3ToOutputMixer(false));
+            r.set(LeftInput3ToOutputMixerVolume(0b000));
+            r.set(LeftSpeakerVolumeUpdate(true));
+            r.set(LeftSpeakerVolume(0b000_0000));
 
             // Set volumes
             // TODO factor this out
-            r.set::<HeadphoneOutVolumeUpdate>(true);
-            r.set::<LeftHeadphoneVolume>(0b111_1111); // 6dB
+            r.set(HeadphoneOutVolumeUpdate(true));
+            r.set(LeftHeadphoneVolume(0b111_1111)); // 6dB
         });
     }
 
@@ -103,19 +138,19 @@ impl AudioControl {
     pub fn right_output_path(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on/off output devices
-            r.set::<RightOutput1Enable>(enable);
-            r.set::<RightOutputMixEnable>(enable);
+            r.set(RightOutput1Enable(enable));
+            r.set(RightOutputMixEnable(enable));
 
             // Right input 3 bypass and speaker output are always disabled
-            r.set::<RightInput3ToOutputMixer>(false);
-            r.set::<RightInput3ToOutputMixerVolume>(0b000);
-            r.set::<RightSpeakerVolumeUpdate>(true);
-            r.set::<RightSpeakerVolume>(0b000_0000);
+            r.set(RightInput3ToOutputMixer(false));
+            r.set(RightInput3ToOutputMixerVolume(0b000));
+            r.set(RightSpeakerVolumeUpdate(true));
+            r.set(RightSpeakerVolume(0b000_0000));
 
             // Set volumes
             // TODO Factor this out
-            r.set::<HeadphoneOutVolumeUpdate>(true);
-            r.set::<RightHeadphoneVolume>(0b111_1111); // 6dB
+            r.set(HeadphoneOutVolumeUpdate(true));
+            r.set(RightHeadphoneVolume(0b111_1111)); // 6dB
         });
     }
 
@@ -125,37 +160,51 @@ impl AudioControl {
     pub fn left_analog_bypass(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Connect left input boost to left output mix
-            r.set::<LeftBoostToLeftOutputMix>(enable);
+            r.set(LeftBoostToLeftOutputMix(enable));
 
             // Set volumes
             // TODO Factor this out
-            r.set::<LeftBoostToLeftOutputMixVolume>(0b000); // 0dB
+            r.set(LeftBoostToLeftOutputMixVolume(0b000)); // 0dB
+        })
+    }
+
+    /// Enable/disable digital loopback
+    ///
+    /// When this is enabled, the output of the ADCs is fed directly to the DACs.
+    pub fn digital_loopback(&mut self, enable: bool) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Set ADC to use the DACLRC clock
+            r.set(AdcLrcPinSelect(enable));
+
+            // Enable digital loopback
+            r.set(DigitalLoopback(enable));
         })
     }
 
     // TODO provide I2S configuration here
     // XXX Do all the ADCs / DACs need to be turned on here?  Or at least both channels?
     /// Enable the I2S interface
-    pub fn i2s(&mut self) {
+    pub fn enable_i2s(&mut self) {
         self.regs.modify(&mut self.i2c, |r| {
             // Configure I2S interface
-            r.set::<AudioInterfaceMasterMode>(true); // Master mode
-            r.set::<AudioWordLength>(0b00); // 16-bit words
-            r.set::<AudioFormat>(0b10); // I2S format
+            r.set(AudioInterfaceMasterMode(true)); // Master mode
+            r.set(AudioWordLength(0b00)); // 16-bit words
+            r.set(AudioFormat(0b10)); // I2S format
 
             // Set clocks for 8khz
-            r.set::<MasterClockDisable>(false);
-            r.set::<PllN>(0b1000);
-            r.set::<PllKMsb>(0b0011_0001);
-            r.set::<PllKMid>(0b0010_0110);
-            r.set::<PllKLsb>(0b1110_1001);
-            r.set::<Adc1Divider>(0b110);
-            r.set::<DacDivider>(0b110);
-            r.set::<SysClkDiv>(0b00);
-            r.set::<ClockSelect>(true);
-            r.set::<BclkFrequency>(0b1100);
-            r.set::<ClassDSysclkDivider>(0b111);
-            r.set::<AdcAlcSampleRateSelect>(0b101);
+            // XXX Some of these might be good to move to the ADC/DAC methods?
+            r.set(MasterClockDisable(false));
+            r.set(PllN(0b1000));
+            r.set(PllKMsb(0b0011_0001));
+            r.set(PllKMid(0b0010_0110));
+            r.set(PllKLsb(0b1110_1001));
+            r.set(Adc1Divider(0b110));
+            r.set(DacDivider(0b110));
+            r.set(SysClkDiv(0b00));
+            r.set(ClockSelect(true));
+            r.set(BclkFrequency(0b1100));
+            r.set(ClassDSysclkDivider(0b111));
+            r.set(AdcAlcSampleRateSelect(0b101));
         });
     }
 
@@ -163,13 +212,13 @@ impl AudioControl {
     pub fn left_dac(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on and connect
-            r.set::<LeftDacEnable>(enable);
-            r.set::<LeftDacToOutputMixer>(enable);
+            r.set(LeftDacEnable(enable));
+            r.set(LeftDacToOutputMixer(enable));
 
             // Set volume
             // TODO factor this out
-            r.set::<DacVolumeUpdate>(enable);
-            r.set::<LeftDacDigitalVolume>(0b1111_1111); // 0dB
+            r.set(DacVolumeUpdate(enable));
+            r.set(LeftDacDigitalVolume(0b1111_1111)); // 0dB
         });
     }
 
@@ -177,14 +226,28 @@ impl AudioControl {
     pub fn right_dac(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on and connect
-            r.set::<RightDacEnable>(enable);
-            r.set::<RightDacToOutputMixer>(enable);
+            r.set(RightDacEnable(enable));
+            r.set(RightDacToOutputMixer(enable));
 
             // Set volume
             // TODO factor this out
-            r.set::<DacVolumeUpdateRight>(enable);
-            r.set::<RightDacDigitalVolume>(0b1111_1111); // 0dB
+            r.set(DacVolumeUpdateRight(enable));
+            r.set(RightDacDigitalVolume(0b1111_1111)); // 0dB
         })
+    }
+
+    /// Enable/disable the left ADC
+    ///
+    /// Since the right input is always disconnected, we never turn on the right ADC
+    // XXX Should we leave the right ADC turned off, or turn it on with volume set to zero?
+    pub fn left_adc(&mut self, enable: bool) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Power on
+            r.set(PowerMgmt1EnableAdcLeft(enable));
+
+            // Disable the high pass filter
+            r.set(AdcHighPassDisable(true));
+        });
     }
 
     ///  Configure DAC behavior
@@ -196,13 +259,13 @@ impl AudioControl {
     pub fn dac_config(&mut self, mono_mix: bool, soft_mute_mode: bool, mute: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Mix the left and right DAC outputs before sending them to the mixer
-            r.set::<DacMonoMix>(mono_mix);
+            r.set(DacMonoMix(mono_mix));
 
             // Make DAC mute softer
-            r.set::<DacSoftMuteMode>(soft_mute_mode);
+            r.set(DacSoftMuteMode(soft_mute_mode));
 
             // Mute DAC outputs
-            r.set::<DacSoftMuteEnable>(mute);
+            r.set(DacSoftMuteEnable(mute));
         })
     }
 
@@ -210,106 +273,171 @@ impl AudioControl {
         self.power_on().await;
 
         // Analog loopback experiment
+        /*
         self.left_input_path(true);
         self.left_output_path(true);
         self.left_analog_bypass(true);
+        */
 
         // Digital tone generation experiment
+        /*
         self.left_output_path(true);
         self.left_dac(true);
         self.right_dac(true);
         self.dac_config(true, true, false);
-        self.i2s(true);
+        self.enable_i2s();
+        */
+
+        // Digital loopback experiment
+        /*
+        self.left_input_path(true);
+        self.left_output_path(true);
+        self.left_adc(true);
+        self.left_dac(true);
+        self.dac_config(true, true, false);
+        self.digital_loopback(true);
+        */
+
+        // Input read experiment
+        /*
+        self.left_input_path(true);
+        self.left_adc(true);
+        self.enable_i2s();
+        */
+
+        // Device loopback experiment
+        /*
+        self.left_input_path(true);
+        self.left_output_path(true);
+        self.left_adc(true);
+        self.left_dac(true);
+        self.dac_config(true, true, false);
+        self.enable_i2s();
+        */
+
+        // 0. Enable Vref and master clock
+        // r.set::<PowerMgmt1VrefEnable>(true);
+        r.set::<MasterClockDisable>(false); // ???
+        r.set::<MicrophoneBiasEnable>(true); // ???
+
+        // 1. Configure the input path
+        // 1.1. Power on input devices
+        r.set::<PowerMgmt1VmidSelect>(0b01);
+        r.set::<PowerMgmt1AinLeftEnable>(true);
+        r.set::<LeftMicEnable>(true);
+
+        // 2.2. Disable unused inputs on the left side
+        r.set::<Linput2Boost>(0b000);
+        r.set::<Linput3Boost>(0b000);
+        r.set::<LeftInput3ToOutputMixer>(false);
+        r.set::<LeftInput3ToOutputMixerVolume>(0b000);
+
+        // 2.3. Disable the right side inputs
+        r.set::<RightInputAnalogMute>(true);
+        r.set::<Rinput2Boost>(0b000);
+        r.set::<Rinput3Boost>(0b000);
+        r.set::<RightInput3ToOutputMixer>(false);
+        r.set::<RightInput3ToOutputMixerVolume>(0b000);
+
+        // 2.4. Enable the left side
+        r.set::<LeftInput1ToInverting>(true);
+        r.set::<LeftInput3ToNonInverting>(false);
+        r.set::<LeftInput2ToNonInverting>(true);
+        r.set::<LeftInputToBoost>(true);
+        r.set::<InputPgaVolumeUpdateRight>(true);
+        r.set::<LeftPgaVolume>(0b01_0111); // 0dB
+        r.set::<LeftBoostGain>(0b10); // 20dB
+        r.set::<LeftInputAnalogMute>(false);
 
         /*
         // Startup classic
         self.regs.modify(&mut self.i2c, |r| {
             // Turn everything on
-            r.set::<PowerMgmt1VmidSelect>(0b01);
-            r.set::<PowerMgmt1VrefEnable>(true);
-            r.set::<PowerMgmt1AinLeftEnable>(true);
-            r.set::<PowerMgmt1AinRightEnable>(true);
-            r.set::<PowerMgmt1EnableAdcLeft>(true);
-            r.set::<PowerMgmt1EnableAdcRight>(true);
-            r.set::<MicrophoneBiasEnable>(true);
-            r.set::<MasterClockDisable>(false);
+            r.set(PowerMgmt1VmidSelect(0b01));
+            r.set(PowerMgmt1VrefEnable(true));
+            r.set(PowerMgmt1AinLeftEnable(true));
+            r.set(PowerMgmt1AinRightEnable(true));
+            r.set(PowerMgmt1EnableAdcLeft(true));
+            r.set(PowerMgmt1EnableAdcRight(true));
+            r.set(MicrophoneBiasEnable(true));
+            r.set(MasterClockDisable(false));
 
-            r.set::<LeftDacEnable>(true);
-            r.set::<RightDacEnable>(true);
-            r.set::<LeftOutput1Enable>(true);
-            r.set::<RightOutput1Enable>(true);
-            r.set::<PllEnable>(true);
+            r.set(LeftDacEnable(true));
+            r.set(RightDacEnable(true));
+            r.set(LeftOutput1Enable(true));
+            r.set(RightOutput1Enable(true));
+            r.set(PllEnable(true));
 
-            r.set::<LeftMicEnable>(true);
-            r.set::<LeftOutputMixEnable>(true);
-            r.set::<RightOutputMixEnable>(true);
+            r.set(LeftMicEnable(true));
+            r.set(LeftOutputMixEnable(true));
+            r.set(RightOutputMixEnable(true));
 
             // Disable soft mut and ADC high pass filter
-            r.set::<DacSoftMuteEnable>(false);
-            r.set::<AdcHighPassDisable>(false);
+            r.set(DacSoftMuteEnable(false));
+            r.set(AdcHighPassDisable(false));
 
             // Set clocks for 8khz
-            r.set::<PllN>(0b1000);
-            r.set::<PllKMsb>(0b0011_0001);
-            r.set::<PllKMid>(0b0010_0110);
-            r.set::<PllKLsb>(0b1110_1001);
-            r.set::<Adc1Divider>(0b110);
-            r.set::<DacDivider>(0b110);
-            r.set::<SysClkDiv>(0b00);
-            r.set::<ClockSelect>(true);
-            r.set::<BclkFrequency>(0b1100);
-            r.set::<ClassDSysclkDivider>(0b111);
-            r.set::<AdcAlcSampleRateSelect>(0b101);
+            r.set(PllN(0b1000));
+            r.set(PllKMsb(0b0011_0001));
+            r.set(PllKMid(0b0010_0110));
+            r.set(PllKLsb(0b1110_1001));
+            r.set(Adc1Divider(0b110));
+            r.set(DacDivider(0b110));
+            r.set(SysClkDiv(0b00));
+            r.set(ClockSelect(true));
+            r.set(BclkFrequency(0b1100));
+            r.set(ClassDSysclkDivider(0b111));
+            r.set(AdcAlcSampleRateSelect(0b101));
 
             // Set mono
-            r.set::<DacMonoMix>(true);
-            r.set::<MonoOutVolume>(false);
+            r.set(DacMonoMix(true));
+            r.set(MonoOutVolume(false));
 
             // Set volumes
-            r.set::<InputPgaVolumeUpdate>(true);
-            r.set::<LeftPgaVolume>(0b11_1111);
-            r.set::<HeadphoneOutVolumeUpdate>(true);
-            r.set::<LeftHeadphoneVolume>(0b110_0111);
-            r.set::<RightHeadphoneVolume>(0b111_1111);
+            r.set(InputPgaVolumeUpdate(true));
+            r.set(LeftPgaVolume(0b11_1111));
+            r.set(HeadphoneOutVolumeUpdate(true));
+            r.set(LeftHeadphoneVolume(0b110_0111));
+            r.set(RightHeadphoneVolume(0b111_1111));
 
             // Enable the outputs
-            r.set::<ClassDSpeakerOutputEnable>(0b01);
+            r.set(ClassDSpeakerOutputEnable(0b01));
 
             // Set the DAC left and right volumes
-            r.set::<DacVolumeUpdate>(true);
-            r.set::<LeftDacDigitalVolume>(0b1111_1111);
-            r.set::<RightDacDigitalVolume>(0b1111_1111);
+            r.set(DacVolumeUpdate(true));
+            r.set(LeftDacDigitalVolume(0b1111_1111));
+            r.set(RightDacDigitalVolume(0b1111_1111));
 
             // Set left and right mixer
-            r.set::<LeftDacToOutputMixer>(true);
-            r.set::<LeftInput3ToOutputMixer>(false);
-            r.set::<LeftInput3ToOutputMixerVolume>(0b000);
-            r.set::<RightDacToOutputMixer>(true);
-            r.set::<RightInput3ToOutputMixerVolume>(0b000);
-            r.set::<Linput3Boost>(0b111);
+            r.set(LeftDacToOutputMixer(true));
+            r.set(LeftInput3ToOutputMixer(false));
+            r.set(LeftInput3ToOutputMixerVolume(0b000));
+            r.set(RightDacToOutputMixer(true));
+            r.set(RightInput3ToOutputMixerVolume(0b000));
+            r.set(Linput3Boost(0b111));
 
             // Enable DAC softmute
-            r.set::<DacSoftMuteMode>(true);
+            r.set(DacSoftMuteMode(true));
 
             // Set master mode, I2S, 16-bit words
-            r.set::<AudioInterfaceMasterMode>(true);
-            r.set::<AudioWordLength>(0b00);
-            r.set::<AudioFormat>(0b10);
+            r.set(AudioInterfaceMasterMode(true));
+            r.set(AudioWordLength(0b00));
+            r.set(AudioFormat(0b10));
 
             // Unmute the mic
             // XXX(RLB) These are done in the C version, but they get overwritten by the
             // later writes in this version.  Does the order matter?
-            //r.set::<LeftInput1ToInverting>(false);
-            //r.set::<LeftInput3ToNonInverting>(false);
-            r.set::<PowerMgmt1EnableAdcLeft>(true);
-            r.set::<LeftMicEnable>(true);
-            r.set::<LeftInputToBoost>(true);
-            r.set::<LeftInput2ToNonInverting>(true);
-            r.set::<LeftInput3ToNonInverting>(true);
-            r.set::<LeftInput1ToInverting>(true);
-            r.set::<InputPgaVolumeUpdate>(true);
-            r.set::<Linput2Boost>(0b101);
-            r.set::<MicrophoneBiasEnable>(true);
+            //r.set(LeftInput1ToInverting(false));
+            //r.set(LeftInput3ToNonInverting(false));
+            r.set(PowerMgmt1EnableAdcLeft(true));
+            r.set(LeftMicEnable(true));
+            r.set(LeftInputToBoost(true));
+            r.set(LeftInput2ToNonInverting(true));
+            r.set(LeftInput3ToNonInverting(true));
+            r.set(LeftInput1ToInverting(true));
+            r.set(InputPgaVolumeUpdate(true));
+            r.set(Linput2Boost(0b101));
+            r.set(MicrophoneBiasEnable(true));
         });
         */
     }
@@ -354,46 +482,6 @@ impl ToFromU16 for u16 {
     fn into_u16(self) -> u16 {
         self
     }
-}
-
-pub trait FieldAccess {
-    const ADDR: RegAddr;
-    const OFFSET: u8;
-    const WIDTH: u8;
-    const MAX: u16 = (1 << Self::WIDTH) - 1;
-    const MASK: u16 = Self::MAX << Self::OFFSET;
-    type Value;
-
-    fn get(regval: u16) -> Self::Value;
-    fn set(regval: u16, val: Self::Value) -> u16;
-}
-
-macro_rules! define_field {
-    ($name:ident, $addr:expr, $offset:expr, $width:expr, $val:ty) => {
-        pub struct $name;
-        impl FieldAccess for $name {
-            const ADDR: RegAddr = $addr;
-            const OFFSET: u8 = $offset;
-            const WIDTH: u8 = $width;
-            type Value = $val;
-
-            #[inline]
-            fn get(regval: u16) -> $val {
-                <$val>::from_u16((regval & Self::MASK) >> Self::OFFSET)
-            }
-
-            #[inline]
-            fn set(regval: u16, value: $val) -> u16 {
-                let v16 = value.into_u16();
-                assert!(
-                    v16 <= Self::MAX,
-                    concat!(stringify!($name), ": value out of range"),
-                );
-                let mask = ((1u16 << Self::WIDTH) - 1) << Self::OFFSET;
-                (regval & !mask) | ((v16 << Self::OFFSET) & mask)
-            }
-        }
-    };
 }
 
 #[derive(Clone)]
@@ -512,15 +600,62 @@ impl<'a> RegisterView<'a> {
     }
 
     // Generic setter for any defined field; asserts on value width and records modification.
-    pub fn set<F: FieldAccess>(&mut self, val: F::Value) {
-        let idx = F::ADDR as usize;
+    pub fn set<F: FieldAccess>(&mut self, val: F) {
+        let idx: usize = F::ADDR.into();
         let old = self.regs[idx];
-        let new = F::set(old, val);
+        let new = val.set(old);
         if new != old {
             self.regs[idx] = new;
             self.modified[idx] = true;
         }
     }
+}
+
+pub trait FieldAccess {
+    const ADDR: RegAddr;
+    const OFFSET: u8;
+    const WIDTH: u8;
+    const MAX: u16 = (1 << Self::WIDTH) - 1;
+    const MASK: u16 = Self::MAX << Self::OFFSET;
+    type Value;
+
+    fn new(val: Self::Value) -> Self;
+    fn get(regval: u16) -> Self::Value;
+    fn set(&self, regval: u16) -> u16;
+}
+
+macro_rules! define_field {
+    ($name:ident, $addr:expr, $offset:expr, $width:expr, $val:ty) => {
+        pub struct $name($val);
+
+        impl FieldAccess for $name {
+            const ADDR: RegAddr = $addr;
+            const OFFSET: u8 = $offset;
+            const WIDTH: u8 = $width;
+            type Value = $val;
+
+            #[inline]
+            fn new(val: $val) -> Self {
+                Self(val)
+            }
+
+            #[inline]
+            fn get(regval: u16) -> $val {
+                <$val>::from_u16((regval & Self::MASK) >> Self::OFFSET)
+            }
+
+            #[inline]
+            fn set(&self, regval: u16) -> u16 {
+                let val = self.0.into_u16();
+                assert!(
+                    val <= Self::MAX,
+                    concat!(stringify!($name), ": value out of range"),
+                );
+                let mask = ((1u16 << Self::WIDTH) - 1) << Self::OFFSET;
+                (regval & !mask) | ((val << Self::OFFSET) & mask)
+            }
+        }
+    };
 }
 
 // XXX(RLB) A first draft of these controls was generated by ChatGPT.  I have verified their
@@ -581,9 +716,11 @@ define_field!(ClassDSysclkDivider, 0x08, 6, 3, u8);
 define_field!(BclkFrequency, 0x08, 0, 4, u8);
 
 // R9 (0x09) Audio Interface
-define_field!(WordLength, 0x09, 2, 2, u8);
+define_field!(AdcLrcPinSelect, 0x09, 6, 1, bool);
+define_field!(WordLength8, 0x09, 5, 1, bool);
 define_field!(DacCompanding, 0x09, 3, 2, u8);
-define_field!(AdcCompanding, 0x09, 0, 2, u8);
+define_field!(AdcCompanding, 0x09, 1, 2, u8);
+define_field!(DigitalLoopback, 0x09, 0, 1, bool);
 
 // R10 (0x0A) Left DAC Volume
 define_field!(DacVolumeUpdate, 0x0A, 8, 1, bool);
