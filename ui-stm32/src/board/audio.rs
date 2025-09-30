@@ -32,9 +32,6 @@ impl AudioControl {
 
         self.regs.modify(&mut self.i2c, |r| {
             r.set(PowerMgmt1VrefEnable(true));
-
-            // XXX(RLB) This is enabled in Brett's code, but it's not clear that it does anything
-            // r.set(MicrophoneBiasEnable(true));
         });
     }
 
@@ -46,19 +43,19 @@ impl AudioControl {
     /// `right_input_path()`.
     pub fn left_input_path(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
-            /*
             // Power on/off input devices
+            r.set(MicrophoneBiasEnable(true));
             r.set(PowerMgmt1VmidSelect(0b01));
-            r.set(PowerMgmt1AinLeftEnable(enable));
-            r.set(LeftMicEnable(enable));
+            r.set(PowerMgmt1AinLeftEnable(true));
+            r.set(LeftMicEnable(true));
 
-            // Left input 3 is always disabled
+            // Disable left input 3 (disconnected)
             r.set(Linput3Boost(0b000));
             r.set(LeftInput3ToOutputMixer(false));
             r.set(LeftInput3ToOutputMixerVolume(0b000));
             r.set(LeftInput3ToNonInverting(false));
 
-            // Right side inputs are always disabled
+            // Disable the right side inputs (disconnected)
             r.set(RightInputAnalogMute(true));
             r.set(Rinput2Boost(0b000));
             r.set(Rinput3Boost(0b000));
@@ -66,55 +63,21 @@ impl AudioControl {
             r.set(RightInput3ToOutputMixerVolume(0b000));
 
             // Enable the left side
-            r.set(LeftInput1ToInverting(enable));
-            r.set(LeftInput2ToNonInverting(enable));
-            r.set(LeftInputToBoost(enable));
-            r.set(LeftInputAnalogMute(!enable));
-
-            // Set volumes
-            // TODO: Factor this out
-            r.set(InputPgaVolumeUpdate(enable));
-            r.set(LeftPgaVolume(0b01_0111)); // 0dB
-            r.set(Linput2Boost(0b101)); // 0dB
-            r.set(LeftBoostGain(0b10)); // 29dB
-            */
-            // 0. Enable Vref and master clock
-            //r.set(PowerMgmt1VrefEnable(true));
-            //r.set(MasterClockDisable(false)); // ???
-            //r.set(MicrophoneBiasEnable(true)); // ???
-
-            // 1. Configure the input path
-            // 1.1. Power on input devices
-            r.set(PowerMgmt1VmidSelect(0b01));
-            r.set(PowerMgmt1AinLeftEnable(true));
-            r.set(LeftMicEnable(true));
-
-            // 2.2. Disable unused inputs on the left side
-            r.set(Linput2Boost(0b000));
-            r.set(Linput3Boost(0b000));
-            r.set(LeftInput3ToOutputMixer(false));
-            r.set(LeftInput3ToOutputMixerVolume(0b000));
-
-            // 2.3. Disable the right side inputs
-            r.set(RightInputAnalogMute(true));
-            r.set(Rinput2Boost(0b000));
-            r.set(Rinput3Boost(0b000));
-            r.set(RightInput3ToOutputMixer(false));
-            r.set(RightInput3ToOutputMixerVolume(0b000));
-
-            // 2.4. Enable the left side
             r.set(LeftInput1ToInverting(true));
-            r.set(LeftInput3ToNonInverting(false));
             r.set(LeftInput2ToNonInverting(true));
             r.set(LeftInputToBoost(true));
-            r.set(InputPgaVolumeUpdateRight(true));
-            r.set(LeftPgaVolume(0b01_0111)); // 0dB
-            r.set(LeftBoostGain(0b10)); // 20dB
             r.set(LeftInputAnalogMute(false));
+
+            // Set volumes
+            r.set(Linput2Boost(0b101)); // 0dB
+            r.set(LeftBoostGain(0b10)); // 20dB
+            r.set(InputPgaVolumeUpdate(true));
+            r.set(LeftPgaVolume(0b01_0111)); // 0dB
         });
     }
 
     /// Enable/disable the left output path
+    // TODO actual enable/disable
     pub fn left_output_path(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on/off output devices
@@ -135,11 +98,11 @@ impl AudioControl {
     }
 
     /// Enable/disable the right output path
-    pub fn right_output_path(&mut self, enable: bool) {
+    pub fn right_output_path(&mut self, _enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on/off output devices
-            r.set(RightOutput1Enable(enable));
-            r.set(RightOutputMixEnable(enable));
+            r.set(RightOutput1Enable(true));
+            r.set(RightOutputMixEnable(true));
 
             // Right input 3 bypass and speaker output are always disabled
             r.set(RightInput3ToOutputMixer(false));
@@ -157,10 +120,11 @@ impl AudioControl {
     /// Enable/disable the left analog bypass
     ///
     /// This method connects the left input directly to the left output, bypassing the ADC and DAC.
-    pub fn left_analog_bypass(&mut self, enable: bool) {
+    // TODO actually enable / disable
+    pub fn left_analog_bypass(&mut self, _enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Connect left input boost to left output mix
-            r.set(LeftBoostToLeftOutputMix(enable));
+            r.set(LeftBoostToLeftOutputMix(true));
 
             // Set volumes
             // TODO Factor this out
@@ -273,11 +237,9 @@ impl AudioControl {
         self.power_on().await;
 
         // Analog loopback experiment
-        /*
         self.left_input_path(true);
         self.left_output_path(true);
         self.left_analog_bypass(true);
-        */
 
         // Digital tone generation experiment
         /*
@@ -314,40 +276,6 @@ impl AudioControl {
         self.dac_config(true, true, false);
         self.enable_i2s();
         */
-
-        // 0. Enable Vref and master clock
-        // r.set::<PowerMgmt1VrefEnable>(true);
-        r.set::<MasterClockDisable>(false); // ???
-        r.set::<MicrophoneBiasEnable>(true); // ???
-
-        // 1. Configure the input path
-        // 1.1. Power on input devices
-        r.set::<PowerMgmt1VmidSelect>(0b01);
-        r.set::<PowerMgmt1AinLeftEnable>(true);
-        r.set::<LeftMicEnable>(true);
-
-        // 2.2. Disable unused inputs on the left side
-        r.set::<Linput2Boost>(0b000);
-        r.set::<Linput3Boost>(0b000);
-        r.set::<LeftInput3ToOutputMixer>(false);
-        r.set::<LeftInput3ToOutputMixerVolume>(0b000);
-
-        // 2.3. Disable the right side inputs
-        r.set::<RightInputAnalogMute>(true);
-        r.set::<Rinput2Boost>(0b000);
-        r.set::<Rinput3Boost>(0b000);
-        r.set::<RightInput3ToOutputMixer>(false);
-        r.set::<RightInput3ToOutputMixerVolume>(0b000);
-
-        // 2.4. Enable the left side
-        r.set::<LeftInput1ToInverting>(true);
-        r.set::<LeftInput3ToNonInverting>(false);
-        r.set::<LeftInput2ToNonInverting>(true);
-        r.set::<LeftInputToBoost>(true);
-        r.set::<InputPgaVolumeUpdateRight>(true);
-        r.set::<LeftPgaVolume>(0b01_0111); // 0dB
-        r.set::<LeftBoostGain>(0b10); // 20dB
-        r.set::<LeftInputAnalogMute>(false);
 
         /*
         // Startup classic
