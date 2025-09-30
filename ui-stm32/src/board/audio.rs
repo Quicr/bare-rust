@@ -271,98 +271,6 @@ impl AudioControl {
         self.left_dac(true);
         self.configure_dac(true, true, false);
         self.enable_i2s();
-
-        /*
-        // Startup classic
-        self.regs.modify(&mut self.i2c, |r| {
-            // Turn everything on
-            r.set(PowerMgmt1VmidSelect(0b01));
-            r.set(PowerMgmt1VrefEnable(true));
-            r.set(PowerMgmt1AinLeftEnable(true));
-            r.set(PowerMgmt1AinRightEnable(true));
-            r.set(PowerMgmt1EnableAdcLeft(true));
-            r.set(PowerMgmt1EnableAdcRight(true));
-            r.set(MicrophoneBiasEnable(true));
-            r.set(MasterClockDisable(false));
-
-            r.set(LeftDacEnable(true));
-            r.set(RightDacEnable(true));
-            r.set(LeftOutput1Enable(true));
-            r.set(RightOutput1Enable(true));
-            r.set(PllEnable(true));
-
-            r.set(LeftMicEnable(true));
-            r.set(LeftOutputMixEnable(true));
-            r.set(RightOutputMixEnable(true));
-
-            // Disable soft mut and ADC high pass filter
-            r.set(DacSoftMuteEnable(false));
-            r.set(AdcHighPassDisable(false));
-
-            // Set clocks for 8khz
-            r.set(PllN(0b1000));
-            r.set(PllKMsb(0b0011_0001));
-            r.set(PllKMid(0b0010_0110));
-            r.set(PllKLsb(0b1110_1001));
-            r.set(Adc1Divider(0b110));
-            r.set(DacDivider(0b110));
-            r.set(SysClkDiv(0b00));
-            r.set(ClockSelect(true));
-            r.set(BclkFrequency(0b1100));
-            r.set(ClassDSysclkDivider(0b111));
-            r.set(AdcAlcSampleRateSelect(0b101));
-
-            // Set mono
-            r.set(DacMonoMix(true));
-            r.set(MonoOutVolume(false));
-
-            // Set volumes
-            r.set(InputPgaVolumeUpdate(true));
-            r.set(LeftPgaVolume(0b11_1111));
-            r.set(HeadphoneOutVolumeUpdate(true));
-            r.set(LeftHeadphoneVolume(0b110_0111));
-            r.set(RightHeadphoneVolume(0b111_1111));
-
-            // Enable the outputs
-            r.set(ClassDSpeakerOutputEnable(0b01));
-
-            // Set the DAC left and right volumes
-            r.set(DacVolumeUpdate(true));
-            r.set(LeftDacDigitalVolume(0b1111_1111));
-            r.set(RightDacDigitalVolume(0b1111_1111));
-
-            // Set left and right mixer
-            r.set(LeftDacToOutputMixer(true));
-            r.set(LeftInput3ToOutputMixer(false));
-            r.set(LeftInput3ToOutputMixerVolume(0b000));
-            r.set(RightDacToOutputMixer(true));
-            r.set(RightInput3ToOutputMixerVolume(0b000));
-            r.set(Linput3Boost(0b111));
-
-            // Enable DAC softmute
-            r.set(DacSoftMuteMode(true));
-
-            // Set master mode, I2S, 16-bit words
-            r.set(AudioInterfaceMasterMode(true));
-            r.set(AudioWordLength(0b00));
-            r.set(AudioFormat(0b10));
-
-            // Unmute the mic
-            // XXX(RLB) These are done in the C version, but they get overwritten by the
-            // later writes in this version.  Does the order matter?
-            //r.set(LeftInput1ToInverting(false));
-            //r.set(LeftInput3ToNonInverting(false));
-            r.set(PowerMgmt1EnableAdcLeft(true));
-            r.set(LeftMicEnable(true));
-            r.set(LeftInputToBoost(true));
-            r.set(LeftInput2ToNonInverting(true));
-            r.set(LeftInput3ToNonInverting(true));
-            r.set(LeftInput1ToInverting(true));
-            r.set(InputPgaVolumeUpdate(true));
-            r.set(Linput2Boost(0b101));
-            r.set(MicrophoneBiasEnable(true));
-        });
-        */
     }
 }
 
@@ -496,7 +404,6 @@ impl Registers {
             .enumerate()
             .filter_map(|(i, m)| m.then_some(i));
         for i in modified {
-            let addr = self.regs[i] >> 9;
             i2c.blocking_write(I2C_ADDR, &self.regs[i].to_be_bytes())
                 .unwrap();
         }
