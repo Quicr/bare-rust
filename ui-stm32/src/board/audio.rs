@@ -23,71 +23,203 @@ impl AudioControl {
         }
     }
 
-    async fn reset(&mut self) {
+    /// Reset the device and enable baseline devices
+    async fn power_on(&mut self) {
         // address = 0x0f, value = 0b0_0000_0000
         const RESET_SIGNAL: [u8; 2] = [0x1e, 0x00];
         self.i2c.blocking_write(I2C_ADDR, &RESET_SIGNAL).unwrap();
         Timer::after_millis(100).await;
+
+        self.regs.modify(&mut self.i2c, |r| {
+            r.set::<PowerMgmt1VrefEnable>(true);
+
+            // XXX(RLB) This is enabled in Brett's code, but it's not clear that it does anything
+            // r.set::<MicrophoneBiasEnable>(true);
+        });
     }
 
-    pub async fn init(&mut self) {
-        self.reset().await;
-
-        // Route input to output
+    // TODO Move all of these methods to RegisterView
+    /// Enable/disable the left input path
+    ///
+    /// In our configuration, on the left input path is ever connected to a microphone.  So this
+    /// method also ensures that the right input path is disabled, and there is no parallel
+    /// `right_input_path()`.
+    pub fn left_input_path(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
-            // 0. Enable Vref and master clock
-            r.set::<PowerMgmt1VrefEnable>(true);
-            r.set::<MasterClockDisable>(false); // ???
-            r.set::<MicrophoneBiasEnable>(true); // ???
-
-            // 1. Configure the input path
-            // 1.1. Power on input devices
+            // Power on/off input devices
             r.set::<PowerMgmt1VmidSelect>(0b01);
-            r.set::<PowerMgmt1AinLeftEnable>(true);
-            r.set::<LeftMicEnable>(true);
+            r.set::<PowerMgmt1AinLeftEnable>(enable);
+            r.set::<LeftMicEnable>(enable);
 
-            // 2.2. Disable unused inputs on the left side
-            r.set::<Linput2Boost>(0b000);
+            // Left input 3 is always disabled
             r.set::<Linput3Boost>(0b000);
             r.set::<LeftInput3ToOutputMixer>(false);
             r.set::<LeftInput3ToOutputMixerVolume>(0b000);
+            r.set::<LeftInput3ToNonInverting>(false);
 
-            // 2.3. Disable the right side inputs
+            // Right side inputs are always disabled
             r.set::<RightInputAnalogMute>(true);
             r.set::<Rinput2Boost>(0b000);
             r.set::<Rinput3Boost>(0b000);
             r.set::<RightInput3ToOutputMixer>(false);
             r.set::<RightInput3ToOutputMixerVolume>(0b000);
 
-            // 2.4. Enable the left side
-            r.set::<LeftInput1ToInverting>(true);
-            r.set::<LeftInput3ToNonInverting>(false);
-            r.set::<LeftInput2ToNonInverting>(true);
-            r.set::<LeftInputToBoost>(true);
-            r.set::<InputPgaVolumeUpdateRight>(true);
+            // Enable the left side
+            r.set::<LeftInput1ToInverting>(enable);
+            r.set::<LeftInput2ToNonInverting>(enable);
+            r.set::<LeftInputToBoost>(enable);
+            r.set::<LeftInputAnalogMute>(!enable);
+
+            // Set volumes
+            // TODO: Factor this out
+            r.set::<InputPgaVolumeUpdate>(enable);
             r.set::<LeftPgaVolume>(0b01_0111); // 0dB
-            r.set::<LeftBoostGain>(0b10); // 20dB
-            r.set::<LeftInputAnalogMute>(false);
+            r.set::<Linput2Boost>(0b000); // 0dB
+            r.set::<LeftBoostGain>(0b00); // 0dB
+        });
+    }
 
-            // 3. Configure the output path
-            // 3.1. Power out output devices
-            r.set::<LeftOutput1Enable>(true);
-            r.set::<LeftOutputMixEnable>(true);
+    /// Enable/disable the left output path
+    pub fn left_output_path(&mut self, enable: bool) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Power on/off output devices
+            r.set::<LeftOutput1Enable>(enable);
+            r.set::<LeftOutputMixEnable>(enable);
 
-            // 3.2. Disable unused paths on the left side
-            r.set::<LeftDacToOutputMixer>(false);
+            // Left input 3 bypass and speaker output are always disabled
             r.set::<LeftInput3ToOutputMixer>(false);
             r.set::<LeftInput3ToOutputMixerVolume>(0b000);
             r.set::<LeftSpeakerVolumeUpdate>(true);
             r.set::<LeftSpeakerVolume>(0b000_0000);
 
-            // 3.3. Disable the right side (NOOP)
-            // 3.4. Enable the good path on the left side
-            r.set::<LeftBoostToLeftOutputMix>(true);
-            r.set::<LeftBoostToLeftOutputMixVolume>(0b000); // 0dB
+            // Set volumes
+            // TODO factor this out
             r.set::<HeadphoneOutVolumeUpdate>(true);
             r.set::<LeftHeadphoneVolume>(0b111_1111); // 6dB
         });
+    }
+
+    /// Enable/disable the right output path
+    pub fn right_output_path(&mut self, enable: bool) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Power on/off output devices
+            r.set::<RightOutput1Enable>(enable);
+            r.set::<RightOutputMixEnable>(enable);
+
+            // Right input 3 bypass and speaker output are always disabled
+            r.set::<RightInput3ToOutputMixer>(false);
+            r.set::<RightInput3ToOutputMixerVolume>(0b000);
+            r.set::<RightSpeakerVolumeUpdate>(true);
+            r.set::<RightSpeakerVolume>(0b000_0000);
+
+            // Set volumes
+            // TODO Factor this out
+            r.set::<HeadphoneOutVolumeUpdate>(true);
+            r.set::<RightHeadphoneVolume>(0b111_1111); // 6dB
+        });
+    }
+
+    /// Enable/disable the left analog bypass
+    ///
+    /// This method connects the left input directly to the left output, bypassing the ADC and DAC.
+    pub fn left_analog_bypass(&mut self, enable: bool) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Connect left input boost to left output mix
+            r.set::<LeftBoostToLeftOutputMix>(enable);
+
+            // Set volumes
+            // TODO Factor this out
+            r.set::<LeftBoostToLeftOutputMixVolume>(0b000); // 0dB
+        })
+    }
+
+    // TODO provide I2S configuration here
+    // XXX Do all the ADCs / DACs need to be turned on here?  Or at least both channels?
+    /// Enable the I2S interface
+    pub fn i2s(&mut self) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Configure I2S interface
+            r.set::<AudioInterfaceMasterMode>(true); // Master mode
+            r.set::<AudioWordLength>(0b00); // 16-bit words
+            r.set::<AudioFormat>(0b10); // I2S format
+
+            // Set clocks for 8khz
+            r.set::<MasterClockDisable>(false);
+            r.set::<PllN>(0b1000);
+            r.set::<PllKMsb>(0b0011_0001);
+            r.set::<PllKMid>(0b0010_0110);
+            r.set::<PllKLsb>(0b1110_1001);
+            r.set::<Adc1Divider>(0b110);
+            r.set::<DacDivider>(0b110);
+            r.set::<SysClkDiv>(0b00);
+            r.set::<ClockSelect>(true);
+            r.set::<BclkFrequency>(0b1100);
+            r.set::<ClassDSysclkDivider>(0b111);
+            r.set::<AdcAlcSampleRateSelect>(0b101);
+        });
+    }
+
+    /// Enable/disable the left DAC
+    pub fn left_dac(&mut self, enable: bool) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Power on and connect
+            r.set::<LeftDacEnable>(enable);
+            r.set::<LeftDacToOutputMixer>(enable);
+
+            // Set volume
+            // TODO factor this out
+            r.set::<DacVolumeUpdate>(enable);
+            r.set::<LeftDacDigitalVolume>(0b1111_1111); // 0dB
+        });
+    }
+
+    /// Enable/disable the right DAC
+    pub fn right_dac(&mut self, enable: bool) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Power on and connect
+            r.set::<RightDacEnable>(enable);
+            r.set::<RightDacToOutputMixer>(enable);
+
+            // Set volume
+            // TODO factor this out
+            r.set::<DacVolumeUpdateRight>(enable);
+            r.set::<RightDacDigitalVolume>(0b1111_1111); // 0dB
+        })
+    }
+
+    ///  Configure DAC behavior
+    ///
+    ///  * `mono_mix`: Mix the left and right DAC outputs before sending them to the mixer
+    ///  * `soft_mute_mode`: Avoid pops by making the edges of soft mute soft
+    ///  * `mute`:  Mute the DACs
+    // XXX(RLB) We probably want to at least factor out the mute enable/disable
+    pub fn dac_config(&mut self, mono_mix: bool, soft_mute_mode: bool, mute: bool) {
+        self.regs.modify(&mut self.i2c, |r| {
+            // Mix the left and right DAC outputs before sending them to the mixer
+            r.set::<DacMonoMix>(mono_mix);
+
+            // Make DAC mute softer
+            r.set::<DacSoftMuteMode>(soft_mute_mode);
+
+            // Mute DAC outputs
+            r.set::<DacSoftMuteEnable>(mute);
+        })
+    }
+
+    pub async fn init(&mut self) {
+        self.power_on().await;
+
+        // Analog loopback experiment
+        self.left_input_path(true);
+        self.left_output_path(true);
+        self.left_analog_bypass(true);
+
+        // Digital tone generation experiment
+        self.left_output_path(true);
+        self.left_dac(true);
+        self.right_dac(true);
+        self.dac_config(true, true, false);
+        self.i2s(true);
 
         /*
         // Startup classic
