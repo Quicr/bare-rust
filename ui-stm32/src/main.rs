@@ -204,7 +204,6 @@ async fn main(_spawner: Spawner) {
     let mut audio_control = AudioControl::new(i2c);
     audio_control.init().await;
 
-    /*
     // Start the SysTick timer
     hal_init_tick(168_000_000);
 
@@ -245,6 +244,7 @@ async fn main(_spawner: Spawner) {
     }
     trace!("after tx");
 
+    /*
     trace!("before txrx");
     let mut last_frame = [0; 16_000];
     let mut curr_frame = [0; 16_000];

@@ -32,6 +32,8 @@ impl AudioControl {
 
         self.regs.modify(&mut self.i2c, |r| {
             r.set(PowerMgmt1VrefEnable(true));
+            r.set(PowerMgmt1VmidSelect(0b01));
+            r.set(MicrophoneBiasEnable(true));
         });
     }
 
@@ -44,10 +46,8 @@ impl AudioControl {
     pub fn left_input_path(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on/off input devices
-            r.set(MicrophoneBiasEnable(true));
-            r.set(PowerMgmt1VmidSelect(0b01));
-            r.set(PowerMgmt1AinLeftEnable(true));
-            r.set(LeftMicEnable(true));
+            r.set(PowerMgmt1AinLeftEnable(enable));
+            r.set(LeftMicEnable(enable));
 
             // Disable left input 3 (disconnected)
             r.set(Linput3Boost(0b000));
@@ -98,11 +98,11 @@ impl AudioControl {
     }
 
     /// Enable/disable the right output path
-    pub fn right_output_path(&mut self, _enable: bool) {
+    pub fn right_output_path(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on/off output devices
-            r.set(RightOutput1Enable(true));
-            r.set(RightOutputMixEnable(true));
+            r.set(RightOutput1Enable(enable));
+            r.set(RightOutputMixEnable(enable));
 
             // Right input 3 bypass and speaker output are always disabled
             r.set(RightInput3ToOutputMixer(false));
@@ -111,8 +111,8 @@ impl AudioControl {
             r.set(RightSpeakerVolume(0b000_0000));
 
             // Set volumes
-            // TODO Factor this out
-            r.set(HeadphoneOutVolumeUpdate(true));
+            // TODO factor this out
+            r.set(HeadphoneOutVolumeUpdateRight(true));
             r.set(RightHeadphoneVolume(0b111_1111)); // 6dB
         });
     }
@@ -150,13 +150,13 @@ impl AudioControl {
     /// Enable the I2S interface
     pub fn enable_i2s(&mut self) {
         self.regs.modify(&mut self.i2c, |r| {
-            // Configure I2S interface
-            r.set(AudioInterfaceMasterMode(true)); // Master mode
-            r.set(AudioWordLength(0b00)); // 16-bit words
-            r.set(AudioFormat(0b10)); // I2S format
+            // Set master mode, I2S, 16-bit words
+            r.set(AudioInterfaceMasterMode(true));
+            r.set(AudioWordLength(0b00));
+            r.set(AudioFormat(0b10));
 
             // Set clocks for 8khz
-            // XXX Some of these might be good to move to the ADC/DAC methods?
+            r.set(PllEnable(true));
             r.set(MasterClockDisable(false));
             r.set(PllN(0b1000));
             r.set(PllKMsb(0b0011_0001));
@@ -181,7 +181,7 @@ impl AudioControl {
 
             // Set volume
             // TODO factor this out
-            r.set(DacVolumeUpdate(enable));
+            r.set(DacVolumeUpdate(true));
             r.set(LeftDacDigitalVolume(0b1111_1111)); // 0dB
         });
     }
@@ -195,7 +195,7 @@ impl AudioControl {
 
             // Set volume
             // TODO factor this out
-            r.set(DacVolumeUpdateRight(enable));
+            r.set(DacVolumeUpdateRight(true));
             r.set(RightDacDigitalVolume(0b1111_1111)); // 0dB
         })
     }
@@ -220,7 +220,7 @@ impl AudioControl {
     ///  * `soft_mute_mode`: Avoid pops by making the edges of soft mute soft
     ///  * `mute`:  Mute the DACs
     // XXX(RLB) We probably want to at least factor out the mute enable/disable
-    pub fn dac_config(&mut self, mono_mix: bool, soft_mute_mode: bool, mute: bool) {
+    pub fn configure_dac(&mut self, mono_mix: bool, soft_mute_mode: bool, mute: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Mix the left and right DAC outputs before sending them to the mixer
             r.set(DacMonoMix(mono_mix));
@@ -237,18 +237,17 @@ impl AudioControl {
         self.power_on().await;
 
         // Analog loopback experiment
+        /*
         self.left_input_path(true);
         self.left_output_path(true);
         self.left_analog_bypass(true);
+        */
 
         // Digital tone generation experiment
-        /*
         self.left_output_path(true);
         self.left_dac(true);
-        self.right_dac(true);
-        self.dac_config(true, true, false);
+        self.configure_dac(true, true, false);
         self.enable_i2s();
-        */
 
         // Digital loopback experiment
         /*
