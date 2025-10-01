@@ -428,9 +428,10 @@ pub const SPI_I2SCFGR_CLEAR_MASK: u32 = SPI_I2SCFGR_CHLEN
     | SPI_I2SCFGR_I2SMOD;
 
 // Helper functions for flag checking
+// TODO Replace this with actual flag reads
 fn i2s_get_flag_status(hi2s: &I2sHandle, flag: u32) -> bool {
-    let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
-    (sr & flag) != 0
+    let sr = hi2s.regs.sr().read();
+    (sr.0 & flag) != 0
 }
 
 // SysTick register addresses for STM32F4
@@ -494,14 +495,14 @@ fn i2s_wait_flag_state_until_timeout(
 }
 
 fn i2s_wait_flag_state_until_timeout_instance(
-    instance: u32,
+    regs: &Spi,
     flag: u32,
     state: bool,
     timeout: u32,
 ) -> HalStatus {
     let tick_start = hal_get_tick();
 
-    let mut curr_state = i2s_get_flag_status_instance(instance, flag);
+    let mut curr_state = i2s_get_flag_status_instance(regs, flag);
     while curr_state != state {
         let elapsed = hal_get_tick();
         let elapsed = elapsed.wrapping_sub(tick_start);
@@ -510,18 +511,15 @@ fn i2s_wait_flag_state_until_timeout_instance(
             return HalStatus::Timeout;
         }
 
-        curr_state = i2s_get_flag_status_instance(instance, flag);
+        curr_state = i2s_get_flag_status_instance(regs, flag);
     }
 
     HalStatus::Ok
 }
 
-fn i2s_get_flag_status_instance(instance: u32, i2s_flag: u32) -> bool {
-    unsafe {
-        let sr_ptr = (instance + 0x08) as *const u32; // SR offset
-        let sr = ptr::read_volatile(sr_ptr);
-        (sr & i2s_flag) != 0
-    }
+fn i2s_get_flag_status_instance(regs: &Spi, i2s_flag: u32) -> bool {
+    let sr = regs.sr().read();
+    (sr.0 & i2s_flag) != 0
 }
 
 pub fn hal_i2s_transmit(hi2s: &mut I2sHandle, p_data: &[u16], timeout: u32) -> HalStatus {
@@ -677,7 +675,7 @@ pub fn hal_i2sex_transmit_receive(
             if tx_xfer_count > 0 {
                 // Wait until TXE flag is set on main instance
                 if i2s_wait_flag_state_until_timeout_instance(
-                    hi2s.instance,
+                    &hi2s.regs,
                     I2S_FLAG_TXE,
                     true,
                     timeout,
@@ -714,7 +712,7 @@ pub fn hal_i2sex_transmit_receive(
             if rx_xfer_count > 0 {
                 // Wait until RXNE flag is set on extended instance
                 if i2s_wait_flag_state_until_timeout_instance(
-                    ext_instance,
+                    &hi2s.regs_ext,
                     I2S_FLAG_RXNE,
                     true,
                     timeout,
@@ -787,7 +785,7 @@ pub fn hal_i2sex_transmit_receive(
             if tx_xfer_count > 0 {
                 // Wait until TXE flag is set on extended instance
                 if i2s_wait_flag_state_until_timeout_instance(
-                    ext_instance,
+                    &hi2s.regs_ext,
                     I2S_FLAG_TXE,
                     true,
                     timeout,
@@ -824,7 +822,7 @@ pub fn hal_i2sex_transmit_receive(
             if rx_xfer_count > 0 {
                 // Wait until RXNE flag is set on main instance
                 if i2s_wait_flag_state_until_timeout_instance(
-                    hi2s.instance,
+                    &hi2s.regs,
                     I2S_FLAG_RXNE,
                     true,
                     timeout,
