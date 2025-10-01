@@ -191,7 +191,7 @@ async fn main(_spawner: Spawner) {
     // hal_init_tick(168_000_000);
 
     // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
-    hal_i2s_msp_init_embassy();
+    hal_i2s_msp_init();
 
     // Do audio chip setup over I2C
     let config = {
