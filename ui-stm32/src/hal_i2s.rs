@@ -1,6 +1,6 @@
 use core::ptr;
 use defmt::Format;
-use embassy_stm32::pac::spi::Spi;
+use embassy_stm32::pac::spi::{vals::*, Spi};
 use num_enum::IntoPrimitive;
 
 #[repr(u32)]
@@ -535,24 +535,17 @@ pub fn hal_i2s_transmit(hi2s: &mut I2sHandle, p_data: &[u16], timeout: u32) -> H
     hi2s.state = HalI2sState::BusyTx;
     hi2s.error_code = HAL_I2S_ERROR_NONE;
 
-    let size = p_data.len();
-    let mut tx_data_ptr = p_data.as_ptr();
-    let mut tmp_size = size;
-
     // Check if the I2S is already enabled
-    let i2scfgr = unsafe { ptr::read_volatile((hi2s.instance + 0x1C) as *const u32) };
-    if (i2scfgr & SPI_I2SCFGR_I2SE) == 0 {
-        // Enable I2S peripheral
-        unsafe {
-            ptr::write_volatile(
-                (hi2s.instance + 0x1C) as *mut u32,
-                i2scfgr | SPI_I2SCFGR_I2SE,
-            );
+    hi2s.regs.i2scfgr().modify(|w| {
+        if !w.i2se() {
+            w.set_i2se(true);
         }
-    }
+    });
 
     // Start the transfer
-    while tmp_size > 0 {
+    // XXX: This ought to be a range for loop, but that seems to screw things up
+    for i in 0..p_data.len() {
+        // while i < size {
         // Wait until TXE flag is set
         if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_TXE, true, timeout) != HalStatus::Ok {
             // Set the error code and state are already set by the timeout function
@@ -560,16 +553,11 @@ pub fn hal_i2s_transmit(hi2s: &mut I2sHandle, p_data: &[u16], timeout: u32) -> H
         }
 
         // Write data to DR register
-        let data = unsafe { ptr::read(tx_data_ptr) };
-        unsafe {
-            ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, data);
-        }
-
-        tx_data_ptr = unsafe { tx_data_ptr.add(1) };
-        tmp_size -= 1;
+        hi2s.regs.dr().write(|w| w.set_dr(p_data[i]));
     }
 
     // Wait until Busy flag is reset
+    // XXX In the C code, this is only done when in SLAVE_TX or SLAVE_RX mode
     if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_BSY, false, timeout) != HalStatus::Ok {
         // Set the error code
         hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
