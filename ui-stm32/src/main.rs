@@ -186,6 +186,13 @@ async fn main(_spawner: Spawner) {
     };
     let p = embassy_stm32::init(config);
 
+    // Start the SysTick timer
+    // XXX Disabled for now; will cause timeouts to hang forever
+    // hal_init_tick(168_000_000);
+
+    // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
+    hal_i2s_msp_init_embassy();
+
     // Do audio chip setup over I2C
     let config = {
         use embassy_stm32::{gpio::Speed, i2c::*, time::Hertz};
@@ -203,12 +210,6 @@ async fn main(_spawner: Spawner) {
     let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, config);
     let mut audio_control = AudioControl::new(i2c);
     audio_control.init().await;
-
-    // Start the SysTick timer
-    hal_init_tick(168_000_000);
-
-    // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
-    hal_i2s_msp_init_embassy();
 
     // MX_I2S3_Init() - Configure I2S3 parameters
     let mut i2s = I2sHandle::new_spi3();
