@@ -234,6 +234,9 @@ impl AudioControl {
         })
     }
 
+    // XXX(RLB) Setup seems to go sideways (garbled ADC) if this function and power_on are not
+    // async.  Maybe it has something to do with timing?  Maybe main() needs to yield for something
+    // else to get time?
     pub async fn init(&mut self) {
         self.power_on().await;
 
