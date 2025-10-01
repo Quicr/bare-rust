@@ -28,7 +28,6 @@ impl AudioControl {
         // address = 0x0f, value = 0b0_0000_0000
         const RESET_SIGNAL: [u8; 2] = [0x1e, 0x00];
         self.i2c.blocking_write(I2C_ADDR, &RESET_SIGNAL).unwrap();
-        Timer::after_millis(100).await;
 
         self.regs.modify(&mut self.i2c, |r| {
             r.set(PowerMgmt1VrefEnable(true));
