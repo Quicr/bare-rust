@@ -5,7 +5,7 @@ use num_enum::IntoPrimitive;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum I2sMode {
+pub enum Mode {
     SlaveTx = 0x00000000,
     SlaveRx = 0x00000100,
     MasterTx = 0x00000200,
@@ -14,7 +14,7 @@ pub enum I2sMode {
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum I2sStandard {
+pub enum Standard {
     Philips = 0x00000000,
     Msb = 0x00000010,
     Lsb = 0x00000020,
@@ -22,9 +22,11 @@ pub enum I2sStandard {
     PcmLong = 0x000000B0,
 }
 
+// XXX These get converted to DATLEN values, but they look like they don't correspond to the
+// metapac values: https://docs.embassy.dev/stm32-metapac/git/stm32f405rg/spi/vals/enum.Datlen.html
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum I2sDataFormat {
+pub enum DataFormat {
     Data16b = 0x00000000,
     Data16bExtended = 0x00000001,
     Data24b = 0x00000003,
@@ -33,14 +35,14 @@ pub enum I2sDataFormat {
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum I2sMclkOutput {
+pub enum MclkOutput {
     Disable = 0x00000000,
     Enable = 0x00000200,
 }
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum I2sAudioFreq {
+pub enum AudioFreq {
     Hz192k = 192000,
     Hz96k = 96000,
     Hz48k = 48000,
@@ -55,21 +57,21 @@ pub enum I2sAudioFreq {
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum I2sCpol {
+pub enum Cpol {
     Low = 0x00000000,
     High = 0x00000008,
 }
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum I2sClockSource {
+pub enum ClockSource {
     Plli2s = 0x00000000,
     Ext = 0x00000001,
 }
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum I2sFullDuplexMode {
+pub enum FullDuplexMode {
     Disable = 0x00000000,
     Enable = 0x00000001,
 }
@@ -126,27 +128,27 @@ pub const HAL_I2S_ERROR_PRESCALER: u32 = 0x00000020;
 
 #[derive(Debug, Clone, Copy)]
 pub struct I2sInit {
-    pub mode: I2sMode,
-    pub standard: I2sStandard,
-    pub data_format: I2sDataFormat,
-    pub mclk_output: I2sMclkOutput,
-    pub audio_freq: I2sAudioFreq,
-    pub cpol: I2sCpol,
-    pub clock_source: I2sClockSource,
-    pub full_duplex_mode: I2sFullDuplexMode,
+    pub mode: Mode,
+    pub standard: Standard,
+    pub data_format: DataFormat,
+    pub mclk_output: MclkOutput,
+    pub audio_freq: AudioFreq,
+    pub cpol: Cpol,
+    pub clock_source: ClockSource,
+    pub full_duplex_mode: FullDuplexMode,
 }
 
 impl Default for I2sInit {
     fn default() -> Self {
         Self {
-            mode: I2sMode::SlaveTx,
-            standard: I2sStandard::Philips,
-            data_format: I2sDataFormat::Data16b,
-            mclk_output: I2sMclkOutput::Disable,
-            audio_freq: I2sAudioFreq::Default,
-            cpol: I2sCpol::Low,
-            clock_source: I2sClockSource::Plli2s,
-            full_duplex_mode: I2sFullDuplexMode::Disable,
+            mode: Mode::SlaveTx,
+            standard: Standard::Philips,
+            data_format: DataFormat::Data16b,
+            mclk_output: MclkOutput::Disable,
+            audio_freq: AudioFreq::Default,
+            cpol: Cpol::Low,
+            clock_source: ClockSource::Plli2s,
+            full_duplex_mode: FullDuplexMode::Disable,
         }
     }
 }
@@ -202,6 +204,7 @@ impl I2sHandle {
 }
 
 // Extended I2S macros (translated from C)
+// XXX(RLB) These have been translated to use the register blocks, but not actually tested.
 
 pub fn i2s_ext_instance(instance: u32) -> u32 {
     if instance == SPI2_BASE {
@@ -212,45 +215,17 @@ pub fn i2s_ext_instance(instance: u32) -> u32 {
 }
 
 pub fn hal_i2s_ext_enable(handle: &I2sHandle) {
-    let ext_base = i2s_ext_instance(handle.instance);
-    unsafe {
-        let i2scfgr_ptr = (ext_base + 0x1C) as *mut u32; // I2SCFGR offset
-        let mut reg = ptr::read_volatile(i2scfgr_ptr);
-        reg |= 0x00000400; // Set I2SE bit
-        ptr::write_volatile(i2scfgr_ptr, reg);
-    }
+    handle.regs_ext.i2scfgr().modify(|w| w.set_i2se(true));
 }
 
 pub fn hal_i2s_ext_disable(handle: &I2sHandle) {
-    let ext_base = i2s_ext_instance(handle.instance);
-    unsafe {
-        let i2scfgr_ptr = (ext_base + 0x1C) as *mut u32; // I2SCFGR offset
-        let mut reg = ptr::read_volatile(i2scfgr_ptr);
-        reg &= !0x00000400; // Clear I2SE bit
-        ptr::write_volatile(i2scfgr_ptr, reg);
-    }
-}
-
-pub fn hal_i2s_ext_get_flag(handle: &I2sHandle, flag: u32) -> bool {
-    let ext_base = i2s_ext_instance(handle.instance);
-    unsafe {
-        let sr_ptr = (ext_base + 0x08) as *const u32; // SR offset
-        let sr = ptr::read_volatile(sr_ptr);
-        (sr & flag) == flag
-    }
+    handle.regs_ext.i2scfgr().modify(|w| w.set_i2se(false));
 }
 
 pub fn hal_i2s_ext_clear_ovr_flag(handle: &I2sHandle) {
-    let ext_base = i2s_ext_instance(handle.instance);
-    unsafe {
-        let dr_ptr = (ext_base + 0x0C) as *const u32; // DR offset
-        let sr_ptr = (ext_base + 0x08) as *const u32; // SR offset
-        let _tmp = ptr::read_volatile(dr_ptr); // Read DR
-        let _tmp = ptr::read_volatile(sr_ptr); // Read SR
-    }
+    let _ = handle.regs_ext.dr().read();
+    let _ = handle.regs_ext.sr().read();
 }
-
-// Core I2S Functions (translated from C HAL)
 
 pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
     let i2sdiv: u32;
@@ -269,10 +244,9 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
     handle.state = HalI2sState::Busy;
 
     // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits
-    unsafe {
-        let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32;
-        let mut i2scfgr = ptr::read_volatile(i2scfgr_ptr);
-        i2scfgr &= !(SPI_I2SCFGR_CHLEN
+    handle.regs.i2scfgr().modify(|w| {
+        // TODO use semantic modifications
+        w.0 &= !(SPI_I2SCFGR_CHLEN
             | SPI_I2SCFGR_DATLEN
             | SPI_I2SCFGR_CKPOL
             | SPI_I2SCFGR_I2SSTD
@@ -280,18 +254,15 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
             | SPI_I2SCFGR_I2SCFG
             | SPI_I2SCFGR_I2SE
             | SPI_I2SCFGR_I2SMOD);
-        ptr::write_volatile(i2scfgr_ptr, i2scfgr);
+    });
 
-        // Reset I2SPR register
-        let i2spr_ptr = (handle.instance + 0x20) as *mut u32;
-        ptr::write_volatile(i2spr_ptr, 0x0002);
-    }
+    handle.regs.i2spr().modify(|w| w.0 = 0x0002);
 
     // I2SPR: I2SDIV and ODD Calculation
     // If the requested audio frequency is not the default, compute the prescaler
-    if handle.init.audio_freq != I2sAudioFreq::Default {
+    if handle.init.audio_freq != AudioFreq::Default {
         // Check the frame length (For the Prescaler computing)
-        if handle.init.data_format == I2sDataFormat::Data16b {
+        if handle.init.data_format == DataFormat::Data16b {
             // Packet length is 16 bits
             packetlength = 16;
         } else {
@@ -300,7 +271,10 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
         }
 
         // I2S standard
-        if handle.init.standard as u32 <= I2sStandard::Lsb as u32 {
+        if matches!(
+            handle.init.standard,
+            Standard::Philips | Standard::Msb | Standard::Lsb
+        ) {
             // In I2S standard packet length is multiplied by 2
             packetlength = packetlength * 2;
         }
@@ -309,7 +283,7 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
         i2sclk = get_i2s_clock_freq(handle.init.clock_source.into());
 
         // Compute the Real divider depending on the MCLK output state, with a floating point
-        if handle.init.mclk_output == I2sMclkOutput::Enable {
+        if handle.init.mclk_output == MclkOutput::Enable {
             // MCLK output is enabled
             let audio_freq: u32 = handle.init.audio_freq.into();
             tmp = (((i2sclk / 256) * 10) / audio_freq) + 5;
@@ -344,46 +318,29 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
     }
 
     // Write to SPIx I2SPR register the computed value
-    unsafe {
-        let i2spr_ptr = (handle.instance + 0x20) as *mut u32;
-        let mclk_output: u32 = handle.init.mclk_output.into();
-        ptr::write_volatile(i2spr_ptr, i2sdiv | i2sodd | mclk_output);
-    }
+    let mclk_output: u32 = handle.init.mclk_output.into();
+    handle.regs.i2spr().modify(|w| {
+        // TODO use semantic modifiers
+        w.0 = i2sdiv | i2sodd | mclk_output;
+    });
 
     // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits
     // And configure the I2S with the InitStruct values
-    unsafe {
-        let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32;
-        let mut i2scfgr = ptr::read_volatile(i2scfgr_ptr);
-
-        // Clear all configuration bits
-        i2scfgr &= !(SPI_I2SCFGR_CHLEN
-            | SPI_I2SCFGR_DATLEN
-            | SPI_I2SCFGR_CKPOL
-            | SPI_I2SCFGR_I2SSTD
-            | SPI_I2SCFGR_PCMSYNC
-            | SPI_I2SCFGR_I2SCFG
-            | SPI_I2SCFGR_I2SE
-            | SPI_I2SCFGR_I2SMOD);
-
-        // Set new configuration
+    handle.regs.i2scfgr().modify(|w| {
+        // TODO use semantic modifiers
         let mode: u32 = handle.init.mode.into();
         let standard: u32 = handle.init.standard.into();
         let data_format: u32 = handle.init.data_format.into();
         let cpol: u32 = handle.init.cpol.into();
-        i2scfgr |= SPI_I2SCFGR_I2SMOD | mode | standard | data_format | cpol;
-
-        ptr::write_volatile(i2scfgr_ptr, i2scfgr);
-    }
+        w.0 = SPI_I2SCFGR_I2SMOD | mode | standard | data_format | cpol;
+    });
 
     // Configure the I2S extended if the full duplex mode is enabled
-    if handle.init.full_duplex_mode == I2sFullDuplexMode::Enable {
+    if handle.init.full_duplex_mode == FullDuplexMode::Enable {
         // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits for extended instance
-        unsafe {
-            let ext_instance = i2s_ext_instance(handle.instance);
-            let ext_i2scfgr_ptr = (ext_instance + 0x1C) as *mut u32;
-            let mut ext_i2scfgr = ptr::read_volatile(ext_i2scfgr_ptr);
-            ext_i2scfgr &= !(SPI_I2SCFGR_CHLEN
+        handle.regs_ext.i2scfgr().modify(|w| {
+            // TODO use semantic modifications
+            w.0 &= !(SPI_I2SCFGR_CHLEN
                 | SPI_I2SCFGR_DATLEN
                 | SPI_I2SCFGR_CKPOL
                 | SPI_I2SCFGR_I2SSTD
@@ -391,37 +348,23 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
                 | SPI_I2SCFGR_I2SCFG
                 | SPI_I2SCFGR_I2SE
                 | SPI_I2SCFGR_I2SMOD);
-            ptr::write_volatile(ext_i2scfgr_ptr, ext_i2scfgr);
-
-            // Reset extended I2SPR register
-            let ext_i2spr_ptr = (ext_instance + 0x20) as *mut u32;
-            ptr::write_volatile(ext_i2spr_ptr, 2);
-        }
+        });
 
         // Get the mode to be configured for the extended I2S
-        let ext_mode = if (handle.init.mode == I2sMode::MasterTx)
-            || (handle.init.mode == I2sMode::SlaveTx)
-        {
-            I2sMode::SlaveRx
-        } else {
-            // I2S_MODE_MASTER_RX || I2S_MODE_SLAVE_RX
-            I2sMode::SlaveTx
+        let ext_mode = match handle.init.mode {
+            Mode::MasterTx | Mode::SlaveTx => Mode::SlaveRx,
+            Mode::MasterRx | Mode::SlaveRx => Mode::SlaveTx,
         };
 
         // Configure the I2S Slave with the I2S Master parameter values
-        unsafe {
-            let ext_instance = i2s_ext_instance(handle.instance);
-            let ext_i2scfgr_ptr = (ext_instance + 0x1C) as *mut u32;
-            let mut ext_i2scfgr = ptr::read_volatile(ext_i2scfgr_ptr);
-
-            let ext_mode_val: u32 = ext_mode.into();
+        handle.regs_ext.i2scfgr().modify(|w| {
+            // TODO use semantic modifiers
+            let mode: u32 = ext_mode.into();
             let standard: u32 = handle.init.standard.into();
             let data_format: u32 = handle.init.data_format.into();
             let cpol: u32 = handle.init.cpol.into();
-            ext_i2scfgr |= SPI_I2SCFGR_I2SMOD | ext_mode_val | standard | data_format | cpol;
-
-            ptr::write_volatile(ext_i2scfgr_ptr, ext_i2scfgr);
-        }
+            w.0 = SPI_I2SCFGR_I2SMOD | mode | standard | data_format | cpol;
+        });
     }
 
     handle.error_code = HAL_I2S_ERROR_NONE;
@@ -431,21 +374,11 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
 }
 
 pub fn hal_i2s_enable(handle: &I2sHandle) {
-    unsafe {
-        let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32; // I2SCFGR offset
-        let mut reg = ptr::read_volatile(i2scfgr_ptr);
-        reg |= SPI_I2SCFGR_I2SE; // Set I2SE bit
-        ptr::write_volatile(i2scfgr_ptr, reg);
-    }
+    handle.regs.i2scfgr().modify(|w| w.set_i2se(true));
 }
 
 pub fn hal_i2s_disable(handle: &I2sHandle) {
-    unsafe {
-        let i2scfgr_ptr = (handle.instance + 0x1C) as *mut u32; // I2SCFGR offset
-        let mut reg = ptr::read_volatile(i2scfgr_ptr);
-        reg &= !SPI_I2SCFGR_I2SE; // Clear I2SE bit
-        ptr::write_volatile(i2scfgr_ptr, reg);
-    }
+    handle.regs.i2scfgr().modify(|w| w.set_i2se(false));
 }
 
 // Internal helper functions
@@ -456,14 +389,6 @@ fn get_i2s_clock_freq(_clock_source: u32) -> u32 {
 }
 
 // Parameter validation functions
-
-
-
-
-
-
-
-
 
 // Flag definitions
 pub const I2S_FLAG_TXE: u32 = 0x00000002;
@@ -682,13 +607,12 @@ pub fn hal_i2sex_transmit_receive(
     let i2scfgr = unsafe { ptr::read_volatile((hi2s.instance + 0x1C) as *const u32) };
     let tmp1 = i2scfgr & (SPI_I2SCFGR_DATLEN | SPI_I2SCFGR_CHLEN);
 
-    let (tx_xfer_size, rx_xfer_size) = if (tmp1 == I2sDataFormat::Data24b as u32)
-        || (tmp1 == I2sDataFormat::Data32b as u32)
-    {
-        (size << 1, size << 1) // Double the size for 24/32-bit formats
-    } else {
-        (size, size) // Normal size for 16-bit formats
-    };
+    let (tx_xfer_size, rx_xfer_size) =
+        if (tmp1 == DataFormat::Data24b as u32) || (tmp1 == DataFormat::Data32b as u32) {
+            (size << 1, size << 1) // Double the size for 24/32-bit formats
+        } else {
+            (size, size) // Normal size for 16-bit formats
+        };
 
     let mut tx_xfer_count = tx_xfer_size;
     let mut rx_xfer_count = rx_xfer_size;
@@ -715,7 +639,7 @@ pub fn hal_i2sex_transmit_receive(
     };
 
     // Check if the I2S_MODE_MASTER_TX or I2S_MODE_SLAVE_TX Mode is selected
-    if (i2s_mode == I2sMode::MasterTx as u32) || (i2s_mode == I2sMode::SlaveTx as u32) {
+    if (i2s_mode == Mode::MasterTx as u32) || (i2s_mode == Mode::SlaveTx as u32) {
         // Prepare the First Data before enabling the I2S
         unsafe {
             ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, *tx_data_ptr);
@@ -739,7 +663,7 @@ pub fn hal_i2sex_transmit_receive(
         }
 
         // Clear the Overrun Flag if in master TX mode
-        if i2s_mode == I2sMode::MasterTx as u32 {
+        if i2s_mode == Mode::MasterTx as u32 {
             // Clear overrun flag by reading DR then SR of extended instance
             unsafe {
                 let _dummy = ptr::read_volatile((ext_instance + 0x0C) as *const u32);
@@ -774,7 +698,7 @@ pub fn hal_i2sex_transmit_receive(
                 tx_xfer_count -= 1;
 
                 // Check if an underrun occurs (only for slave TX mode)
-                if i2s_mode == I2sMode::SlaveTx as u32 {
+                if i2s_mode == Mode::SlaveTx as u32 {
                     let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
                     if (sr & I2S_FLAG_UDR) != 0 {
                         // Clear Underrun flag
@@ -849,7 +773,7 @@ pub fn hal_i2sex_transmit_receive(
         }
 
         // Clear the Overrun Flag if in master RX mode
-        if i2s_mode == I2sMode::MasterRx as u32 {
+        if i2s_mode == Mode::MasterRx as u32 {
             // Clear overrun flag by reading DR then SR of main instance
             unsafe {
                 let _dummy = ptr::read_volatile((hi2s.instance + 0x0C) as *const u32);
@@ -884,7 +808,7 @@ pub fn hal_i2sex_transmit_receive(
                 tx_xfer_count -= 1;
 
                 // Check if an underrun occurs on extended instance (only for slave RX mode)
-                if i2s_mode == I2sMode::SlaveRx as u32 {
+                if i2s_mode == Mode::SlaveRx as u32 {
                     let sr_ext = unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
                     if (sr_ext & I2S_FLAG_UDR) != 0 {
                         // Clear Underrun flag

@@ -3,7 +3,6 @@
 use embassy_stm32::i2c::I2c;
 use embassy_stm32::i2c::Master;
 use embassy_stm32::mode::Blocking;
-use embassy_time::Timer;
 
 type I2C = I2c<'static, Blocking, Master>;
 const I2C_ADDR: u8 = 0x1a;
@@ -68,8 +67,8 @@ impl AudioControl {
             r.set(LeftInputAnalogMute(false));
 
             // Set volumes
-            r.set(Linput2Boost(0b101)); // 0dB
-            r.set(LeftBoostGain(0b10)); // 20dB
+            r.set(Linput2Boost(0b000)); // -12dB
+            r.set(LeftBoostGain(0b00)); // 0dB
             r.set(InputPgaVolumeUpdate(true));
             r.set(LeftPgaVolume(0b01_0111)); // 0dB
         });
