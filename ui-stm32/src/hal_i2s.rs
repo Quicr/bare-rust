@@ -1,141 +1,78 @@
-//! # STM32F4xx HAL I2S Driver
-//!
-//! This module provides a direct Rust translation of the STM32F4xx HAL I2S driver,
-//! based on `stm32f4xx_hal_i2s.c` and `stm32f4xx_hal_i2s_ex.c` from ST's official HAL library.
-//!
-//! ## Features
-//!
-//! - **Full Duplex I2S**: Support for simultaneous transmit and receive using dual instances
-//! - **Extended Instance Support**: I2S2ext/I2S3ext peripheral support for STM32F4 series
-//! - **Multiple Standards**: Philips, MSB, LSB, and PCM standards
-//! - **Flexible Data Formats**: 16-bit, 24-bit, and 32-bit data formats
-//! - **Audio Frequencies**: Support for common audio sample rates (8kHz to 192kHz)
-//! - **Memory Safety**: Rust-safe implementation with controlled unsafe blocks
-//!
-//! ## Architecture
-//!
-//! The STM32F4 I2S implementation uses a dual-instance approach for full duplex operation:
-//! - **Main Instance** (SPI2/SPI3): Handles TX operations and clock generation
-//! - **Extended Instance** (I2S2ext/I2S3ext): Handles RX operations in full duplex mode
-//!
-//! ## Basic Usage
-//!
-//! ```rust,no_run
-//! # use crate::hal_i2s::*;
-//! // Initialize I2S handle for SPI3
-//! let mut i2s = I2sHandle::new_spi3();
-//!
-//! // Configure I2S parameters
-//! i2s.init.mode = I2S_MODE_SLAVE_TX;
-//! i2s.init.standard = I2S_STANDARD_PHILIPS;
-//! i2s.init.data_format = I2S_DATAFORMAT_16B;
-//! i2s.init.audio_freq = 48_000;
-//! i2s.init.full_duplex_mode = I2S_FULLDUPLEXMODE_ENABLE;
-//!
-//! // Initialize the I2S peripheral
-//! if hal_i2s_init(&mut i2s) == HalStatus::Ok {
-//!     // I2S is ready for use
-//! }
-//! ```
-//!
-//! ## Full Duplex Example
-//!
-//! ```rust,no_run
-//! # use crate::hal_i2s::*;
-//! # let mut i2s = I2sHandle::new_spi3();
-//! # hal_i2s_init(&mut i2s);
-//! // Transmit and receive simultaneously
-//! let tx_data = [0x1234u16; 100];
-//! let mut rx_data = [0u16; 100];
-//!
-//! match hal_i2s_transmit_receive(&mut i2s, &tx_data, &mut rx_data, 1000) {
-//!     HalStatus::Ok => {
-//!         // Full duplex transfer completed successfully
-//!     }
-//!     HalStatus::Timeout => {
-//!         // Transfer timed out
-//!     }
-//!     _ => {
-//!         // Handle other errors
-//!     }
-//! }
-//! ```
-//!
-//! ## Memory Mapping
-//!
-//! The driver uses direct memory access to STM32F4 registers:
-//! - **SPI2**: `0x40003800` (I2S2ext: `0x40003400`)
-//! - **SPI3**: `0x40003C00` (I2S3ext: `0x40004000`)
-//!
-//! ## Safety
-//!
-//! This module uses unsafe code for direct register access. All unsafe operations are
-//! contained within well-defined functions and are safe when used correctly with proper
-//! hardware initialization.
 use core::ptr;
 use defmt::Format;
+use embassy_stm32::pac::spi::Spi;
+use num_enum::IntoPrimitive;
 
-pub const I2S_MODE_SLAVE_TX: u32 = 0x00000000;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
+pub enum I2sMode {
+    SlaveTx = 0x00000000,
+    SlaveRx = 0x00000100,
+    MasterTx = 0x00000200,
+    MasterRx = 0x00000300,
+}
 
-pub const I2S_MODE_SLAVE_RX: u32 = 0x00000100;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
+pub enum I2sStandard {
+    Philips = 0x00000000,
+    Msb = 0x00000010,
+    Lsb = 0x00000020,
+    PcmShort = 0x00000030,
+    PcmLong = 0x000000B0,
+}
 
-pub const I2S_MODE_MASTER_TX: u32 = 0x00000200;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
+pub enum I2sDataFormat {
+    Data16b = 0x00000000,
+    Data16bExtended = 0x00000001,
+    Data24b = 0x00000003,
+    Data32b = 0x00000005,
+}
 
-pub const I2S_MODE_MASTER_RX: u32 = 0x00000300;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
+pub enum I2sMclkOutput {
+    Disable = 0x00000000,
+    Enable = 0x00000200,
+}
 
-pub const I2S_STANDARD_PHILIPS: u32 = 0x00000000;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
+pub enum I2sAudioFreq {
+    Hz192k = 192000,
+    Hz96k = 96000,
+    Hz48k = 48000,
+    Hz44k = 44100,
+    Hz32k = 32000,
+    Hz22k = 22050,
+    Hz16k = 16000,
+    Hz11k = 11025,
+    Hz8k = 8000,
+    Default = 2,
+}
 
-pub const I2S_STANDARD_MSB: u32 = 0x00000010;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
+pub enum I2sCpol {
+    Low = 0x00000000,
+    High = 0x00000008,
+}
 
-pub const I2S_STANDARD_LSB: u32 = 0x00000020;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
+pub enum I2sClockSource {
+    Plli2s = 0x00000000,
+    Ext = 0x00000001,
+}
 
-pub const I2S_STANDARD_PCM_SHORT: u32 = 0x00000030;
-
-pub const I2S_STANDARD_PCM_LONG: u32 = 0x000000B0;
-
-pub const I2S_DATAFORMAT_16B: u32 = 0x00000000;
-
-pub const I2S_DATAFORMAT_16B_EXTENDED: u32 = 0x00000001;
-
-pub const I2S_DATAFORMAT_24B: u32 = 0x00000003;
-
-pub const I2S_DATAFORMAT_32B: u32 = 0x00000005;
-
-pub const I2S_MCLKOUTPUT_ENABLE: u32 = 0x00000200;
-
-pub const I2S_MCLKOUTPUT_DISABLE: u32 = 0x00000000;
-
-pub const I2S_AUDIOFREQ_192K: u32 = 192000;
-
-pub const I2S_AUDIOFREQ_96K: u32 = 96000;
-
-pub const I2S_AUDIOFREQ_48K: u32 = 48000;
-
-pub const I2S_AUDIOFREQ_44K: u32 = 44100;
-
-pub const I2S_AUDIOFREQ_32K: u32 = 32000;
-
-pub const I2S_AUDIOFREQ_22K: u32 = 22050;
-
-pub const I2S_AUDIOFREQ_16K: u32 = 16000;
-
-pub const I2S_AUDIOFREQ_11K: u32 = 11025;
-
-pub const I2S_AUDIOFREQ_8K: u32 = 8000;
-
-pub const I2S_AUDIOFREQ_DEFAULT: u32 = 2;
-
-pub const I2S_CPOL_LOW: u32 = 0x00000000;
-
-pub const I2S_CPOL_HIGH: u32 = 0x00000008;
-
-pub const I2S_CLOCKSOURCE_PLLI2S: u32 = 0x00000000;
-
-pub const I2S_CLOCKSOURCE_EXT: u32 = 0x00000001;
-
-pub const I2S_FULLDUPLEXMODE_DISABLE: u32 = 0x00000000;
-
-pub const I2S_FULLDUPLEXMODE_ENABLE: u32 = 0x00000001;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
+pub enum I2sFullDuplexMode {
+    Disable = 0x00000000,
+    Enable = 0x00000001,
+}
 
 #[derive(Format, Debug, Clone, Copy, PartialEq)]
 pub enum HalStatus {
@@ -189,34 +126,27 @@ pub const HAL_I2S_ERROR_PRESCALER: u32 = 0x00000020;
 
 #[derive(Debug, Clone, Copy)]
 pub struct I2sInit {
-    pub mode: u32,
-
-    pub standard: u32,
-
-    pub data_format: u32,
-
-    pub mclk_output: u32,
-
-    pub audio_freq: u32,
-
-    pub cpol: u32,
-
-    pub clock_source: u32,
-
-    pub full_duplex_mode: u32,
+    pub mode: I2sMode,
+    pub standard: I2sStandard,
+    pub data_format: I2sDataFormat,
+    pub mclk_output: I2sMclkOutput,
+    pub audio_freq: I2sAudioFreq,
+    pub cpol: I2sCpol,
+    pub clock_source: I2sClockSource,
+    pub full_duplex_mode: I2sFullDuplexMode,
 }
 
 impl Default for I2sInit {
     fn default() -> Self {
         Self {
-            mode: I2S_MODE_SLAVE_TX,
-            standard: I2S_STANDARD_PHILIPS,
-            data_format: I2S_DATAFORMAT_16B,
-            mclk_output: I2S_MCLKOUTPUT_DISABLE,
-            audio_freq: I2S_AUDIOFREQ_DEFAULT,
-            cpol: I2S_CPOL_LOW,
-            clock_source: I2S_CLOCKSOURCE_PLLI2S,
-            full_duplex_mode: I2S_FULLDUPLEXMODE_DISABLE,
+            mode: I2sMode::SlaveTx,
+            standard: I2sStandard::Philips,
+            data_format: I2sDataFormat::Data16b,
+            mclk_output: I2sMclkOutput::Disable,
+            audio_freq: I2sAudioFreq::Default,
+            cpol: I2sCpol::Low,
+            clock_source: I2sClockSource::Plli2s,
+            full_duplex_mode: I2sFullDuplexMode::Disable,
         }
     }
 }
@@ -229,25 +159,17 @@ pub const I2S3EXT_BASE: u32 = 0x40004000;
 
 pub struct I2sHandle {
     pub instance: u32,
-
+    pub regs: Spi,
+    pub regs_ext: Spi,
     pub init: I2sInit,
-
     pub tx_buff_ptr: *mut u16,
-
     pub tx_xfer_size: u16,
-
     pub tx_xfer_count: u16,
-
     pub rx_buff_ptr: *mut u16,
-
     pub rx_xfer_size: u16,
-
     pub rx_xfer_count: u16,
-
     pub lock: HalLock,
-
     pub state: HalI2sState,
-
     pub error_code: u32,
 }
 
@@ -255,6 +177,8 @@ impl I2sHandle {
     pub fn new(instance: u32) -> Self {
         Self {
             instance,
+            regs: unsafe { Spi::from_ptr(instance as *mut ()) },
+            regs_ext: unsafe { Spi::from_ptr(i2s_ext_instance(instance) as *mut ()) },
             init: I2sInit::default(),
             tx_buff_ptr: ptr::null_mut(),
             tx_xfer_size: 0,
@@ -335,19 +259,6 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
     let mut tmp: u32;
     let i2sclk: u32;
 
-    // Check the I2S parameters (simplified - assuming all parameters are valid)
-    if !is_i2s_mode(handle.init.mode)
-        || !is_i2s_standard(handle.init.standard)
-        || !is_i2s_data_format(handle.init.data_format)
-        || !is_i2s_mclk_output(handle.init.mclk_output)
-        || !is_i2s_audio_freq(handle.init.audio_freq)
-        || !is_i2s_cpol(handle.init.cpol)
-        || !is_i2s_clock_source(handle.init.clock_source)
-        || !is_i2s_full_duplex_mode(handle.init.full_duplex_mode)
-    {
-        return HalStatus::Error;
-    }
-
     if handle.state == HalI2sState::Reset {
         // Allocate lock resource and initialize it
         handle.lock = HalLock::Unlocked;
@@ -378,9 +289,9 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
 
     // I2SPR: I2SDIV and ODD Calculation
     // If the requested audio frequency is not the default, compute the prescaler
-    if handle.init.audio_freq != I2S_AUDIOFREQ_DEFAULT {
+    if handle.init.audio_freq != I2sAudioFreq::Default {
         // Check the frame length (For the Prescaler computing)
-        if handle.init.data_format == I2S_DATAFORMAT_16B {
+        if handle.init.data_format == I2sDataFormat::Data16b {
             // Packet length is 16 bits
             packetlength = 16;
         } else {
@@ -389,21 +300,23 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
         }
 
         // I2S standard
-        if handle.init.standard <= I2S_STANDARD_LSB {
+        if handle.init.standard as u32 <= I2sStandard::Lsb as u32 {
             // In I2S standard packet length is multiplied by 2
             packetlength = packetlength * 2;
         }
 
         // Get the source clock value (simplified - use PLLI2S)
-        i2sclk = get_i2s_clock_freq(handle.init.clock_source);
+        i2sclk = get_i2s_clock_freq(handle.init.clock_source.into());
 
         // Compute the Real divider depending on the MCLK output state, with a floating point
-        if handle.init.mclk_output == I2S_MCLKOUTPUT_ENABLE {
+        if handle.init.mclk_output == I2sMclkOutput::Enable {
             // MCLK output is enabled
-            tmp = (((i2sclk / 256) * 10) / handle.init.audio_freq) + 5;
+            let audio_freq: u32 = handle.init.audio_freq.into();
+            tmp = (((i2sclk / 256) * 10) / audio_freq) + 5;
         } else {
             // MCLK output is disabled
-            tmp = (((i2sclk / packetlength) * 10) / handle.init.audio_freq) + 5;
+            let audio_freq: u32 = handle.init.audio_freq.into();
+            tmp = (((i2sclk / packetlength) * 10) / audio_freq) + 5;
         }
 
         // Remove the flatting point
@@ -433,7 +346,8 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
     // Write to SPIx I2SPR register the computed value
     unsafe {
         let i2spr_ptr = (handle.instance + 0x20) as *mut u32;
-        ptr::write_volatile(i2spr_ptr, i2sdiv | i2sodd | handle.init.mclk_output);
+        let mclk_output: u32 = handle.init.mclk_output.into();
+        ptr::write_volatile(i2spr_ptr, i2sdiv | i2sodd | mclk_output);
     }
 
     // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits
@@ -453,31 +367,20 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
             | SPI_I2SCFGR_I2SMOD);
 
         // Set new configuration
-        i2scfgr |= SPI_I2SCFGR_I2SMOD
-            | handle.init.mode
-            | handle.init.standard
-            | handle.init.data_format
-            | handle.init.cpol;
+        let mode: u32 = handle.init.mode.into();
+        let standard: u32 = handle.init.standard.into();
+        let data_format: u32 = handle.init.data_format.into();
+        let cpol: u32 = handle.init.cpol.into();
+        i2scfgr |= SPI_I2SCFGR_I2SMOD | mode | standard | data_format | cpol;
 
         ptr::write_volatile(i2scfgr_ptr, i2scfgr);
     }
 
     // Configure the I2S extended if the full duplex mode is enabled
-    if handle.init.full_duplex_mode == I2S_FULLDUPLEXMODE_ENABLE {
-        // EXT INIT HERE
-
-        // Determine extended instance address
-        let ext_instance = if handle.instance == 0x40003C00 {
-            0x40004000 // I2S3ext
-        } else if handle.instance == 0x40003800 {
-            0x40003400 // I2S2ext
-        } else {
-            handle.error_code = HAL_I2S_ERROR_PRESCALER;
-            return HalStatus::Error;
-        };
-
+    if handle.init.full_duplex_mode == I2sFullDuplexMode::Enable {
         // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits for extended instance
         unsafe {
+            let ext_instance = i2s_ext_instance(handle.instance);
             let ext_i2scfgr_ptr = (ext_instance + 0x1C) as *mut u32;
             let mut ext_i2scfgr = ptr::read_volatile(ext_i2scfgr_ptr);
             ext_i2scfgr &= !(SPI_I2SCFGR_CHLEN
@@ -496,23 +399,26 @@ pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
         }
 
         // Get the mode to be configured for the extended I2S
-        if (handle.init.mode == I2S_MODE_MASTER_TX) || (handle.init.mode == I2S_MODE_SLAVE_TX) {
-            tmp = I2S_MODE_SLAVE_RX;
+        let ext_mode = if (handle.init.mode == I2sMode::MasterTx)
+            || (handle.init.mode == I2sMode::SlaveTx)
+        {
+            I2sMode::SlaveRx
         } else {
             // I2S_MODE_MASTER_RX || I2S_MODE_SLAVE_RX
-            tmp = I2S_MODE_SLAVE_TX;
-        }
+            I2sMode::SlaveTx
+        };
 
         // Configure the I2S Slave with the I2S Master parameter values
         unsafe {
+            let ext_instance = i2s_ext_instance(handle.instance);
             let ext_i2scfgr_ptr = (ext_instance + 0x1C) as *mut u32;
             let mut ext_i2scfgr = ptr::read_volatile(ext_i2scfgr_ptr);
 
-            ext_i2scfgr |= SPI_I2SCFGR_I2SMOD
-                | tmp
-                | handle.init.standard
-                | handle.init.data_format
-                | handle.init.cpol;
+            let ext_mode_val: u32 = ext_mode.into();
+            let standard: u32 = handle.init.standard.into();
+            let data_format: u32 = handle.init.data_format.into();
+            let cpol: u32 = handle.init.cpol.into();
+            ext_i2scfgr |= SPI_I2SCFGR_I2SMOD | ext_mode_val | standard | data_format | cpol;
 
             ptr::write_volatile(ext_i2scfgr_ptr, ext_i2scfgr);
         }
@@ -551,62 +457,13 @@ fn get_i2s_clock_freq(_clock_source: u32) -> u32 {
 
 // Parameter validation functions
 
-fn is_i2s_mode(mode: u32) -> bool {
-    matches!(
-        mode,
-        I2S_MODE_SLAVE_TX | I2S_MODE_SLAVE_RX | I2S_MODE_MASTER_TX | I2S_MODE_MASTER_RX
-    )
-}
 
-fn is_i2s_standard(standard: u32) -> bool {
-    matches!(
-        standard,
-        I2S_STANDARD_PHILIPS
-            | I2S_STANDARD_MSB
-            | I2S_STANDARD_LSB
-            | I2S_STANDARD_PCM_SHORT
-            | I2S_STANDARD_PCM_LONG
-    )
-}
 
-fn is_i2s_data_format(format: u32) -> bool {
-    matches!(
-        format,
-        I2S_DATAFORMAT_16B | I2S_DATAFORMAT_16B_EXTENDED | I2S_DATAFORMAT_24B | I2S_DATAFORMAT_32B
-    )
-}
 
-fn is_i2s_mclk_output(mclk: u32) -> bool {
-    matches!(mclk, I2S_MCLKOUTPUT_ENABLE | I2S_MCLKOUTPUT_DISABLE)
-}
 
-fn is_i2s_audio_freq(freq: u32) -> bool {
-    matches!(
-        freq,
-        I2S_AUDIOFREQ_192K
-            | I2S_AUDIOFREQ_96K
-            | I2S_AUDIOFREQ_48K
-            | I2S_AUDIOFREQ_44K
-            | I2S_AUDIOFREQ_32K
-            | I2S_AUDIOFREQ_22K
-            | I2S_AUDIOFREQ_16K
-            | I2S_AUDIOFREQ_11K
-            | I2S_AUDIOFREQ_8K
-            | I2S_AUDIOFREQ_DEFAULT
-    ) || (freq >= 8000 && freq <= 192000)
-}
 
-fn is_i2s_cpol(cpol: u32) -> bool {
-    matches!(cpol, I2S_CPOL_LOW | I2S_CPOL_HIGH)
-}
 
-fn is_i2s_clock_source(source: u32) -> bool {
-    matches!(source, I2S_CLOCKSOURCE_PLLI2S | I2S_CLOCKSOURCE_EXT)
-}
 
-fn is_i2s_full_duplex_mode(mode: u32) -> bool {
-    matches!(mode, I2S_FULLDUPLEXMODE_DISABLE | I2S_FULLDUPLEXMODE_ENABLE)
-}
 
 // Flag definitions
 pub const I2S_FLAG_TXE: u32 = 0x00000002;
@@ -825,12 +682,13 @@ pub fn hal_i2sex_transmit_receive(
     let i2scfgr = unsafe { ptr::read_volatile((hi2s.instance + 0x1C) as *const u32) };
     let tmp1 = i2scfgr & (SPI_I2SCFGR_DATLEN | SPI_I2SCFGR_CHLEN);
 
-    let (tx_xfer_size, rx_xfer_size) =
-        if (tmp1 == I2S_DATAFORMAT_24B) || (tmp1 == I2S_DATAFORMAT_32B) {
-            (size << 1, size << 1) // Double the size for 24/32-bit formats
-        } else {
-            (size, size) // Normal size for 16-bit formats
-        };
+    let (tx_xfer_size, rx_xfer_size) = if (tmp1 == I2sDataFormat::Data24b as u32)
+        || (tmp1 == I2sDataFormat::Data32b as u32)
+    {
+        (size << 1, size << 1) // Double the size for 24/32-bit formats
+    } else {
+        (size, size) // Normal size for 16-bit formats
+    };
 
     let mut tx_xfer_count = tx_xfer_size;
     let mut rx_xfer_count = rx_xfer_size;
@@ -857,7 +715,7 @@ pub fn hal_i2sex_transmit_receive(
     };
 
     // Check if the I2S_MODE_MASTER_TX or I2S_MODE_SLAVE_TX Mode is selected
-    if (i2s_mode == I2S_MODE_MASTER_TX) || (i2s_mode == I2S_MODE_SLAVE_TX) {
+    if (i2s_mode == I2sMode::MasterTx as u32) || (i2s_mode == I2sMode::SlaveTx as u32) {
         // Prepare the First Data before enabling the I2S
         unsafe {
             ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, *tx_data_ptr);
@@ -881,7 +739,7 @@ pub fn hal_i2sex_transmit_receive(
         }
 
         // Clear the Overrun Flag if in master TX mode
-        if i2s_mode == I2S_MODE_MASTER_TX {
+        if i2s_mode == I2sMode::MasterTx as u32 {
             // Clear overrun flag by reading DR then SR of extended instance
             unsafe {
                 let _dummy = ptr::read_volatile((ext_instance + 0x0C) as *const u32);
@@ -916,7 +774,7 @@ pub fn hal_i2sex_transmit_receive(
                 tx_xfer_count -= 1;
 
                 // Check if an underrun occurs (only for slave TX mode)
-                if i2s_mode == I2S_MODE_SLAVE_TX {
+                if i2s_mode == I2sMode::SlaveTx as u32 {
                     let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
                     if (sr & I2S_FLAG_UDR) != 0 {
                         // Clear Underrun flag
@@ -991,7 +849,7 @@ pub fn hal_i2sex_transmit_receive(
         }
 
         // Clear the Overrun Flag if in master RX mode
-        if i2s_mode == I2S_MODE_MASTER_RX {
+        if i2s_mode == I2sMode::MasterRx as u32 {
             // Clear overrun flag by reading DR then SR of main instance
             unsafe {
                 let _dummy = ptr::read_volatile((hi2s.instance + 0x0C) as *const u32);
@@ -1026,7 +884,7 @@ pub fn hal_i2sex_transmit_receive(
                 tx_xfer_count -= 1;
 
                 // Check if an underrun occurs on extended instance (only for slave RX mode)
-                if i2s_mode == I2S_MODE_SLAVE_RX {
+                if i2s_mode == I2sMode::SlaveRx as u32 {
                     let sr_ext = unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
                     if (sr_ext & I2S_FLAG_UDR) != 0 {
                         // Clear Underrun flag
