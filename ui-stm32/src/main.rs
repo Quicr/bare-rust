@@ -208,7 +208,7 @@ async fn main(_spawner: Spawner) {
     hal_init_tick(168_000_000);
 
     // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
-    hal_i2s_msp_init();
+    hal_i2s_msp_init_embassy();
 
     // MX_I2S3_Init() - Configure I2S3 parameters
     let mut i2s = I2sHandle::new_spi3();
