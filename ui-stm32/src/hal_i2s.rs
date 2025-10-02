@@ -1,5 +1,6 @@
 use core::ptr;
-use defmt::Format;
+use defmt::Format as DefmtFormat;
+use embassy_stm32::i2s::Format;
 use embassy_stm32::pac::spi::{vals::*, Spi};
 use num_enum::IntoPrimitive;
 
@@ -22,16 +23,6 @@ pub enum Standard {
     PcmLong = 0x000000B0,
 }
 
-// XXX These get converted to DATLEN values, but they look like they don't correspond to the
-// metapac values: https://docs.embassy.dev/stm32-metapac/git/stm32f405rg/spi/vals/enum.Datlen.html
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum DataFormat {
-    Data16b = 0x00000000,
-    Data16bExtended = 0x00000001,
-    Data24b = 0x00000003,
-    Data32b = 0x00000005,
-}
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
@@ -76,7 +67,7 @@ pub enum FullDuplexMode {
     Enable = 0x00000001,
 }
 
-#[derive(Format, Debug, Clone, Copy, PartialEq)]
+#[derive(DefmtFormat, Debug, Clone, Copy, PartialEq)]
 pub enum Error {
     Busy,
     Timeout,
@@ -99,11 +90,11 @@ enum State {
     BusyTxRx,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Config {
     pub mode: Mode,
     pub standard: Standard,
-    pub data_format: DataFormat,
+    pub data_format: Format,
     pub mclk_output: MclkOutput,
     pub audio_freq: AudioFreq,
     pub cpol: Cpol,
@@ -116,7 +107,7 @@ impl Default for Config {
         Self {
             mode: Mode::SlaveTx,
             standard: Standard::Philips,
-            data_format: DataFormat::Data16b,
+            data_format: Format::Data16Channel16,
             mclk_output: MclkOutput::Disable,
             audio_freq: AudioFreq::Default,
             cpol: Cpol::Low,
@@ -169,13 +160,12 @@ impl I2sHandle {
         // If the requested audio frequency is not the default, compute the prescaler
         if config.audio_freq != AudioFreq::Default {
             // Check the frame length (For the Prescaler computing)
-            if config.data_format == DataFormat::Data16b {
-                // Packet length is 16 bits
-                packetlength = 16;
-            } else {
-                // Packet length is 32 bits
-                packetlength = 32;
-            }
+            packetlength = match config.data_format {
+                Format::Data16Channel16 => 16,
+                Format::Data16Channel32 => 32,
+                Format::Data24Channel32 => 32,
+                Format::Data32Channel32 => 32,
+            };
 
             // I2S standard
             if matches!(
@@ -236,7 +226,12 @@ impl I2sHandle {
             // TODO use semantic modifiers
             let mode: u32 = config.mode.into();
             let standard: u32 = config.standard.into();
-            let data_format: u32 = config.data_format.into();
+            let data_format: u32 = match config.data_format {
+                Format::Data16Channel16 => 0x0000,
+                Format::Data16Channel32 => 0x0001,
+                Format::Data24Channel32 => 0x0003,
+                Format::Data32Channel32 => 0x0005,
+            };
             let cpol: u32 = config.cpol.into();
             w.0 = mode | standard | data_format | cpol;
             w.set_i2smod(true);
@@ -255,7 +250,12 @@ impl I2sHandle {
                 // TODO use semantic modifiers
                 let mode: u32 = ext_mode.into();
                 let standard: u32 = config.standard.into();
-                let data_format: u32 = config.data_format.into();
+                let data_format: u32 = match config.data_format {
+                    Format::Data16Channel16 => 0x0000,
+                    Format::Data16Channel32 => 0x0001,
+                    Format::Data24Channel32 => 0x0003,
+                    Format::Data32Channel32 => 0x0005,
+                };
                 let cpol: u32 = config.cpol.into();
                 w.0 = mode | standard | data_format | cpol;
                 w.set_i2smod(true);

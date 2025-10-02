@@ -209,12 +209,13 @@ async fn main(_spawner: Spawner) {
 
     // MX_I2S3_Init() - Configure I2S3 parameters
     let config = {
+        use embassy_stm32::i2s::Format;
         use hal_i2s::Config;
 
         let mut config = Config::default();
         config.mode = Mode::SlaveTx;
         config.standard = Standard::Philips;
-        config.data_format = DataFormat::Data16bExtended;
+        config.data_format = Format::Data16Channel32;
         config.mclk_output = MclkOutput::Disable;
         config.audio_freq = AudioFreq::Hz8k;
         config.cpol = Cpol::Low;
