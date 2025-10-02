@@ -212,7 +212,7 @@ async fn main(_spawner: Spawner) {
     audio_control.init().await;
 
     // MX_I2S3_Init() - Configure I2S3 parameters
-    let mut config = {
+    let config = {
         use hal_i2s::Config;
 
         let mut config = Config::default();
@@ -228,10 +228,7 @@ async fn main(_spawner: Spawner) {
     };
 
     let mut i2s = I2sHandle::new_spi3();
-    let rv = hal_i2s_init(&mut i2s, config);
-    if rv != HalStatus::Ok {
-        defmt::panic!("Failed to initialize I2S: {}", rv);
-    }
+    i2s.init(config).expect("Failed to initialize I2S");
 
     trace!("Ready to roll 😎");
 
@@ -244,20 +241,14 @@ async fn main(_spawner: Spawner) {
     let square_frame: [u16; 16_000] = core::array::from_fn(|i| square_wave[i % square_wave.len()]);
 
     trace!("before tx");
-    let rv = hal_i2s_transmit(&mut i2s, &square_frame, 100);
-    if rv != HalStatus::Ok {
-        defmt::panic!("Failed to transmit: {} {}", rv, i2s.error_code);
-    }
+    i2s.transmit(&square_frame, 100).expect("Failed to transmit");
     trace!("after tx");
 
     trace!("before txrx");
     let mut last_frame = [0; 16_000];
     let mut curr_frame = [0; 16_000];
     loop {
-        let rv = hal_i2sex_transmit_receive(&mut i2s, &last_frame, &mut curr_frame, 100);
-        if rv != HalStatus::Ok {
-            defmt::panic!("Failed to transmit: {} {}", rv, i2s.error_code);
-        }
+        i2s.transmit_receive(&last_frame, &mut curr_frame, 100).expect("Failed to transmit/receive");
 
         // XXX(RLB): When I try to remove this line, things stop working.  The headset plays loud
         // noise.  Presumably there needs to be some delay here, but why?
