@@ -216,7 +216,7 @@ async fn main(_spawner: Spawner) {
         config.mode = Mode::SlaveTx;
         config.standard = Standard::Philips;
         config.data_format = Format::Data16Channel32;
-        config.mclk_output = MclkOutput::Disable;
+        config.master_clock = false;
         config.audio_freq = AudioFreq::Hz8k;
         config.cpol = Cpol::Low;
         config.clock_source = ClockSource::Plli2s;

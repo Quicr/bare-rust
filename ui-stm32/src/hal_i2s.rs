@@ -23,14 +23,6 @@ pub enum Standard {
     PcmLong = 0x000000B0,
 }
 
-
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum MclkOutput {
-    Disable = 0x00000000,
-    Enable = 0x00000200,
-}
-
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
 pub enum AudioFreq {
@@ -95,7 +87,7 @@ pub struct Config {
     pub mode: Mode,
     pub standard: Standard,
     pub data_format: Format,
-    pub mclk_output: MclkOutput,
+    pub master_clock: bool,
     pub audio_freq: AudioFreq,
     pub cpol: Cpol,
     pub clock_source: ClockSource,
@@ -108,7 +100,7 @@ impl Default for Config {
             mode: Mode::SlaveTx,
             standard: Standard::Philips,
             data_format: Format::Data16Channel16,
-            mclk_output: MclkOutput::Disable,
+            master_clock: false,
             audio_freq: AudioFreq::Default,
             cpol: Cpol::Low,
             clock_source: ClockSource::Plli2s,
@@ -181,7 +173,7 @@ impl I2sHandle {
             let i2sclk = 50_000_000;
 
             // Compute the Real divider depending on the MCLK output state, with a floating point
-            let mut tmp = if config.mclk_output == MclkOutput::Enable {
+            let mut tmp = if config.master_clock {
                 // MCLK output is enabled
                 let audio_freq: u32 = config.audio_freq.into();
                 (((i2sclk / 256) * 10) / audio_freq) + 5
@@ -214,10 +206,10 @@ impl I2sHandle {
         }
 
         // Write to SPIx I2SPR register the computed value
-        let mclk_output: u32 = config.mclk_output.into();
         self.regs.i2spr().modify(|w| {
             // TODO use semantic modifiers
-            w.0 = i2sdiv | i2sodd | mclk_output;
+            w.0 = i2sdiv | i2sodd;
+            w.set_mckoe(config.master_clock);
         });
 
         // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits
