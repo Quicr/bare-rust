@@ -206,7 +206,7 @@ async fn main(_spawner: Spawner) {
     };
     let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, config);
     let mut audio_control = AudioControl::new(i2c);
-    audio_control.init().await;
+    audio_control.init();
 
     // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
     let _ = hal_i2s_msp_init(p.SPI3, p.PA15, p.PC10, p.PB5, p.PB4);
