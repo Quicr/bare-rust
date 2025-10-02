@@ -219,7 +219,6 @@ async fn main(_spawner: Spawner) {
         config.master_clock = false;
         config.audio_freq = AudioFreq::Hz8k;
         config.clock_polarity = ClockPolarity::IdleLow;
-        config.clock_source = ClockSource::Plli2s;
         config.full_duplex_mode = FullDuplexMode::Enable;
         config
     };

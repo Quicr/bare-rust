@@ -56,7 +56,6 @@ pub enum Mode {
     MasterRx = 0x00000300,
 }
 
-
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
 pub enum AudioFreq {
@@ -70,13 +69,6 @@ pub enum AudioFreq {
     Hz11k = 11025,
     Hz8k = 8000,
     Default = 2,
-}
-
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum ClockSource {
-    Plli2s = 0x00000000,
-    Ext = 0x00000001,
 }
 
 #[repr(u32)]
@@ -117,7 +109,6 @@ pub struct Config {
     pub master_clock: bool,
     pub audio_freq: AudioFreq,
     pub clock_polarity: ClockPolarity,
-    pub clock_source: ClockSource,
     pub full_duplex_mode: FullDuplexMode,
 }
 
@@ -130,7 +121,6 @@ impl Default for Config {
             master_clock: false,
             audio_freq: AudioFreq::Default,
             clock_polarity: ClockPolarity::IdleLow,
-            clock_source: ClockSource::Plli2s,
             full_duplex_mode: FullDuplexMode::Disable,
         }
     }
