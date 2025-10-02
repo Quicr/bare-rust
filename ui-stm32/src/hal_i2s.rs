@@ -2,6 +2,8 @@ use core::ptr;
 use defmt::Format as DefmtFormat;
 use embassy_stm32::i2s::{ClockPolarity, Format, Standard};
 use embassy_stm32::pac::spi::{vals::*, Spi};
+use embassy_stm32::peripherals::RCC;
+use embassy_stm32::time::Hertz;
 use num_enum::IntoPrimitive;
 
 // These mapping functions are copy/pasted private methods from i2s.rs
@@ -44,6 +46,32 @@ const fn to_pcmsync(standard: Standard) -> Pcmsync {
     match standard {
         Standard::PcmLongSync => Pcmsync::LONG,
         _ => Pcmsync::SHORT,
+    }
+}
+
+fn compute_baud_rate(
+    i2s_clock: Hertz,
+    request_freq: Hertz,
+    mclk: bool,
+    format: Format,
+) -> (bool, u8) {
+    let coef = if mclk {
+        256
+    } else if let Format::Data16Channel16 = format {
+        32
+    } else {
+        64
+    };
+
+    let (n, d) = (i2s_clock.0, coef * request_freq.0);
+    let division = (n + (d >> 1)) / d;
+
+    if division < 4 {
+        (false, 2)
+    } else if division > 511 {
+        (true, 255)
+    } else {
+        ((division & 1) == 1, (division >> 1) as u8)
     }
 }
 
@@ -105,9 +133,9 @@ enum State {
 pub struct Config {
     pub mode: Mode,
     pub standard: Standard,
-    pub data_format: Format,
+    pub format: Format,
     pub master_clock: bool,
-    pub audio_freq: AudioFreq,
+    pub frequency: Hertz,
     pub clock_polarity: ClockPolarity,
     pub full_duplex_mode: FullDuplexMode,
 }
@@ -117,9 +145,9 @@ impl Default for Config {
         Self {
             mode: Mode::SlaveTx,
             standard: Standard::Philips,
-            data_format: Format::Data16Channel16,
+            format: Format::Data16Channel16,
             master_clock: false,
-            audio_freq: AudioFreq::Default,
+            frequency: Hertz(8_000),
             clock_polarity: ClockPolarity::IdleLow,
             full_duplex_mode: FullDuplexMode::Disable,
         }
@@ -154,11 +182,7 @@ impl I2sHandle {
         Self::new(SPI3, I2S3EXT)
     }
 
-    pub fn init(&mut self, config: Config) -> Result<(), Error> {
-        let i2sdiv: u32;
-        let mut i2sodd: u32;
-        let mut packetlength: u32;
-
+    pub fn init(&mut self, rcc: &Peri<RCC>, config: Config) -> Result<(), Error> {
         if self.state == State::Reset {
             // Init complete, ready to configure
         }
@@ -166,66 +190,20 @@ impl I2sHandle {
         self.state = State::BusyTx;
 
         // I2SPR: I2SDIV and ODD Calculation
-        // If the requested audio frequency is not the default, compute the prescaler
-        if config.audio_freq != AudioFreq::Default {
-            // Check the frame length (For the Prescaler computing)
-            packetlength = match config.data_format {
-                Format::Data16Channel16 => 16,
-                Format::Data16Channel32 => 32,
-                Format::Data24Channel32 => 32,
-                Format::Data32Channel32 => 32,
-            };
+        // Get the source clock value (simplified - use PLLI2S)
+        // XXX Our i2s clock is set to 50MHz.  We should pull this from RCC or something.
+        let pclk = embassy_stm32::rcc::clocks(rcc)
+            .plli2s1_r
+            .to_hertz()
+            .unwrap();
 
-            // I2S standard
-            if matches!(
-                config.standard,
-                Standard::Philips | Standard::MsbFirst | Standard::LsbFirst
-            ) {
-                // In I2S standard packet length is multiplied by 2
-                packetlength = packetlength * 2;
-            }
-
-            // Get the source clock value (simplified - use PLLI2S)
-            // XXX Our i2s clock is set to 50MHz.  We should pull this from RCC or something.
-            let i2sclk = 50_000_000;
-
-            // Compute the Real divider depending on the MCLK output state, with a floating point
-            let mut tmp = if config.master_clock {
-                // MCLK output is enabled
-                let audio_freq: u32 = config.audio_freq.into();
-                (((i2sclk / 256) * 10) / audio_freq) + 5
-            } else {
-                // MCLK output is disabled
-                let audio_freq: u32 = config.audio_freq.into();
-                (((i2sclk / packetlength) * 10) / audio_freq) + 5
-            };
-
-            // Remove the flatting point
-            tmp = tmp / 10;
-
-            // Check the parity of the divider
-            i2sodd = tmp & 0x1;
-
-            // Compute the i2sdiv prescaler
-            i2sdiv = ((tmp - i2sodd) / 2) & 0xFF;
-
-            // Get the Mask for the Odd bit (SPI_I2SPR[8]) register
-            i2sodd = i2sodd << 8;
-        } else {
-            // Set the default values
-            i2sdiv = 2;
-            i2sodd = 0;
-        }
-
-        // Test if the divider is 1 or 0 or greater than 0xFF
-        if (i2sdiv < 2) || (i2sdiv > 0xFF) {
-            return Err(Error::InvalidPrescaler);
-        }
+        let (odd, div) =
+            compute_baud_rate(pclk, config.frequency, config.master_clock, config.format);
 
         // Write to SPIx I2SPR register the computed value
         self.regs.i2spr().modify(|w| {
-            // TODO use semantic modifiers
-            w.0 = i2sdiv | i2sodd;
+            w.set_i2sdiv(div);
+            w.set_odd(if odd { Odd::ODD } else { Odd::EVEN });
             w.set_mckoe(config.master_clock);
         });
 
@@ -238,8 +216,8 @@ impl I2sHandle {
             w.set_i2smod(true);
             w.set_i2sstd(to_i2sstd(config.standard));
             w.set_pcmsync(to_pcmsync(config.standard));
-            w.set_datlen(datlen(config.data_format));
-            w.set_chlen(chlen(config.data_format));
+            w.set_datlen(datlen(config.format));
+            w.set_chlen(chlen(config.format));
             w.set_ckpol(to_ckpol(config.clock_polarity));
         });
 
@@ -259,8 +237,8 @@ impl I2sHandle {
                 w.set_i2smod(true);
                 w.set_i2sstd(to_i2sstd(config.standard));
                 w.set_pcmsync(to_pcmsync(config.standard));
-                w.set_datlen(datlen(config.data_format));
-                w.set_chlen(chlen(config.data_format));
+                w.set_datlen(datlen(config.format));
+                w.set_chlen(chlen(config.format));
                 w.set_ckpol(to_ckpol(config.clock_polarity));
             });
         }

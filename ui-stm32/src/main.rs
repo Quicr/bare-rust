@@ -206,25 +206,32 @@ async fn main(_spawner: Spawner) {
 
     // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
     let _ = hal_i2s_msp_init(p.SPI3, p.PA15, p.PC10, p.PB5, p.PB4);
+    defmt::info!(
+        "i2s clock: {}",
+        embassy_stm32::rcc::clocks(&p.RCC).plli2s1_r
+    );
 
     // MX_I2S3_Init() - Configure I2S3 parameters
     let config = {
-        use embassy_stm32::i2s::{ClockPolarity, Format, Standard};
+        use embassy_stm32::{
+            i2s::{ClockPolarity, Format, Standard},
+            time::Hertz,
+        };
         use hal_i2s::Config;
 
         let mut config = Config::default();
         config.mode = Mode::SlaveTx;
         config.standard = Standard::Philips;
-        config.data_format = Format::Data16Channel32;
+        config.format = Format::Data16Channel32;
         config.master_clock = false;
-        config.audio_freq = AudioFreq::Hz8k;
+        config.frequency = Hertz(8_000);
         config.clock_polarity = ClockPolarity::IdleLow;
         config.full_duplex_mode = FullDuplexMode::Enable;
         config
     };
 
     let mut i2s = I2sHandle::new_spi3();
-    i2s.init(config).expect("Failed to initialize I2S");
+    i2s.init(&p.RCC, config).expect("Failed to initialize I2S");
 
     let square_frame: [u16; 16_000] = core::array::from_fn(|i| {
         const LAMBDA: u16 = 18; // Generates 444hz at 8khz sample rate
