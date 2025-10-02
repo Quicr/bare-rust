@@ -186,10 +186,6 @@ async fn main(_spawner: Spawner) {
     };
     let p = embassy_stm32::init(config);
 
-    // Start the SysTick timer
-    // XXX Disabled for now
-    // hal_init_tick(168_000_000);
-
     // Do audio chip setup over I2C
     let config = {
         use embassy_stm32::{gpio::Speed, i2c::*, time::Hertz};
@@ -239,7 +235,7 @@ async fn main(_spawner: Spawner) {
     let square_frame: [u16; 16_000] = core::array::from_fn(|i| square_wave[i % square_wave.len()]);
 
     trace!("before tx");
-    i2s.transmit(&square_frame, 100)
+    i2s.transmit(&square_frame, Some(100))
         .expect("Failed to transmit");
     trace!("after tx");
 
@@ -247,7 +243,7 @@ async fn main(_spawner: Spawner) {
     let mut last_frame = [0; 16_000];
     let mut curr_frame = [0; 16_000];
     loop {
-        i2s.transmit_receive(&last_frame, &mut curr_frame, 100)
+        i2s.transmit_receive(&last_frame, &mut curr_frame, Some(100))
             .expect("Failed to transmit/receive");
 
         last_frame.copy_from_slice(&curr_frame);

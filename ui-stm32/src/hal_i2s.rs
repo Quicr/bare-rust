@@ -267,7 +267,7 @@ impl I2sHandle {
         Ok(())
     }
 
-    pub fn transmit(&mut self, p_data: &[u16], timeout: u32) -> Result<(), Error> {
+    pub fn transmit(&mut self, p_data: &[u16], timeout: Option<u32>) -> Result<(), Error> {
         if self.state != State::Ready {
             return Err(Error::Busy);
         }
@@ -313,7 +313,7 @@ impl I2sHandle {
         &mut self,
         p_tx_data: &[u16],
         p_rx_data: &mut [u16],
-        timeout: u32,
+        timeout: Option<u32>,
     ) -> Result<TransferErrors, Error> {
         let max_size = p_tx_data.len().max(p_rx_data.len());
         let mut errors = TransferErrors::default();
@@ -495,49 +495,20 @@ impl I2sHandle {
     }
 }
 
-// Additional constants needed
-const HAL_MAX_DELAY: u32 = 0xFFFFFFFF;
-
-// Global tick counter (would typically be in BSS section)
-static mut UWTICK: u32 = 0;
-
-pub fn hal_init_tick(hclk_frequency: u32) {
-    // SysTick register addresses for STM32F4
-    const SYST_CSR: u32 = 0xE000E010; // SysTick Control and Status Register
-    const SYST_RVR: u32 = 0xE000E014; // SysTick Reload Value Register
-    const SYST_CVR: u32 = 0xE000E018; // SysTick Current Value Register
-
-    // Configure SysTick to generate interrupt every 1ms
-    let reload_value = (hclk_frequency / 1000) - 1;
-
-    unsafe {
-        ptr::write_volatile(SYST_RVR as *mut u32, reload_value);
-        ptr::write_volatile(SYST_CVR as *mut u32, 0);
-        ptr::write_volatile(SYST_CSR as *mut u32, 0x7); // CLKSOURCE | TICKINT | ENABLE
-    }
-}
-
-fn hal_get_tick() -> u32 {
-    unsafe { UWTICK }
-}
-
-pub fn hal_inc_tick() {
-    unsafe {
-        UWTICK = UWTICK.wrapping_add(1);
-    }
-}
-
-fn i2s_wait<F>(test_flag: F, timeout: u32) -> Result<(), Error>
+fn i2s_wait<F>(test_flag: F, timeout: Option<u32>) -> Result<(), Error>
 where
     F: Fn() -> bool,
 {
-    let tick_start = hal_get_tick();
+    use embassy_time::Instant;
+
+    let tick_start = Instant::now();
 
     while !test_flag() {
-        let elapsed = hal_get_tick();
-        let elapsed = elapsed.wrapping_sub(tick_start);
+        let elapsed = tick_start.elapsed().as_millis() as u32;
 
-        if timeout != HAL_MAX_DELAY && elapsed > timeout {
+        if let Some(timeout) = timeout
+            && elapsed > timeout
+        {
             return Err(Error::Timeout);
         }
     }
@@ -545,8 +516,7 @@ where
     Ok(())
 }
 
-use embassy_stm32::gpio::{AfType, OutputType, Speed};
-use embassy_stm32::gpio::{Flex, Pin};
+use embassy_stm32::gpio::Pin;
 use embassy_stm32::peripherals::PB4;
 use embassy_stm32::spi::CkPin;
 use embassy_stm32::spi::MosiPin;
@@ -596,10 +566,7 @@ where
     SDEXT: SdExtPin<T>,
 {
     use embassy_stm32::pac::{
-        gpio::{
-            vals::{Moder, Ospeedr, Ot, Pupdr},
-            Gpio,
-        },
+        gpio::vals::{Moder, Ospeedr, Ot, Pupdr},
         GPIOA, GPIOB, GPIOC, RCC,
     };
 
@@ -610,10 +577,7 @@ where
             2 => GPIOC,
             _ => unreachable!(),
         };
-
         let pin = pin as usize;
-        let afr = if pin > 8 { 1 } else { 0 };
-        let afr_pin = if pin > 8 { pin - 8 } else { pin };
 
         port.moder().modify(|w| w.set_moder(pin, Moder::ALTERNATE));
         port.otyper().modify(|w| w.set_ot(pin, Ot::PUSH_PULL));

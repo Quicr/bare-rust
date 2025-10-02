@@ -203,7 +203,6 @@ impl AudioControl {
     /// Enable/disable the left ADC
     ///
     /// Since the right input is always disconnected, we never turn on the right ADC
-    // XXX Should we leave the right ADC turned off, or turn it on with volume set to zero?
     pub fn left_adc(&mut self, enable: bool) {
         self.regs.modify(&mut self.i2c, |r| {
             // Power on
