@@ -227,13 +227,12 @@ async fn main(_spawner: Spawner) {
     let mut i2s = I2sHandle::new_spi3();
     i2s.init(config).expect("Failed to initialize I2S");
 
-    let square_wave: [u16; 36] = [
-        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,
-        0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000,
-    ];
-    let square_frame: [u16; 16_000] = core::array::from_fn(|i| square_wave[i % square_wave.len()]);
+    let square_frame: [u16; 16_000] = core::array::from_fn(|i| {
+        const LAMBDA: u16 = 18; // Generates 444hz at 8khz sample rate
+        const AMPLITUDE: u16 = 0x1fff;
+
+        (((i as u16) / LAMBDA) % 2) * AMPLITUDE
+    });
 
     trace!("before tx");
     i2s.transmit(&square_frame, Some(100))
