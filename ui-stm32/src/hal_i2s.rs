@@ -1,4 +1,3 @@
-use core::ptr;
 use defmt::Format as DefmtFormat;
 use embassy_stm32::i2s::{ClockPolarity, Format, Standard};
 use embassy_stm32::pac::spi::{vals::*, Spi};
@@ -171,8 +170,6 @@ impl I2sHandle {
 
     pub fn init(&mut self, rcc: &Peri<RCC>, config: Config) -> Result<(), Error> {
         // I2SPR: I2SDIV and ODD Calculation
-        // Get the source clock value (simplified - use PLLI2S)
-        // XXX Our i2s clock is set to 50MHz.  We should pull this from RCC or something.
         let pclk = embassy_stm32::rcc::clocks(rcc)
             .plli2s1_r
             .to_hertz()
@@ -268,8 +265,6 @@ impl I2sHandle {
             return Err(Error::EmptyBuffer);
         }
 
-        let mut rx_data_ptr = p_rx_data.as_mut_ptr();
-
         // Get the I2S mode configuration
         let i2s_mode = match self.regs.i2scfgr().read().i2scfg() {
             I2scfg::SLAVE_TX => Mode::SlaveTx,
@@ -277,10 +272,6 @@ impl I2sHandle {
             I2scfg::MASTER_TX => Mode::MasterTx,
             I2scfg::MASTER_RX => Mode::MasterRx,
         };
-
-        // Determine extended instance address
-        let base_instance = self.regs.as_ptr() as u32;
-        let ext_instance = self.regs_ext.as_ptr() as u32;
 
         // Check if the I2S_MODE_MASTER_TX or I2S_MODE_SLAVE_TX Mode is selected
         if (i2s_mode == Mode::MasterTx) || (i2s_mode == Mode::SlaveTx) {
@@ -310,9 +301,6 @@ impl I2sHandle {
 
                     // Check if an underrun occurs (only for slave TX mode)
                     if i2s_mode == Mode::SlaveTx {
-                        // XXX unnecessary read
-                        let _sr =
-                            unsafe { ptr::read_volatile((base_instance + 0x08) as *const u32) };
                         if self.regs.sr().read().udr() {
                             // Clear Underrun flag
                             let _ = self.regs.sr().read();
@@ -327,17 +315,10 @@ impl I2sHandle {
                     i2s_wait(|| self.regs_ext.sr().read().rxne(), timeout)?;
 
                     // Read Data from DR register of extended instance
-                    let rx_data =
-                        unsafe { ptr::read_volatile((ext_instance + 0x0C) as *const u16) };
-                    unsafe {
-                        ptr::write(rx_data_ptr, rx_data);
-                    }
-                    rx_data_ptr = unsafe { rx_data_ptr.add(1) };
+                    let rx_data = self.regs_ext.dr().read().dr();
+                    p_rx_data[i] = rx_data;
 
                     // Check if an overrun occurs on extended instance
-                    // XXX Things break if this read isn't here
-                    let _sr_ext =
-                        unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
                     if self.regs_ext.sr().read().ovr() {
                         // Clear Overrun flag
                         let _ = self.regs_ext.dr().read();
@@ -347,8 +328,6 @@ impl I2sHandle {
                 }
             }
         } else {
-            // The I2S_MODE_MASTER_RX or I2S_MODE_SLAVE_RX Mode is selected
-
             // Prepare the First Data before enabling the I2S (write to extended instance)
             self.regs_ext.dr().write(|w| w.set_dr(p_tx_data[0]));
 
@@ -376,15 +355,9 @@ impl I2sHandle {
 
                     // Check if an underrun occurs on extended instance (only for slave RX mode)
                     if i2s_mode == Mode::SlaveRx {
-                        // XXX unnecessary read
-                        let _sr_ext =
-                            unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
                         if !self.regs_ext.sr().read().udr() {
                             // Clear Underrun flag
-                            unsafe {
-                                let _dummy =
-                                    ptr::read_volatile((ext_instance + 0x08) as *const u32);
-                            }
+                            let _ = self.regs_ext.sr().read();
                             errors.underrun = true;
                         }
                     }
@@ -396,16 +369,10 @@ impl I2sHandle {
                     i2s_wait(|| self.regs.sr().read().rxne(), timeout)?;
 
                     // Read Data from DR register of main instance
-                    let rx_data =
-                        unsafe { ptr::read_volatile((base_instance + 0x0C) as *const u16) };
-                    unsafe {
-                        ptr::write(rx_data_ptr, rx_data);
-                    }
-                    rx_data_ptr = unsafe { rx_data_ptr.add(1) };
+                    let rx_data = self.regs.dr().read().dr();
+                    p_rx_data[i] = rx_data;
 
                     // Check if an overrun occurs on main instance
-                    // XXX This read should be unnecessary, but things lock up without it
-                    let _sr = unsafe { ptr::read_volatile((base_instance + 0x08) as *const u32) };
                     if self.regs.sr().read().ovr() {
                         // Clear Overrun flag
                         let _ = self.regs.dr().read();
