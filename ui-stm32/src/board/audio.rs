@@ -67,7 +67,7 @@ impl AudioControl {
             r.set(LeftInputAnalogMute(false));
 
             // Set volumes
-            r.set(Linput2Boost(0b000)); // -12dB
+            r.set(Linput2Boost(0b101)); // 0dB
             r.set(LeftBoostGain(0b00)); // 0dB
             r.set(InputPgaVolumeUpdate(true));
             r.set(LeftPgaVolume(0b01_0111)); // 0dB

@@ -188,27 +188,12 @@ impl I2sHandle {
 }
 
 // Extended I2S macros (translated from C)
-// XXX(RLB) These have been translated to use the register blocks, but not actually tested.
-
-pub fn i2s_ext_instance(instance: u32) -> u32 {
+fn i2s_ext_instance(instance: u32) -> u32 {
     if instance == SPI2_BASE {
         I2S2EXT_BASE
     } else {
         I2S3EXT_BASE
     }
-}
-
-pub fn hal_i2s_ext_enable(handle: &I2sHandle) {
-    handle.regs_ext.i2scfgr().modify(|w| w.set_i2se(true));
-}
-
-pub fn hal_i2s_ext_disable(handle: &I2sHandle) {
-    handle.regs_ext.i2scfgr().modify(|w| w.set_i2se(false));
-}
-
-pub fn hal_i2s_ext_clear_ovr_flag(handle: &I2sHandle) {
-    let _ = handle.regs_ext.dr().read();
-    let _ = handle.regs_ext.sr().read();
 }
 
 pub fn hal_i2s_init(handle: &mut I2sHandle) -> HalStatus {
@@ -411,13 +396,6 @@ pub const SPI_I2SCFGR_CLEAR_MASK: u32 = SPI_I2SCFGR_CHLEN
     | SPI_I2SCFGR_I2SE
     | SPI_I2SCFGR_I2SMOD;
 
-// Helper functions for flag checking
-// TODO Replace this with actual flag reads
-fn i2s_get_flag_status(hi2s: &I2sHandle, flag: u32) -> bool {
-    let sr = hi2s.regs.sr().read();
-    (sr.0 & flag) != 0
-}
-
 // SysTick register addresses for STM32F4
 const SYST_CSR: u32 = 0xE000E010; // SysTick Control and Status Register
 const SYST_RVR: u32 = 0xE000E014; // SysTick Reload Value Register
@@ -452,58 +430,22 @@ pub fn hal_inc_tick() {
     }
 }
 
-fn i2s_wait_flag_state_until_timeout(
-    hi2s: &mut I2sHandle,
-    flag: u32,
-    state: bool,
-    timeout: u32,
-) -> HalStatus {
+fn i2s_wait<F>(test_flag: F, timeout: u32) -> HalStatus
+where
+    F: Fn() -> bool,
+{
     let tick_start = hal_get_tick();
 
-    let mut curr_state = i2s_get_flag_status(hi2s, flag);
-    while curr_state != state {
-        let elapsed = hal_get_tick();
-        let elapsed = elapsed.wrapping_sub(tick_start);
-
-        if timeout != HAL_MAX_DELAY && elapsed > timeout {
-            hi2s.state = HalI2sState::Ready;
-            hi2s.lock = HalLock::Unlocked;
-
-            return HalStatus::Timeout;
-        }
-
-        curr_state = i2s_get_flag_status(hi2s, flag);
-    }
-
-    HalStatus::Ok
-}
-
-fn i2s_wait_flag_state_until_timeout_instance(
-    regs: &Spi,
-    flag: u32,
-    state: bool,
-    timeout: u32,
-) -> HalStatus {
-    let tick_start = hal_get_tick();
-
-    let mut curr_state = i2s_get_flag_status_instance(regs, flag);
-    while curr_state != state {
+    while !test_flag() {
         let elapsed = hal_get_tick();
         let elapsed = elapsed.wrapping_sub(tick_start);
 
         if timeout != HAL_MAX_DELAY && elapsed > timeout {
             return HalStatus::Timeout;
         }
-
-        curr_state = i2s_get_flag_status_instance(regs, flag);
     }
 
     HalStatus::Ok
-}
-
-fn i2s_get_flag_status_instance(regs: &Spi, i2s_flag: u32) -> bool {
-    let sr = regs.sr().read();
-    (sr.0 & i2s_flag) != 0
 }
 
 pub fn hal_i2s_transmit(hi2s: &mut I2sHandle, p_data: &[u16], timeout: u32) -> HalStatus {
@@ -531,7 +473,7 @@ pub fn hal_i2s_transmit(hi2s: &mut I2sHandle, p_data: &[u16], timeout: u32) -> H
     for i in 0..p_data.len() {
         // while i < size {
         // Wait until TXE flag is set
-        if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_TXE, true, timeout) != HalStatus::Ok {
+        if i2s_wait(|| hi2s.regs.sr().read().txe(), timeout) != HalStatus::Ok {
             // Set the error code and state are already set by the timeout function
             return HalStatus::Timeout;
         }
@@ -542,7 +484,7 @@ pub fn hal_i2s_transmit(hi2s: &mut I2sHandle, p_data: &[u16], timeout: u32) -> H
 
     // Wait until Busy flag is reset
     // XXX In the C code, this is only done when in SLAVE_TX or SLAVE_RX mode
-    if i2s_wait_flag_state_until_timeout(hi2s, I2S_FLAG_BSY, false, timeout) != HalStatus::Ok {
+    if i2s_wait(|| !hi2s.regs.sr().read().bsy(), timeout) != HalStatus::Ok {
         // Set the error code
         hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
         hi2s.state = HalI2sState::Ready;
@@ -572,15 +514,6 @@ pub fn hal_i2sex_transmit_receive(
     // Process Locked
     hi2s.lock = HalLock::Locked;
 
-    // Check the data format to determine transfer size
-    // TODO make this more elegant, e.g., with enum mapping
-    // XXX The C code hacks around multi-size data formats by scanning with a u16 pointer.  In this
-    // code, the caller has to do the transformation to 16-bit words.
-    let (tx_xfer_size, rx_xfer_size) = (size, size);
-
-    let mut tx_xfer_count = tx_xfer_size;
-    let mut rx_xfer_count = rx_xfer_size;
-    let mut tx_data_ptr = p_tx_data.as_ptr();
     let mut rx_data_ptr = p_rx_data.as_mut_ptr();
 
     // Set state and reset error code
@@ -610,8 +543,6 @@ pub fn hal_i2sex_transmit_receive(
     if (i2s_mode == Mode::MasterTx) || (i2s_mode == Mode::SlaveTx) {
         // Prepare the First Data before enabling the I2S
         hi2s.regs.dr().write(|w| w.set_dr(p_tx_data[0]));
-        tx_data_ptr = unsafe { tx_data_ptr.add(1) };
-        tx_xfer_count -= 1;
 
         // Enable peripherals
         hi2s.regs.i2scfgr().modify(|w| w.set_i2se(true));
@@ -631,13 +562,7 @@ pub fn hal_i2sex_transmit_receive(
             // Transmit data if available
             if i < p_tx_data.len() {
                 // Wait until TXE flag is set on main instance
-                if i2s_wait_flag_state_until_timeout_instance(
-                    &hi2s.regs,
-                    I2S_FLAG_TXE,
-                    true,
-                    timeout,
-                ) != HalStatus::Ok
-                {
+                if i2s_wait(|| hi2s.regs.sr().read().txe(), timeout) != HalStatus::Ok {
                     hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
                     hi2s.state = HalI2sState::Ready;
                     hi2s.lock = HalLock::Unlocked;
@@ -662,13 +587,7 @@ pub fn hal_i2sex_transmit_receive(
             // Receive data if available
             if i < p_rx_data.len() {
                 // Wait until RXNE flag is set on extended instance
-                if i2s_wait_flag_state_until_timeout_instance(
-                    &hi2s.regs_ext,
-                    I2S_FLAG_RXNE,
-                    true,
-                    timeout,
-                ) != HalStatus::Ok
-                {
+                if i2s_wait(|| hi2s.regs_ext.sr().read().rxne(), timeout) != HalStatus::Ok {
                     hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
                     hi2s.state = HalI2sState::Ready;
                     hi2s.lock = HalLock::Unlocked;
@@ -681,7 +600,6 @@ pub fn hal_i2sex_transmit_receive(
                     ptr::write(rx_data_ptr, rx_data);
                 }
                 rx_data_ptr = unsafe { rx_data_ptr.add(1) };
-                rx_xfer_count -= 1;
 
                 // Check if an overrun occurs on extended instance
                 // XXX Things break if this read isn't here
@@ -700,11 +618,7 @@ pub fn hal_i2sex_transmit_receive(
         // The I2S_MODE_MASTER_RX or I2S_MODE_SLAVE_RX Mode is selected
 
         // Prepare the First Data before enabling the I2S (write to extended instance)
-        unsafe {
-            ptr::write_volatile((ext_instance + 0x0C) as *mut u16, *tx_data_ptr);
-        }
-        tx_data_ptr = unsafe { tx_data_ptr.add(1) };
-        tx_xfer_count -= 1;
+        hi2s.regs_ext.dr().write(|w| w.set_dr(p_tx_data[0]));
 
         // Enable the peripherals
         hi2s.regs.i2scfgr().modify(|w| w.set_i2se(true));
@@ -720,17 +634,10 @@ pub fn hal_i2sex_transmit_receive(
         // Main transfer loop
         let max_size = p_tx_data.len().max(p_rx_data.len());
         for i in 0..max_size {
-            // while (rx_xfer_count > 0) || (tx_xfer_count > 0) {
             // Transmit data if available (use extended instance)
-            if i < p_tx_data.len() {
+            if i < p_tx_data.len() - 1 {
                 // Wait until TXE flag is set on extended instance
-                if i2s_wait_flag_state_until_timeout_instance(
-                    &hi2s.regs_ext,
-                    I2S_FLAG_TXE,
-                    true,
-                    timeout,
-                ) != HalStatus::Ok
-                {
+                if i2s_wait(|| hi2s.regs_ext.sr().read().txe(), timeout) != HalStatus::Ok {
                     hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
                     hi2s.state = HalI2sState::Ready;
                     hi2s.lock = HalLock::Unlocked;
@@ -738,11 +645,7 @@ pub fn hal_i2sex_transmit_receive(
                 }
 
                 // Write Data on DR register of extended instance
-                unsafe {
-                    ptr::write_volatile((ext_instance + 0x0C) as *mut u16, p_tx_data[i]);
-                }
-                tx_data_ptr = unsafe { tx_data_ptr.add(1) };
-                tx_xfer_count -= 1;
+                hi2s.regs_ext.dr().write(|w| w.set_dr(p_tx_data[i + 1]));
 
                 // Check if an underrun occurs on extended instance (only for slave RX mode)
                 if i2s_mode == Mode::SlaveRx {
@@ -760,13 +663,7 @@ pub fn hal_i2sex_transmit_receive(
             // Receive data if available (use main instance)
             if i < p_rx_data.len() {
                 // Wait until RXNE flag is set on main instance
-                if i2s_wait_flag_state_until_timeout_instance(
-                    &hi2s.regs,
-                    I2S_FLAG_RXNE,
-                    true,
-                    timeout,
-                ) != HalStatus::Ok
-                {
+                if i2s_wait(|| hi2s.regs.sr().read().rxne(), timeout) != HalStatus::Ok {
                     hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
                     hi2s.state = HalI2sState::Ready;
                     hi2s.lock = HalLock::Unlocked;
@@ -779,7 +676,6 @@ pub fn hal_i2sex_transmit_receive(
                     ptr::write(rx_data_ptr, rx_data);
                 }
                 rx_data_ptr = unsafe { rx_data_ptr.add(1) };
-                rx_xfer_count -= 1;
 
                 // Check if an overrun occurs on main instance
                 // XXX This read should be unnecessary, but things lock up without it
