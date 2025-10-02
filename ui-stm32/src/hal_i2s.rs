@@ -1,8 +1,34 @@
 use core::ptr;
 use defmt::Format as DefmtFormat;
-use embassy_stm32::i2s::Format;
+use embassy_stm32::i2s::{ClockPolarity, Format};
 use embassy_stm32::pac::spi::{vals::*, Spi};
 use num_enum::IntoPrimitive;
+
+// These mapping functions are copy/pasted private methods from i2s.rs
+const fn datlen(format: Format) -> Datlen {
+    match format {
+        Format::Data16Channel16 => Datlen::BITS16,
+        Format::Data16Channel32 => Datlen::BITS16,
+        Format::Data24Channel32 => Datlen::BITS24,
+        Format::Data32Channel32 => Datlen::BITS32,
+    }
+}
+
+const fn chlen(format: Format) -> Chlen {
+    match format {
+        Format::Data16Channel16 => Chlen::BITS16,
+        Format::Data16Channel32 => Chlen::BITS32,
+        Format::Data24Channel32 => Chlen::BITS32,
+        Format::Data32Channel32 => Chlen::BITS32,
+    }
+}
+
+const fn to_ckpol(clock_polarity: ClockPolarity) -> Ckpol {
+    match clock_polarity {
+        ClockPolarity::IdleLow => Ckpol::IDLE_LOW,
+        ClockPolarity::IdleHigh => Ckpol::IDLE_HIGH,
+    }
+}
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
@@ -36,13 +62,6 @@ pub enum AudioFreq {
     Hz11k = 11025,
     Hz8k = 8000,
     Default = 2,
-}
-
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum Cpol {
-    Low = 0x00000000,
-    High = 0x00000008,
 }
 
 #[repr(u32)]
@@ -89,7 +108,7 @@ pub struct Config {
     pub data_format: Format,
     pub master_clock: bool,
     pub audio_freq: AudioFreq,
-    pub cpol: Cpol,
+    pub clock_polarity: ClockPolarity,
     pub clock_source: ClockSource,
     pub full_duplex_mode: FullDuplexMode,
 }
@@ -102,7 +121,7 @@ impl Default for Config {
             data_format: Format::Data16Channel16,
             master_clock: false,
             audio_freq: AudioFreq::Default,
-            cpol: Cpol::Low,
+            clock_polarity: ClockPolarity::IdleLow,
             clock_source: ClockSource::Plli2s,
             full_duplex_mode: FullDuplexMode::Disable,
         }
@@ -218,15 +237,11 @@ impl I2sHandle {
             // TODO use semantic modifiers
             let mode: u32 = config.mode.into();
             let standard: u32 = config.standard.into();
-            let data_format: u32 = match config.data_format {
-                Format::Data16Channel16 => 0x0000,
-                Format::Data16Channel32 => 0x0001,
-                Format::Data24Channel32 => 0x0003,
-                Format::Data32Channel32 => 0x0005,
-            };
-            let cpol: u32 = config.cpol.into();
-            w.0 = mode | standard | data_format | cpol;
+            w.0 = mode | standard;
             w.set_i2smod(true);
+            w.set_datlen(datlen(config.data_format));
+            w.set_chlen(chlen(config.data_format));
+            w.set_ckpol(to_ckpol(config.clock_polarity));
         });
 
         // Configure the I2S extended if the full duplex mode is enabled
@@ -242,15 +257,11 @@ impl I2sHandle {
                 // TODO use semantic modifiers
                 let mode: u32 = ext_mode.into();
                 let standard: u32 = config.standard.into();
-                let data_format: u32 = match config.data_format {
-                    Format::Data16Channel16 => 0x0000,
-                    Format::Data16Channel32 => 0x0001,
-                    Format::Data24Channel32 => 0x0003,
-                    Format::Data32Channel32 => 0x0005,
-                };
-                let cpol: u32 = config.cpol.into();
-                w.0 = mode | standard | data_format | cpol;
+                w.0 = mode | standard;
                 w.set_i2smod(true);
+                w.set_datlen(datlen(config.data_format));
+                w.set_chlen(chlen(config.data_format));
+                w.set_ckpol(to_ckpol(config.clock_polarity));
             });
         }
 

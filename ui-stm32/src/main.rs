@@ -209,7 +209,7 @@ async fn main(_spawner: Spawner) {
 
     // MX_I2S3_Init() - Configure I2S3 parameters
     let config = {
-        use embassy_stm32::i2s::Format;
+        use embassy_stm32::i2s::{ClockPolarity, Format};
         use hal_i2s::Config;
 
         let mut config = Config::default();
@@ -218,7 +218,7 @@ async fn main(_spawner: Spawner) {
         config.data_format = Format::Data16Channel32;
         config.master_clock = false;
         config.audio_freq = AudioFreq::Hz8k;
-        config.cpol = Cpol::Low;
+        config.clock_polarity = ClockPolarity::IdleLow;
         config.clock_source = ClockSource::Plli2s;
         config.full_duplex_mode = FullDuplexMode::Enable;
         config
