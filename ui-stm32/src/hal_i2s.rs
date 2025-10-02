@@ -121,14 +121,6 @@ pub struct TransferErrors {
     pub overrun: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum State {
-    Reset,
-    Ready,
-    BusyTx,
-    BusyTxRx,
-}
-
 #[derive(Clone, Copy)]
 pub struct Config {
     pub mode: Mode,
@@ -162,16 +154,11 @@ const I2S3EXT: Spi = unsafe { Spi::from_ptr(0x40004000 as *mut ()) };
 pub struct I2sHandle {
     regs: Spi,
     regs_ext: Spi,
-    state: State,
 }
 
 impl I2sHandle {
     fn new(regs: Spi, regs_ext: Spi) -> Self {
-        Self {
-            regs,
-            regs_ext,
-            state: State::Reset,
-        }
+        Self { regs, regs_ext }
     }
 
     pub fn new_spi2() -> Self {
@@ -183,12 +170,6 @@ impl I2sHandle {
     }
 
     pub fn init(&mut self, rcc: &Peri<RCC>, config: Config) -> Result<(), Error> {
-        if self.state == State::Reset {
-            // Init complete, ready to configure
-        }
-
-        self.state = State::BusyTx;
-
         // I2SPR: I2SDIV and ODD Calculation
         // Get the source clock value (simplified - use PLLI2S)
         // XXX Our i2s clock is set to 50MHz.  We should pull this from RCC or something.
@@ -243,22 +224,13 @@ impl I2sHandle {
             });
         }
 
-        self.state = State::Ready;
-
         Ok(())
     }
 
     pub fn transmit(&mut self, p_data: &[u16], timeout: Option<u32>) -> Result<(), Error> {
-        if self.state != State::Ready {
-            return Err(Error::Busy);
-        }
-
         if p_data.is_empty() {
             return Err(Error::EmptyBuffer);
         }
-
-        // Set state to busy transmission
-        self.state = State::BusyTx;
 
         // Check if the I2S is already enabled
         self.regs.i2scfgr().modify(|w| {
@@ -270,10 +242,7 @@ impl I2sHandle {
         // Start the transfer
         for sample in p_data {
             // Wait until TXE flag is set
-            i2s_wait(|| self.regs.sr().read().txe(), timeout).map_err(|e| {
-                self.state = State::Ready;
-                e
-            })?;
+            i2s_wait(|| self.regs.sr().read().txe(), timeout)?;
 
             // Write data to DR register
             self.regs.dr().write(|w| w.set_dr(*sample));
@@ -281,12 +250,8 @@ impl I2sHandle {
 
         // Wait until Busy flag is reset
         // XXX In the C code, this is only done when in SLAVE_TX or SLAVE_RX mode
-        i2s_wait(|| !self.regs.sr().read().bsy(), timeout).map_err(|e| {
-            self.state = State::Ready;
-            e
-        })?;
+        i2s_wait(|| !self.regs.sr().read().bsy(), timeout)?;
 
-        self.state = State::Ready;
         Ok(())
     }
 
@@ -299,18 +264,11 @@ impl I2sHandle {
         let max_size = p_tx_data.len().max(p_rx_data.len());
         let mut errors = TransferErrors::default();
 
-        if self.state != State::Ready {
-            return Err(Error::Busy);
-        }
-
         if p_tx_data.is_empty() || p_rx_data.is_empty() {
             return Err(Error::EmptyBuffer);
         }
 
         let mut rx_data_ptr = p_rx_data.as_mut_ptr();
-
-        // Set state
-        self.state = State::BusyTxRx;
 
         // Get the I2S mode configuration
         let i2s_mode = match self.regs.i2scfgr().read().i2scfg() {
@@ -345,10 +303,7 @@ impl I2sHandle {
                 // Transmit data if available
                 if i < p_tx_data.len() {
                     // Wait until TXE flag is set on main instance
-                    i2s_wait(|| self.regs.sr().read().txe(), timeout).map_err(|e| {
-                        self.state = State::Ready;
-                        e
-                    })?;
+                    i2s_wait(|| self.regs.sr().read().txe(), timeout)?;
 
                     // Write Data on DR register of main instance
                     self.regs.dr().write(|w| w.set_dr(p_tx_data[i]));
@@ -369,10 +324,7 @@ impl I2sHandle {
                 // Receive data if available
                 if i < p_rx_data.len() {
                     // Wait until RXNE flag is set on extended instance
-                    i2s_wait(|| self.regs_ext.sr().read().rxne(), timeout).map_err(|e| {
-                        self.state = State::Ready;
-                        e
-                    })?;
+                    i2s_wait(|| self.regs_ext.sr().read().rxne(), timeout)?;
 
                     // Read Data from DR register of extended instance
                     let rx_data =
@@ -417,10 +369,7 @@ impl I2sHandle {
                 // Transmit data if available (use extended instance)
                 if i < p_tx_data.len() - 1 {
                     // Wait until TXE flag is set on extended instance
-                    i2s_wait(|| self.regs_ext.sr().read().txe(), timeout).map_err(|e| {
-                        self.state = State::Ready;
-                        e
-                    })?;
+                    i2s_wait(|| self.regs_ext.sr().read().txe(), timeout)?;
 
                     // Write Data on DR register of extended instance
                     self.regs_ext.dr().write(|w| w.set_dr(p_tx_data[i + 1]));
@@ -444,10 +393,7 @@ impl I2sHandle {
                 // Receive data if available (use main instance)
                 if i < p_rx_data.len() {
                     // Wait until RXNE flag is set on main instance
-                    i2s_wait(|| self.regs.sr().read().rxne(), timeout).map_err(|e| {
-                        self.state = State::Ready;
-                        e
-                    })?;
+                    i2s_wait(|| self.regs.sr().read().rxne(), timeout)?;
 
                     // Read Data from DR register of main instance
                     let rx_data =
@@ -469,8 +415,6 @@ impl I2sHandle {
                 }
             }
         }
-
-        self.state = State::Ready;
 
         Ok(errors)
     }
