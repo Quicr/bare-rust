@@ -1,6 +1,6 @@
 use core::ptr;
 use defmt::Format as DefmtFormat;
-use embassy_stm32::i2s::{ClockPolarity, Format};
+use embassy_stm32::i2s::{ClockPolarity, Format, Standard};
 use embassy_stm32::pac::spi::{vals::*, Spi};
 use num_enum::IntoPrimitive;
 
@@ -30,6 +30,23 @@ const fn to_ckpol(clock_polarity: ClockPolarity) -> Ckpol {
     }
 }
 
+const fn to_i2sstd(standard: Standard) -> I2sstd {
+    match standard {
+        Standard::Philips => I2sstd::PHILIPS,
+        Standard::MsbFirst => I2sstd::MSB,
+        Standard::LsbFirst => I2sstd::LSB,
+        Standard::PcmLongSync => I2sstd::PCM,
+        Standard::PcmShortSync => I2sstd::PCM,
+    }
+}
+
+const fn to_pcmsync(standard: Standard) -> Pcmsync {
+    match standard {
+        Standard::PcmLongSync => Pcmsync::LONG,
+        _ => Pcmsync::SHORT,
+    }
+}
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
 pub enum Mode {
@@ -39,15 +56,6 @@ pub enum Mode {
     MasterRx = 0x00000300,
 }
 
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum Standard {
-    Philips = 0x00000000,
-    Msb = 0x00000010,
-    Lsb = 0x00000020,
-    PcmShort = 0x00000030,
-    PcmLong = 0x000000B0,
-}
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
@@ -181,7 +189,7 @@ impl I2sHandle {
             // I2S standard
             if matches!(
                 config.standard,
-                Standard::Philips | Standard::Msb | Standard::Lsb
+                Standard::Philips | Standard::MsbFirst | Standard::LsbFirst
             ) {
                 // In I2S standard packet length is multiplied by 2
                 packetlength = packetlength * 2;
@@ -236,9 +244,10 @@ impl I2sHandle {
         self.regs.i2scfgr().modify(|w| {
             // TODO use semantic modifiers
             let mode: u32 = config.mode.into();
-            let standard: u32 = config.standard.into();
-            w.0 = mode | standard;
+            w.0 = mode;
             w.set_i2smod(true);
+            w.set_i2sstd(to_i2sstd(config.standard));
+            w.set_pcmsync(to_pcmsync(config.standard));
             w.set_datlen(datlen(config.data_format));
             w.set_chlen(chlen(config.data_format));
             w.set_ckpol(to_ckpol(config.clock_polarity));
@@ -256,9 +265,10 @@ impl I2sHandle {
             self.regs_ext.i2scfgr().modify(|w| {
                 // TODO use semantic modifiers
                 let mode: u32 = ext_mode.into();
-                let standard: u32 = config.standard.into();
-                w.0 = mode | standard;
+                w.0 = mode;
                 w.set_i2smod(true);
+                w.set_i2sstd(to_i2sstd(config.standard));
+                w.set_pcmsync(to_pcmsync(config.standard));
                 w.set_datlen(datlen(config.data_format));
                 w.set_chlen(chlen(config.data_format));
                 w.set_ckpol(to_ckpol(config.clock_polarity));

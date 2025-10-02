@@ -209,7 +209,7 @@ async fn main(_spawner: Spawner) {
 
     // MX_I2S3_Init() - Configure I2S3 parameters
     let config = {
-        use embassy_stm32::i2s::{ClockPolarity, Format};
+        use embassy_stm32::i2s::{ClockPolarity, Format, Standard};
         use hal_i2s::Config;
 
         let mut config = Config::default();
