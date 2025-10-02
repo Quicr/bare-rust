@@ -212,18 +212,23 @@ async fn main(_spawner: Spawner) {
     audio_control.init().await;
 
     // MX_I2S3_Init() - Configure I2S3 parameters
+    let mut config = {
+        use hal_i2s::Config;
+
+        let mut config = Config::default();
+        config.mode = Mode::SlaveTx;
+        config.standard = Standard::Philips;
+        config.data_format = DataFormat::Data16bExtended;
+        config.mclk_output = MclkOutput::Disable;
+        config.audio_freq = AudioFreq::Hz8k;
+        config.cpol = Cpol::Low;
+        config.clock_source = ClockSource::Plli2s;
+        config.full_duplex_mode = FullDuplexMode::Enable;
+        config
+    };
+
     let mut i2s = I2sHandle::new_spi3();
-
-    i2s.init.mode = Mode::SlaveTx;
-    i2s.init.standard = Standard::Philips;
-    i2s.init.data_format = DataFormat::Data16bExtended;
-    i2s.init.mclk_output = MclkOutput::Disable;
-    i2s.init.audio_freq = AudioFreq::Hz8k;
-    i2s.init.cpol = Cpol::Low;
-    i2s.init.clock_source = ClockSource::Plli2s;
-    i2s.init.full_duplex_mode = FullDuplexMode::Enable;
-
-    let rv = hal_i2s_init(&mut i2s);
+    let rv = hal_i2s_init(&mut i2s, config);
     if rv != HalStatus::Ok {
         defmt::panic!("Failed to initialize I2S: {}", rv);
     }
