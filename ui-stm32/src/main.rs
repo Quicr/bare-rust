@@ -187,11 +187,8 @@ async fn main(_spawner: Spawner) {
     let p = embassy_stm32::init(config);
 
     // Start the SysTick timer
-    // XXX Disabled for now; will cause timeouts to hang forever
+    // XXX Disabled for now
     // hal_init_tick(168_000_000);
-
-    // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
-    hal_i2s_msp_init();
 
     // Do audio chip setup over I2C
     let config = {
@@ -210,6 +207,9 @@ async fn main(_spawner: Spawner) {
     let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, config);
     let mut audio_control = AudioControl::new(i2c);
     audio_control.init().await;
+
+    // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
+    hal_i2s_msp_init();
 
     // MX_I2S3_Init() - Configure I2S3 parameters
     let config = {
@@ -241,24 +241,17 @@ async fn main(_spawner: Spawner) {
     let square_frame: [u16; 16_000] = core::array::from_fn(|i| square_wave[i % square_wave.len()]);
 
     trace!("before tx");
-    i2s.transmit(&square_frame, 100).expect("Failed to transmit");
+    i2s.transmit(&square_frame, 100)
+        .expect("Failed to transmit");
     trace!("after tx");
 
     trace!("before txrx");
     let mut last_frame = [0; 16_000];
     let mut curr_frame = [0; 16_000];
     loop {
-        i2s.transmit_receive(&last_frame, &mut curr_frame, 100).expect("Failed to transmit/receive");
-
-        // XXX(RLB): When I try to remove this line, things stop working.  The headset plays loud
-        // noise.  Presumably there needs to be some delay here, but why?
-        let _total_energy = curr_frame.iter().map(|x| *x as u32).sum::<u32>();
+        i2s.transmit_receive(&last_frame, &mut curr_frame, 100)
+            .expect("Failed to transmit/receive");
 
         last_frame.copy_from_slice(&curr_frame);
     }
-}
-
-#[cortex_m_rt::exception]
-fn SysTick() {
-    hal_inc_tick();
 }
