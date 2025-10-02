@@ -209,7 +209,7 @@ async fn main(_spawner: Spawner) {
     audio_control.init().await;
 
     // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
-    hal_i2s_msp_init();
+    let _ = hal_i2s_msp_init(p.SPI3, p.PA15, p.PC10, p.PB5, p.PB4);
 
     // MX_I2S3_Init() - Configure I2S3 parameters
     let config = {
@@ -229,8 +229,6 @@ async fn main(_spawner: Spawner) {
 
     let mut i2s = I2sHandle::new_spi3();
     i2s.init(config).expect("Failed to initialize I2S");
-
-    trace!("Ready to roll 😎");
 
     let square_wave: [u16; 36] = [
         0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff, 0x1fff,

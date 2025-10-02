@@ -545,11 +545,83 @@ where
     Ok(())
 }
 
-pub fn hal_i2s_msp_init() {
+use embassy_stm32::gpio::{AfType, OutputType, Speed};
+use embassy_stm32::gpio::{Flex, Pin};
+use embassy_stm32::peripherals::PB4;
+use embassy_stm32::spi::CkPin;
+use embassy_stm32::spi::MosiPin;
+use embassy_stm32::spi::WsPin;
+use embassy_stm32::Peri;
+
+pub trait SdExtPin<T>: Pin {
+    fn af_num(&self) -> u8;
+}
+
+// SdExt assignment manually copied from the STM32F405RG data sheet (p. 64)
+impl SdExtPin<embassy_stm32::peripherals::SPI3> for PB4 {
+    #[inline(always)]
+    fn af_num(&self) -> u8 {
+        7
+    }
+}
+
+#[allow(dead_code)]
+pub struct I2Sext<'d, T, WS, CK, SD, SDEXT>
+where
+    T: embassy_stm32::spi::Instance,
+    WS: WsPin<T>,
+    CK: CkPin<T>,
+    SD: MosiPin<T>,
+    SDEXT: SdExtPin<T>,
+{
+    spi: Peri<'d, T>,
+    ws: Peri<'d, WS>,
+    ck: Peri<'d, CK>,
+    sd: Peri<'d, SD>,
+    sd_ext: Peri<'d, SDEXT>,
+}
+
+pub fn hal_i2s_msp_init<'d, T, WS, CK, SD, SDEXT>(
+    spi: Peri<'d, T>,
+    ws: Peri<'d, WS>,
+    ck: Peri<'d, CK>,
+    sd: Peri<'d, SD>,
+    sd_ext: Peri<'d, SDEXT>,
+) -> I2Sext<'d, T, WS, CK, SD, SDEXT>
+where
+    T: embassy_stm32::spi::Instance,
+    WS: WsPin<T>,
+    CK: CkPin<T>,
+    SD: MosiPin<T>,
+    SDEXT: SdExtPin<T>,
+{
     use embassy_stm32::pac::{
-        gpio::vals::{Moder, Ospeedr, Ot, Pupdr},
+        gpio::{
+            vals::{Moder, Ospeedr, Ot, Pupdr},
+            Gpio,
+        },
         GPIOA, GPIOB, GPIOC, RCC,
     };
+
+    fn configure_pin(port: u8, pin: u8, af_num: u8) {
+        let port = match port {
+            0 => GPIOA,
+            1 => GPIOB,
+            2 => GPIOC,
+            _ => unreachable!(),
+        };
+
+        let pin = pin as usize;
+        let afr = if pin > 8 { 1 } else { 0 };
+        let afr_pin = if pin > 8 { pin - 8 } else { pin };
+
+        port.moder().modify(|w| w.set_moder(pin, Moder::ALTERNATE));
+        port.otyper().modify(|w| w.set_ot(pin, Ot::PUSH_PULL));
+        port.pupdr().modify(|w| w.set_pupdr(pin, Pupdr::FLOATING));
+        port.ospeedr()
+            .modify(|w| w.set_ospeedr(pin, Ospeedr::LOW_SPEED));
+        port.afr(pin / 8).modify(|w| w.set_afr(pin % 8, af_num));
+    }
 
     // Enable peripheral clocks
     RCC.apb1enr().modify(|w| w.set_spi3en(true));
@@ -559,42 +631,43 @@ pub fn hal_i2s_msp_init() {
         w.set_gpiocen(true);
     });
 
-    // Configure PA15 -> I2S3_WS (AF6, Push-Pull, No Pull, Low Speed)
-    GPIOA.moder().modify(|w| w.set_moder(15, Moder::ALTERNATE));
-    GPIOA.otyper().modify(|w| w.set_ot(15, Ot::PUSH_PULL));
-    GPIOA.pupdr().modify(|w| w.set_pupdr(15, Pupdr::FLOATING));
-    GPIOA
-        .ospeedr()
-        .modify(|w| w.set_ospeedr(15, Ospeedr::LOW_SPEED));
-    GPIOA.afr(1).modify(|w| w.set_afr(15 - 8, 6)); // AF6
+    // Configure the pins
+    configure_pin(ws.port(), ws.pin(), ws.af_num());
+    configure_pin(ck.port(), ck.pin(), ck.af_num());
+    configure_pin(sd.port(), sd.pin(), sd.af_num());
+    configure_pin(sd_ext.port(), sd_ext.pin(), sd_ext.af_num());
 
-    // Configure PC10 -> I2S3_CK (AF6, Push-Pull, No Pull, Low Speed)
-    GPIOC.moder().modify(|w| w.set_moder(10, Moder::ALTERNATE));
-    GPIOC.otyper().modify(|w| w.set_ot(10, Ot::PUSH_PULL));
-    GPIOC.pupdr().modify(|w| w.set_pupdr(10, Pupdr::FLOATING));
-    GPIOC
-        .ospeedr()
-        .modify(|w| w.set_ospeedr(10, Ospeedr::LOW_SPEED));
-    GPIOC.afr(1).modify(|w| w.set_afr(10 - 8, 6)); // AF6
+    // XXX In principle, this should be equivalent.  Looking at the the code, it looks like
+    // set_as_af_unchecked is making the same set of register modifications as what we do above.
+    // And yet, when we build it, it does not work.
+    //
+    // cf. https://github.com/embassy-rs/embassy/blob/main/embassy-stm32/src/gpio.rs#L652
+    /*
+    let af_num = ws.af_num();
+    let mut ws = Flex::new(ws);
+    ws.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
 
-    // Configure PB4 -> I2S3_ext_SD (AF7, Push-Pull, No Pull, Low Speed)
-    GPIOB.moder().modify(|w| w.set_moder(4, Moder::ALTERNATE));
-    GPIOB.otyper().modify(|w| w.set_ot(4, Ot::PUSH_PULL));
-    GPIOB.pupdr().modify(|w| w.set_pupdr(4, Pupdr::FLOATING));
-    GPIOB
-        .ospeedr()
-        .modify(|w| w.set_ospeedr(4, Ospeedr::LOW_SPEED));
-    GPIOB.afr(0).modify(|w| w.set_afr(4, 7)); // AF7 for I2S3ext
+    let af_num = ck.af_num();
+    let mut ck = Flex::new(ck);
+    ck.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
 
-    // Configure PB5 -> I2S3_SD (AF6, Push-Pull, No Pull, Low Speed)
-    GPIOB.moder().modify(|w| w.set_moder(5, Moder::ALTERNATE));
-    GPIOB.otyper().modify(|w| w.set_ot(5, Ot::PUSH_PULL));
-    GPIOB.pupdr().modify(|w| w.set_pupdr(5, Pupdr::FLOATING));
-    GPIOB
-        .ospeedr()
-        .modify(|w| w.set_ospeedr(5, Ospeedr::LOW_SPEED));
-    GPIOB.afr(0).modify(|w| w.set_afr(5, 6)); // AF6
+    let af_num = sd.af_num();
+    let mut sd = Flex::new(sd);
+    sd.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+    let af_num = sd_ext.af_num();
+    let mut sd_ext = Flex::new(sd_ext);
+    sd_ext.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+    */
 
     // Note: DMA initialization skipped as requested
     // Note: I2S3 interrupt configuration skipped (HAL_NVIC_SetPriority/EnableIRQ)
+
+    I2Sext {
+        spi,
+        ws,
+        ck,
+        sd,
+        sd_ext,
+    }
 }
