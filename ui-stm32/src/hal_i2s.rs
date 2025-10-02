@@ -574,17 +574,9 @@ pub fn hal_i2sex_transmit_receive(
 
     // Check the data format to determine transfer size
     // TODO make this more elegant, e.g., with enum mapping
-    let i2scfgr = hi2s.regs.i2scfgr().read();
-    let datlen = i2scfgr.datlen().to_bits();
-    let chlen = i2scfgr.chlen().to_bits();
-    let data_format = ((datlen << 1) | chlen) as u32;
-    let (tx_xfer_size, rx_xfer_size) = if (data_format == DataFormat::Data24b as u32)
-        || (data_format == DataFormat::Data32b as u32)
-    {
-        (size << 1, size << 1) // Double the size for 24/32-bit formats
-    } else {
-        (size, size) // Normal size for 16-bit formats
-    };
+    // XXX The C code hacks around multi-size data formats by scanning with a u16 pointer.  In this
+    // code, the caller has to do the transformation to 16-bit words.
+    let (tx_xfer_size, rx_xfer_size) = (size, size);
 
     let mut tx_xfer_count = tx_xfer_size;
     let mut rx_xfer_count = rx_xfer_size;
@@ -596,7 +588,7 @@ pub fn hal_i2sex_transmit_receive(
     hi2s.state = HalI2sState::BusyTxRx;
 
     // Get the I2S mode configuration
-    let i2s_mode = match i2scfgr.i2scfg() {
+    let i2s_mode = match hi2s.regs.i2scfgr().read().i2scfg() {
         I2scfg::SLAVE_TX => Mode::SlaveTx,
         I2scfg::SLAVE_RX => Mode::SlaveRx,
         I2scfg::MASTER_TX => Mode::MasterTx,
@@ -617,9 +609,7 @@ pub fn hal_i2sex_transmit_receive(
     // Check if the I2S_MODE_MASTER_TX or I2S_MODE_SLAVE_TX Mode is selected
     if (i2s_mode == Mode::MasterTx) || (i2s_mode == Mode::SlaveTx) {
         // Prepare the First Data before enabling the I2S
-        unsafe {
-            ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, *tx_data_ptr);
-        }
+        hi2s.regs.dr().write(|w| w.set_dr(p_tx_data[0]));
         tx_data_ptr = unsafe { tx_data_ptr.add(1) };
         tx_xfer_count -= 1;
 
@@ -635,9 +625,11 @@ pub fn hal_i2sex_transmit_receive(
         }
 
         // Main transfer loop
-        while (rx_xfer_count > 0) || (tx_xfer_count > 0) {
+        let max_size = p_tx_data.len().max(p_rx_data.len());
+        let mut i = 0;
+        while i < max_size {
             // Transmit data if available
-            if tx_xfer_count > 0 {
+            if i < p_tx_data.len() {
                 // Wait until TXE flag is set on main instance
                 if i2s_wait_flag_state_until_timeout_instance(
                     &hi2s.regs,
@@ -653,27 +645,22 @@ pub fn hal_i2sex_transmit_receive(
                 }
 
                 // Write Data on DR register of main instance
-                unsafe {
-                    ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, *tx_data_ptr);
-                }
-                tx_data_ptr = unsafe { tx_data_ptr.add(1) };
-                tx_xfer_count -= 1;
+                hi2s.regs.dr().write(|w| w.set_dr(p_tx_data[i]));
 
                 // Check if an underrun occurs (only for slave TX mode)
                 if i2s_mode == Mode::SlaveTx {
-                    let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
-                    if (sr & I2S_FLAG_UDR) != 0 {
+                    // XXX unnecessary read
+                    let _sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
+                    if hi2s.regs.sr().read().udr() {
                         // Clear Underrun flag
-                        unsafe {
-                            let _dummy = ptr::read_volatile((hi2s.instance + 0x08) as *const u32);
-                        }
+                        let _ = hi2s.regs.sr().read();
                         hi2s.error_code |= HAL_I2S_ERROR_UDR;
                     }
                 }
             }
 
             // Receive data if available
-            if rx_xfer_count > 0 {
+            if i < p_rx_data.len() {
                 // Wait until RXNE flag is set on extended instance
                 if i2s_wait_flag_state_until_timeout_instance(
                     &hi2s.regs_ext,
@@ -706,6 +693,8 @@ pub fn hal_i2sex_transmit_receive(
                     hi2s.error_code |= HAL_I2S_ERROR_OVR;
                 }
             }
+
+            i += 1;
         }
     } else {
         // The I2S_MODE_MASTER_RX or I2S_MODE_SLAVE_RX Mode is selected
@@ -729,9 +718,11 @@ pub fn hal_i2sex_transmit_receive(
         }
 
         // Main transfer loop
-        while (rx_xfer_count > 0) || (tx_xfer_count > 0) {
+        let max_size = p_tx_data.len().max(p_rx_data.len());
+        for i in 0..max_size {
+            // while (rx_xfer_count > 0) || (tx_xfer_count > 0) {
             // Transmit data if available (use extended instance)
-            if tx_xfer_count > 0 {
+            if i < p_tx_data.len() {
                 // Wait until TXE flag is set on extended instance
                 if i2s_wait_flag_state_until_timeout_instance(
                     &hi2s.regs_ext,
@@ -748,7 +739,7 @@ pub fn hal_i2sex_transmit_receive(
 
                 // Write Data on DR register of extended instance
                 unsafe {
-                    ptr::write_volatile((ext_instance + 0x0C) as *mut u16, *tx_data_ptr);
+                    ptr::write_volatile((ext_instance + 0x0C) as *mut u16, p_tx_data[i]);
                 }
                 tx_data_ptr = unsafe { tx_data_ptr.add(1) };
                 tx_xfer_count -= 1;
@@ -767,7 +758,7 @@ pub fn hal_i2sex_transmit_receive(
             }
 
             // Receive data if available (use main instance)
-            if rx_xfer_count > 0 {
+            if i < p_rx_data.len() {
                 // Wait until RXNE flag is set on main instance
                 if i2s_wait_flag_state_until_timeout_instance(
                     &hi2s.regs,
@@ -792,7 +783,7 @@ pub fn hal_i2sex_transmit_receive(
 
                 // Check if an overrun occurs on main instance
                 // XXX This read should be unnecessary, but things lock up without it
-                let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
+                let _sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
                 if hi2s.regs.sr().read().ovr() {
                     // Clear Overrun flag
                     let _ = hi2s.regs.dr().read();
