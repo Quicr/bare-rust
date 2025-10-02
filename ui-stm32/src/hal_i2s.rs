@@ -79,51 +79,35 @@ pub enum FullDuplexMode {
 #[derive(Format, Debug, Clone, Copy, PartialEq)]
 pub enum HalStatus {
     Ok = 0x00,
-
     Error = 0x01,
-
     Busy = 0x02,
-
     Timeout = 0x03,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HalLock {
     Unlocked = 0x00,
-
     Locked = 0x01,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HalI2sState {
     Reset = 0x00,
-
     Ready = 0x01,
-
     Busy = 0x02,
-
     BusyTx = 0x03,
-
     BusyRx = 0x04,
-
     BusyTxRx = 0x05,
-
     Timeout = 0x06,
-
     Error = 0x07,
 }
 
 pub const HAL_I2S_ERROR_NONE: u32 = 0x00000000;
-
 pub const HAL_I2S_ERROR_UDR: u32 = 0x00000001;
-
 pub const HAL_I2S_ERROR_OVR: u32 = 0x00000002;
-
 pub const HAL_I2S_ERROR_FRE: u32 = 0x00000008;
-
 pub const HAL_I2S_ERROR_DMA: u32 = 0x00000010;
 pub const HAL_I2S_ERROR_TIMEOUT: u32 = 0x00000020;
-
 pub const HAL_I2S_ERROR_PRESCALER: u32 = 0x00000020;
 
 #[derive(Debug, Clone, Copy)]
@@ -582,7 +566,6 @@ pub fn hal_i2sex_transmit_receive(
     }
 
     if p_tx_data.is_empty() || p_rx_data.is_empty() || size == 0 {
-        defmt::trace!("exit 1");
         return HalStatus::Error;
     }
 
@@ -590,15 +573,18 @@ pub fn hal_i2sex_transmit_receive(
     hi2s.lock = HalLock::Locked;
 
     // Check the data format to determine transfer size
-    let i2scfgr = unsafe { ptr::read_volatile((hi2s.instance + 0x1C) as *const u32) };
-    let tmp1 = i2scfgr & (SPI_I2SCFGR_DATLEN | SPI_I2SCFGR_CHLEN);
-
-    let (tx_xfer_size, rx_xfer_size) =
-        if (tmp1 == DataFormat::Data24b as u32) || (tmp1 == DataFormat::Data32b as u32) {
-            (size << 1, size << 1) // Double the size for 24/32-bit formats
-        } else {
-            (size, size) // Normal size for 16-bit formats
-        };
+    // TODO make this more elegant, e.g., with enum mapping
+    let i2scfgr = hi2s.regs.i2scfgr().read();
+    let datlen = i2scfgr.datlen().to_bits();
+    let chlen = i2scfgr.chlen().to_bits();
+    let data_format = ((datlen << 1) | chlen) as u32;
+    let (tx_xfer_size, rx_xfer_size) = if (data_format == DataFormat::Data24b as u32)
+        || (data_format == DataFormat::Data32b as u32)
+    {
+        (size << 1, size << 1) // Double the size for 24/32-bit formats
+    } else {
+        (size, size) // Normal size for 16-bit formats
+    };
 
     let mut tx_xfer_count = tx_xfer_size;
     let mut rx_xfer_count = rx_xfer_size;
@@ -610,7 +596,12 @@ pub fn hal_i2sex_transmit_receive(
     hi2s.state = HalI2sState::BusyTxRx;
 
     // Get the I2S mode configuration
-    let i2s_mode = i2scfgr & SPI_I2SCFGR_I2SCFG;
+    let i2s_mode = match i2scfgr.i2scfg() {
+        I2scfg::SLAVE_TX => Mode::SlaveTx,
+        I2scfg::SLAVE_RX => Mode::SlaveRx,
+        I2scfg::MASTER_TX => Mode::MasterTx,
+        I2scfg::MASTER_RX => Mode::MasterRx,
+    };
 
     // Determine extended instance address
     let ext_instance = if hi2s.instance == 0x40003C00 {
@@ -618,14 +609,13 @@ pub fn hal_i2sex_transmit_receive(
     } else if hi2s.instance == 0x40003800 {
         0x40003400 // I2S2ext
     } else {
-        defmt::trace!("exit 2");
         hi2s.state = HalI2sState::Ready;
         hi2s.lock = HalLock::Unlocked;
         return HalStatus::Error;
     };
 
     // Check if the I2S_MODE_MASTER_TX or I2S_MODE_SLAVE_TX Mode is selected
-    if (i2s_mode == Mode::MasterTx as u32) || (i2s_mode == Mode::SlaveTx as u32) {
+    if (i2s_mode == Mode::MasterTx) || (i2s_mode == Mode::SlaveTx) {
         // Prepare the First Data before enabling the I2S
         unsafe {
             ptr::write_volatile((hi2s.instance + 0x0C) as *mut u16, *tx_data_ptr);
@@ -633,28 +623,15 @@ pub fn hal_i2sex_transmit_receive(
         tx_data_ptr = unsafe { tx_data_ptr.add(1) };
         tx_xfer_count -= 1;
 
-        // Enable I2Sext(receiver) before enabling I2Sx peripheral
-        unsafe {
-            let i2scfgr_ext_ptr = (ext_instance + 0x1C) as *mut u32;
-            let i2scfgr_ext = ptr::read_volatile(i2scfgr_ext_ptr);
-            ptr::write_volatile(i2scfgr_ext_ptr, i2scfgr_ext | SPI_I2SCFGR_I2SE);
-        }
-
-        // Enable I2Sx peripheral
-        unsafe {
-            ptr::write_volatile(
-                (hi2s.instance + 0x1C) as *mut u32,
-                i2scfgr | SPI_I2SCFGR_I2SE,
-            );
-        }
+        // Enable peripherals
+        hi2s.regs.i2scfgr().modify(|w| w.set_i2se(true));
+        hi2s.regs_ext.i2scfgr().modify(|w| w.set_i2se(true));
 
         // Clear the Overrun Flag if in master TX mode
-        if i2s_mode == Mode::MasterTx as u32 {
+        if i2s_mode == Mode::MasterTx {
             // Clear overrun flag by reading DR then SR of extended instance
-            unsafe {
-                let _dummy = ptr::read_volatile((ext_instance + 0x0C) as *const u32);
-                let _dummy = ptr::read_volatile((ext_instance + 0x08) as *const u32);
-            }
+            let _ = hi2s.regs_ext.dr().read();
+            let _ = hi2s.regs_ext.sr().read();
         }
 
         // Main transfer loop
@@ -669,7 +646,6 @@ pub fn hal_i2sex_transmit_receive(
                     timeout,
                 ) != HalStatus::Ok
                 {
-                    defmt::trace!("exit 3");
                     hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
                     hi2s.state = HalI2sState::Ready;
                     hi2s.lock = HalLock::Unlocked;
@@ -684,7 +660,7 @@ pub fn hal_i2sex_transmit_receive(
                 tx_xfer_count -= 1;
 
                 // Check if an underrun occurs (only for slave TX mode)
-                if i2s_mode == Mode::SlaveTx as u32 {
+                if i2s_mode == Mode::SlaveTx {
                     let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
                     if (sr & I2S_FLAG_UDR) != 0 {
                         // Clear Underrun flag
@@ -706,7 +682,6 @@ pub fn hal_i2sex_transmit_receive(
                     timeout,
                 ) != HalStatus::Ok
                 {
-                    defmt::trace!("exit 4");
                     hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
                     hi2s.state = HalI2sState::Ready;
                     hi2s.lock = HalLock::Unlocked;
@@ -722,13 +697,12 @@ pub fn hal_i2sex_transmit_receive(
                 rx_xfer_count -= 1;
 
                 // Check if an overrun occurs on extended instance
-                let sr_ext = unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
-                if (sr_ext & I2S_FLAG_OVR) != 0 {
+                // XXX Things break if this read isn't here
+                let _sr_ext = unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
+                if hi2s.regs_ext.sr().read().ovr() {
                     // Clear Overrun flag
-                    unsafe {
-                        let _dummy = ptr::read_volatile((ext_instance + 0x0C) as *const u32);
-                        let _dummy = ptr::read_volatile((ext_instance + 0x08) as *const u32);
-                    }
+                    let _ = hi2s.regs_ext.dr().read();
+                    let _ = hi2s.regs_ext.sr().read();
                     hi2s.error_code |= HAL_I2S_ERROR_OVR;
                 }
             }
@@ -743,28 +717,15 @@ pub fn hal_i2sex_transmit_receive(
         tx_data_ptr = unsafe { tx_data_ptr.add(1) };
         tx_xfer_count -= 1;
 
-        // Enable I2Sext(transmitter) after enabling I2Sx peripheral
-        unsafe {
-            let i2scfgr_ext_ptr = (ext_instance + 0x1C) as *mut u32;
-            let i2scfgr_ext = ptr::read_volatile(i2scfgr_ext_ptr);
-            ptr::write_volatile(i2scfgr_ext_ptr, i2scfgr_ext | SPI_I2SCFGR_I2SE);
-        }
-
-        // Enable I2S peripheral before the I2Sext
-        unsafe {
-            ptr::write_volatile(
-                (hi2s.instance + 0x1C) as *mut u32,
-                i2scfgr | SPI_I2SCFGR_I2SE,
-            );
-        }
+        // Enable the peripherals
+        hi2s.regs.i2scfgr().modify(|w| w.set_i2se(true));
+        hi2s.regs_ext.i2scfgr().modify(|w| w.set_i2se(true));
 
         // Clear the Overrun Flag if in master RX mode
-        if i2s_mode == Mode::MasterRx as u32 {
+        if i2s_mode == Mode::MasterRx {
             // Clear overrun flag by reading DR then SR of main instance
-            unsafe {
-                let _dummy = ptr::read_volatile((hi2s.instance + 0x0C) as *const u32);
-                let _dummy = ptr::read_volatile((hi2s.instance + 0x08) as *const u32);
-            }
+            let _ = hi2s.regs.dr().read();
+            let _ = hi2s.regs.sr().read();
         }
 
         // Main transfer loop
@@ -779,7 +740,6 @@ pub fn hal_i2sex_transmit_receive(
                     timeout,
                 ) != HalStatus::Ok
                 {
-                    defmt::trace!("exit 5");
                     hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
                     hi2s.state = HalI2sState::Ready;
                     hi2s.lock = HalLock::Unlocked;
@@ -794,7 +754,7 @@ pub fn hal_i2sex_transmit_receive(
                 tx_xfer_count -= 1;
 
                 // Check if an underrun occurs on extended instance (only for slave RX mode)
-                if i2s_mode == Mode::SlaveRx as u32 {
+                if i2s_mode == Mode::SlaveRx {
                     let sr_ext = unsafe { ptr::read_volatile((ext_instance + 0x08) as *const u32) };
                     if (sr_ext & I2S_FLAG_UDR) != 0 {
                         // Clear Underrun flag
@@ -816,7 +776,6 @@ pub fn hal_i2sex_transmit_receive(
                     timeout,
                 ) != HalStatus::Ok
                 {
-                    defmt::trace!("exit 6");
                     hi2s.error_code = HAL_I2S_ERROR_TIMEOUT;
                     hi2s.state = HalI2sState::Ready;
                     hi2s.lock = HalLock::Unlocked;
@@ -832,13 +791,12 @@ pub fn hal_i2sex_transmit_receive(
                 rx_xfer_count -= 1;
 
                 // Check if an overrun occurs on main instance
+                // XXX This read should be unnecessary, but things lock up without it
                 let sr = unsafe { ptr::read_volatile((hi2s.instance + 0x08) as *const u32) };
-                if (sr & I2S_FLAG_OVR) != 0 {
+                if hi2s.regs.sr().read().ovr() {
                     // Clear Overrun flag
-                    unsafe {
-                        let _dummy = ptr::read_volatile((hi2s.instance + 0x0C) as *const u32);
-                        let _dummy = ptr::read_volatile((hi2s.instance + 0x08) as *const u32);
-                    }
+                    let _ = hi2s.regs.dr().read();
+                    let _ = hi2s.regs.sr().read();
                     hi2s.error_code |= HAL_I2S_ERROR_OVR;
                 }
             }
