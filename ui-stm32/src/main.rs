@@ -223,8 +223,22 @@ async fn main(_spawner: Spawner) {
         config
     };
 
-    let mut i2s = I2Sext::new(p.SPI3, p.PA15, p.PC10, p.PB5, p.PB4);
+    let mut tx_buf = [0u16; 400];
+    let mut rx_buf = [0u16; 400];
+
+    let mut i2s: I2Sext<_, u16> = I2Sext::new_with_dma(
+        p.SPI3,
+        p.PA15,
+        p.PC10,
+        p.PB5,
+        p.PB4,
+        p.DMA1_CH7,
+        &mut tx_buf,
+        p.DMA1_CH0,
+        &mut rx_buf,
+    );
     i2s.init(&p.RCC, config).expect("Failed to initialize I2S");
+    i2s.start();
 
     let square_frame: [u16; 16_000] = core::array::from_fn(|i| {
         const LAMBDA: u16 = 18; // Generates 444hz at 8khz sample rate
@@ -234,10 +248,14 @@ async fn main(_spawner: Spawner) {
     });
 
     trace!("before tx");
+    /*
     i2s.transmit(&square_frame, Some(100))
         .expect("Failed to transmit");
+    */
+    i2s.write(&square_frame).await.expect("Failed to transmit");
     trace!("after tx");
 
+    /*
     trace!("before txrx");
     let mut last_frame = [0; 16_000];
     let mut curr_frame = [0; 16_000];
@@ -247,4 +265,7 @@ async fn main(_spawner: Spawner) {
 
         last_frame.copy_from_slice(&curr_frame);
     }
+    */
+
+    defmt::info!("done");
 }

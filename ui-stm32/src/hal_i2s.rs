@@ -1,15 +1,14 @@
 use defmt::Format as DefmtFormat;
-use embassy_stm32::gpio::Pin;
-use embassy_stm32::gpio::{AfType, Flex, OutputType, Speed};
-use embassy_stm32::i2s::{ClockPolarity, Format, Standard};
-use embassy_stm32::pac::spi::{vals::*, Spi};
-use embassy_stm32::peripherals::PB4;
-use embassy_stm32::peripherals::RCC;
-use embassy_stm32::spi::CkPin;
-use embassy_stm32::spi::MosiPin;
-use embassy_stm32::spi::WsPin;
-use embassy_stm32::time::Hertz;
-use embassy_stm32::Peri;
+use embassy_stm32::{
+    dma::{word::Word, ReadableRingBuffer, TransferOptions, WritableRingBuffer},
+    gpio::{AfType, Flex, OutputType, Pin, Speed},
+    i2s::{ClockPolarity, Format, Standard},
+    pac::spi::{vals::*, Spi},
+    peripherals::{PB4, RCC},
+    spi::{CkPin, MisoPin, MosiPin, RxDma, TxDma, WsPin},
+    time::Hertz,
+    Peri,
+};
 use num_enum::IntoPrimitive;
 
 // These mapping functions are copy/pasted private methods from i2s.rs
@@ -118,6 +117,9 @@ pub enum Error {
     Timeout,
     InvalidPrescaler,
     EmptyBuffer,
+    Overrun,
+    NotATransmitter,
+    NotAReceiver,
 }
 
 /// Non-fatal errors that occurred during transfer
@@ -236,12 +238,16 @@ where
     Ok(())
 }
 
-pub struct I2Sext<'d, T>
+pub struct I2Sext<'d, T, W: Word = u16>
 where
     T: embassy_stm32::spi::Instance + I2sRegs,
 {
     regs: Spi,
     regs_ext: Spi,
+
+    // DMA ring buffers for async I/O
+    tx_ring_buffer: Option<WritableRingBuffer<'d, W>>,
+    rx_ring_buffer: Option<ReadableRingBuffer<'d, W>>,
 
     // These fields are held just to keep them alive
     #[allow(dead_code)]
@@ -256,7 +262,7 @@ where
     sd_ext: Flex<'d>,
 }
 
-impl<'d, T> I2Sext<'d, T>
+impl<'d, T, W: Word> I2Sext<'d, T, W>
 where
     T: embassy_stm32::spi::Instance + I2sRegs,
 {
@@ -293,7 +299,7 @@ where
         let mut sd = Flex::new(sd);
         sd.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
 
-        let af_num = sd_ext.af_num();
+        let af_num = SDEXT::af_num(&sd_ext);
         let mut sd_ext = Flex::new(sd_ext);
         sd_ext.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
 
@@ -302,6 +308,98 @@ where
         Self {
             regs,
             regs_ext,
+            tx_ring_buffer: None,
+            rx_ring_buffer: None,
+            spi,
+            ws,
+            ck,
+            sd,
+            sd_ext,
+        }
+    }
+
+    /// Create a new I2S extended peripheral with DMA support for full-duplex operation.
+    ///
+    /// This constructor sets up both TX and RX DMA ring buffers for continuous audio streaming.
+    /// The TX DMA uses the main I2S data register, while RX DMA uses the extended I2S data register.
+    pub fn new_with_dma<WS, CK, SD, SDEXT, TXDMA, RXDMA>(
+        spi: Peri<'d, T>,
+        ws: Peri<'d, WS>,
+        ck: Peri<'d, CK>,
+        sd: Peri<'d, SD>,
+        sd_ext: Peri<'d, SDEXT>,
+        txdma: Peri<'d, TXDMA>,
+        tx_buffer: &'d mut [W],
+        rxdma: Peri<'d, RXDMA>,
+        rx_buffer: &'d mut [W],
+    ) -> Self
+    where
+        WS: WsPin<T>,
+        CK: CkPin<T>,
+        SD: MosiPin<T>,
+        SDEXT: SdExtPin<T> + MisoPin<T>,
+        TXDMA: TxDma<T>,
+        RXDMA: RxDma<T>,
+    {
+        // Enable peripheral clocks
+        T::enable_rcc();
+        ws.enable_gpio_port();
+        ck.enable_gpio_port();
+        sd.enable_gpio_port();
+        sd_ext.enable_gpio_port();
+
+        // Configure the pins
+        let af_num = ws.af_num();
+        let mut ws = Flex::new(ws);
+        ws.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+        let af_num = ck.af_num();
+        let mut ck = Flex::new(ck);
+        ck.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+        let af_num = sd.af_num();
+        let mut sd = Flex::new(sd);
+        sd.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+        let af_num = <SDEXT as SdExtPin<T>>::af_num(&sd_ext);
+        let mut sd_ext = Flex::new(sd_ext);
+        sd_ext.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+        let (regs, regs_ext) = T::get_regs();
+
+        // Set up DMA transfer options
+        let mut opts = TransferOptions::default();
+        opts.half_transfer_ir = true;
+        opts.complete_transfer_ir = true;
+        opts.circular = true;
+
+        // Create TX ring buffer (uses main I2S DR)
+        let tx_ring_buffer = unsafe {
+            WritableRingBuffer::new(
+                txdma,
+                embassy_stm32::dma::Request::from(0), // Will be properly configured by the DMA channel
+                regs.dr().as_ptr() as *mut W,
+                tx_buffer,
+                opts,
+            )
+        };
+
+        // Create RX ring buffer (uses extended I2S DR)
+        let rx_ring_buffer = unsafe {
+            ReadableRingBuffer::new(
+                rxdma,
+                embassy_stm32::dma::Request::from(0), // Will be properly configured by the DMA channel
+                regs_ext.dr().as_ptr() as *mut W,
+                rx_buffer,
+                opts,
+            )
+        };
+
+        Self {
+            regs,
+            regs_ext,
+            tx_ring_buffer: Some(tx_ring_buffer),
+            rx_ring_buffer: Some(rx_ring_buffer),
             spi,
             ws,
             ck,
@@ -526,5 +624,89 @@ where
         }
 
         Ok(errors)
+    }
+
+    /// Start DMA transfers for both TX and RX.
+    /// This enables the DMA ring buffers and sets the DMA request enable bits on the I2S peripherals.
+    /// After calling this, the I2S will continuously transfer audio data in the background.
+    pub fn start(&mut self) {
+        if let Some(tx_ring_buffer) = &mut self.tx_ring_buffer {
+            tx_ring_buffer.start();
+            // Enable TX DMA request on main I2S peripheral
+            self.regs.cr2().modify(|w| w.set_txdmaen(true));
+        }
+
+        if let Some(rx_ring_buffer) = &mut self.rx_ring_buffer {
+            rx_ring_buffer.start();
+            // Enable RX DMA request on extended I2S peripheral
+            self.regs_ext.cr2().modify(|w| w.set_rxdmaen(true));
+        }
+
+        // Enable both I2S peripherals
+        self.regs_ext.i2scfgr().modify(|w| w.set_i2se(true));
+        self.regs.i2scfgr().modify(|w| w.set_i2se(true));
+    }
+
+    /// Stop DMA transfers for both TX and RX.
+    /// This waits for ongoing transfers to complete, then disables the DMA and I2S peripherals.
+    pub async fn stop(&mut self) {
+        let tx_stop = async {
+            if let Some(tx_ring_buffer) = &mut self.tx_ring_buffer {
+                tx_ring_buffer.stop().await;
+                self.regs.cr2().modify(|w| w.set_txdmaen(false));
+            }
+        };
+
+        let rx_stop = async {
+            if let Some(rx_ring_buffer) = &mut self.rx_ring_buffer {
+                rx_ring_buffer.stop().await;
+                self.regs_ext.cr2().modify(|w| w.set_rxdmaen(false));
+            }
+        };
+
+        embassy_futures::join::join(rx_stop, tx_stop).await;
+
+        // Disable I2S peripherals
+        self.regs.i2scfgr().modify(|w| w.set_i2se(false));
+        self.regs_ext.i2scfgr().modify(|w| w.set_i2se(false));
+
+        self.clear();
+    }
+
+    /// Clear/reset the DMA ring buffers to their initial state.
+    /// This can be used to recover from overrun conditions.
+    pub fn clear(&mut self) {
+        if let Some(tx_ring_buffer) = &mut self.tx_ring_buffer {
+            tx_ring_buffer.clear();
+        }
+        if let Some(rx_ring_buffer) = &mut self.rx_ring_buffer {
+            rx_ring_buffer.clear();
+        }
+    }
+
+    /// Read data from the I2S receive ring buffer.
+    /// This will wait asynchronously until the requested amount of data is available.
+    /// The I2S is continuously receiving data in the background via DMA.
+    pub async fn read(&mut self, data: &mut [W]) -> Result<(), Error> {
+        match &mut self.rx_ring_buffer {
+            Some(ring) => {
+                ring.read_exact(data).await.map_err(|_| Error::Overrun)?;
+                Ok(())
+            }
+            None => Err(Error::NotAReceiver),
+        }
+    }
+
+    /// Write data to the I2S transmit ring buffer.
+    /// This will wait asynchronously if there's not enough space in the buffer.
+    /// The I2S is continuously transmitting data in the background via DMA.
+    pub async fn write(&mut self, data: &[W]) -> Result<(), Error> {
+        match &mut self.tx_ring_buffer {
+            Some(ring) => {
+                ring.write_exact(data).await.map_err(|_| Error::Overrun)?;
+                Ok(())
+            }
+            None => Err(Error::NotATransmitter),
+        }
     }
 }
