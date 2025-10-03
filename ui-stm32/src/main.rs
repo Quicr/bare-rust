@@ -204,13 +204,6 @@ async fn main(_spawner: Spawner) {
     let mut audio_control = AudioControl::new(i2c);
     audio_control.init();
 
-    // HAL_I2S_MspInit() - Configure I2S3 GPIO and clocks
-    let _ = hal_i2s_msp_init(p.SPI3, p.PA15, p.PC10, p.PB5, p.PB4);
-    defmt::info!(
-        "i2s clock: {}",
-        embassy_stm32::rcc::clocks(&p.RCC).plli2s1_r
-    );
-
     // MX_I2S3_Init() - Configure I2S3 parameters
     let config = {
         use embassy_stm32::{
@@ -230,7 +223,7 @@ async fn main(_spawner: Spawner) {
         config
     };
 
-    let mut i2s = I2sHandle::new_spi3();
+    let mut i2s = I2Sext::new(p.SPI3, p.PA15, p.PC10, p.PB5, p.PB4);
     i2s.init(&p.RCC, config).expect("Failed to initialize I2S");
 
     let square_frame: [u16; 16_000] = core::array::from_fn(|i| {

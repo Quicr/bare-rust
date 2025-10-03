@@ -1,8 +1,15 @@
 use defmt::Format as DefmtFormat;
+use embassy_stm32::gpio::Pin;
+use embassy_stm32::gpio::{AfType, Flex, OutputType, Speed};
 use embassy_stm32::i2s::{ClockPolarity, Format, Standard};
 use embassy_stm32::pac::spi::{vals::*, Spi};
+use embassy_stm32::peripherals::PB4;
 use embassy_stm32::peripherals::RCC;
+use embassy_stm32::spi::CkPin;
+use embassy_stm32::spi::MosiPin;
+use embassy_stm32::spi::WsPin;
 use embassy_stm32::time::Hertz;
+use embassy_stm32::Peri;
 use num_enum::IntoPrimitive;
 
 // These mapping functions are copy/pasted private methods from i2s.rs
@@ -150,22 +157,157 @@ const SPI3: Spi = unsafe { Spi::from_ptr(0x40003C00 as *mut ()) };
 const I2S2EXT: Spi = unsafe { Spi::from_ptr(0x40003400 as *mut ()) };
 const I2S3EXT: Spi = unsafe { Spi::from_ptr(0x40004000 as *mut ()) };
 
-pub struct I2sHandle {
-    regs: Spi,
-    regs_ext: Spi,
+pub trait I2sRegs {
+    fn enable_rcc();
+    fn get_regs() -> (Spi, Spi);
 }
 
-impl I2sHandle {
-    fn new(regs: Spi, regs_ext: Spi) -> Self {
-        Self { regs, regs_ext }
+impl I2sRegs for embassy_stm32::peripherals::SPI2 {
+    fn enable_rcc() {
+        use embassy_stm32::pac::RCC;
+        RCC.apb1enr().modify(|w| w.set_spi2en(true));
     }
 
-    pub fn new_spi2() -> Self {
-        Self::new(SPI2, I2S2EXT)
+    fn get_regs() -> (Spi, Spi) {
+        (SPI2, I2S2EXT)
+    }
+}
+
+impl I2sRegs for embassy_stm32::peripherals::SPI3 {
+    fn enable_rcc() {
+        use embassy_stm32::pac::RCC;
+        RCC.apb1enr().modify(|w| w.set_spi3en(true));
     }
 
-    pub fn new_spi3() -> Self {
-        Self::new(SPI3, I2S3EXT)
+    fn get_regs() -> (Spi, Spi) {
+        (SPI3, I2S3EXT)
+    }
+}
+
+trait EnableGpioPort {
+    fn enable_gpio_port(&self);
+}
+
+impl<T> EnableGpioPort for T
+where
+    T: Pin,
+{
+    fn enable_gpio_port(&self) {
+        use embassy_stm32::pac::RCC;
+        RCC.ahb1enr().modify(|w| match self.port() {
+            0 => w.set_gpioaen(true),
+            1 => w.set_gpioben(true),
+            2 => w.set_gpiocen(true),
+            _ => unreachable!(),
+        });
+    }
+}
+
+pub trait SdExtPin<T>: Pin {
+    fn af_num(&self) -> u8;
+}
+
+// SdExt assignment manually copied from the STM32F405RG data sheet (p. 64)
+impl SdExtPin<embassy_stm32::peripherals::SPI3> for PB4 {
+    #[inline(always)]
+    fn af_num(&self) -> u8 {
+        7
+    }
+}
+
+fn i2s_wait<F>(test_flag: F, timeout: Option<u32>) -> Result<(), Error>
+where
+    F: Fn() -> bool,
+{
+    use embassy_time::Instant;
+
+    let tick_start = Instant::now();
+
+    while !test_flag() {
+        let elapsed = tick_start.elapsed().as_millis() as u32;
+
+        if let Some(timeout) = timeout
+            && elapsed > timeout
+        {
+            return Err(Error::Timeout);
+        }
+    }
+
+    Ok(())
+}
+
+pub struct I2Sext<'d, T>
+where
+    T: embassy_stm32::spi::Instance + I2sRegs,
+{
+    regs: Spi,
+    regs_ext: Spi,
+
+    // These fields are held just to keep them alive
+    #[allow(dead_code)]
+    spi: Peri<'d, T>,
+    #[allow(dead_code)]
+    ws: Flex<'d>,
+    #[allow(dead_code)]
+    ck: Flex<'d>,
+    #[allow(dead_code)]
+    sd: Flex<'d>,
+    #[allow(dead_code)]
+    sd_ext: Flex<'d>,
+}
+
+impl<'d, T> I2Sext<'d, T>
+where
+    T: embassy_stm32::spi::Instance + I2sRegs,
+{
+    pub fn new<WS, CK, SD, SDEXT>(
+        spi: Peri<'d, T>,
+        ws: Peri<'d, WS>,
+        ck: Peri<'d, CK>,
+        sd: Peri<'d, SD>,
+        sd_ext: Peri<'d, SDEXT>,
+    ) -> Self
+    where
+        WS: WsPin<T>,
+        CK: CkPin<T>,
+        SD: MosiPin<T>,
+        SDEXT: SdExtPin<T>,
+    {
+        // Enable peripheral clocks
+        T::enable_rcc();
+        ws.enable_gpio_port();
+        ck.enable_gpio_port();
+        sd.enable_gpio_port();
+        sd_ext.enable_gpio_port();
+
+        // Configure the pins
+        let af_num = ws.af_num();
+        let mut ws = Flex::new(ws);
+        ws.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+        let af_num = ck.af_num();
+        let mut ck = Flex::new(ck);
+        ck.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+        let af_num = sd.af_num();
+        let mut sd = Flex::new(sd);
+        sd.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+        let af_num = sd_ext.af_num();
+        let mut sd_ext = Flex::new(sd_ext);
+        sd_ext.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+
+        let (regs, regs_ext) = T::get_regs();
+
+        Self {
+            regs,
+            regs_ext,
+            spi,
+            ws,
+            ck,
+            sd,
+            sd_ext,
+        }
     }
 
     pub fn init(&mut self, rcc: &Peri<RCC>, config: Config) -> Result<(), Error> {
@@ -384,146 +526,5 @@ impl I2sHandle {
         }
 
         Ok(errors)
-    }
-}
-
-fn i2s_wait<F>(test_flag: F, timeout: Option<u32>) -> Result<(), Error>
-where
-    F: Fn() -> bool,
-{
-    use embassy_time::Instant;
-
-    let tick_start = Instant::now();
-
-    while !test_flag() {
-        let elapsed = tick_start.elapsed().as_millis() as u32;
-
-        if let Some(timeout) = timeout
-            && elapsed > timeout
-        {
-            return Err(Error::Timeout);
-        }
-    }
-
-    Ok(())
-}
-
-use embassy_stm32::gpio::Pin;
-use embassy_stm32::peripherals::PB4;
-use embassy_stm32::spi::CkPin;
-use embassy_stm32::spi::MosiPin;
-use embassy_stm32::spi::WsPin;
-use embassy_stm32::Peri;
-
-pub trait SdExtPin<T>: Pin {
-    fn af_num(&self) -> u8;
-}
-
-// SdExt assignment manually copied from the STM32F405RG data sheet (p. 64)
-impl SdExtPin<embassy_stm32::peripherals::SPI3> for PB4 {
-    #[inline(always)]
-    fn af_num(&self) -> u8 {
-        7
-    }
-}
-
-#[allow(dead_code)]
-pub struct I2Sext<'d, T, WS, CK, SD, SDEXT>
-where
-    T: embassy_stm32::spi::Instance,
-    WS: WsPin<T>,
-    CK: CkPin<T>,
-    SD: MosiPin<T>,
-    SDEXT: SdExtPin<T>,
-{
-    spi: Peri<'d, T>,
-    ws: Peri<'d, WS>,
-    ck: Peri<'d, CK>,
-    sd: Peri<'d, SD>,
-    sd_ext: Peri<'d, SDEXT>,
-}
-
-pub fn hal_i2s_msp_init<'d, T, WS, CK, SD, SDEXT>(
-    spi: Peri<'d, T>,
-    ws: Peri<'d, WS>,
-    ck: Peri<'d, CK>,
-    sd: Peri<'d, SD>,
-    sd_ext: Peri<'d, SDEXT>,
-) -> I2Sext<'d, T, WS, CK, SD, SDEXT>
-where
-    T: embassy_stm32::spi::Instance,
-    WS: WsPin<T>,
-    CK: CkPin<T>,
-    SD: MosiPin<T>,
-    SDEXT: SdExtPin<T>,
-{
-    use embassy_stm32::pac::{
-        gpio::vals::{Moder, Ospeedr, Ot, Pupdr},
-        GPIOA, GPIOB, GPIOC, RCC,
-    };
-
-    fn configure_pin(port: u8, pin: u8, af_num: u8) {
-        let port = match port {
-            0 => GPIOA,
-            1 => GPIOB,
-            2 => GPIOC,
-            _ => unreachable!(),
-        };
-        let pin = pin as usize;
-
-        port.moder().modify(|w| w.set_moder(pin, Moder::ALTERNATE));
-        port.otyper().modify(|w| w.set_ot(pin, Ot::PUSH_PULL));
-        port.pupdr().modify(|w| w.set_pupdr(pin, Pupdr::FLOATING));
-        port.ospeedr()
-            .modify(|w| w.set_ospeedr(pin, Ospeedr::LOW_SPEED));
-        port.afr(pin / 8).modify(|w| w.set_afr(pin % 8, af_num));
-    }
-
-    // Enable peripheral clocks
-    RCC.apb1enr().modify(|w| w.set_spi3en(true));
-    RCC.ahb1enr().modify(|w| {
-        w.set_gpioaen(true);
-        w.set_gpioben(true);
-        w.set_gpiocen(true);
-    });
-
-    // Configure the pins
-    configure_pin(ws.port(), ws.pin(), ws.af_num());
-    configure_pin(ck.port(), ck.pin(), ck.af_num());
-    configure_pin(sd.port(), sd.pin(), sd.af_num());
-    configure_pin(sd_ext.port(), sd_ext.pin(), sd_ext.af_num());
-
-    // XXX In principle, this should be equivalent.  Looking at the the code, it looks like
-    // set_as_af_unchecked is making the same set of register modifications as what we do above.
-    // And yet, when we build it, it does not work.
-    //
-    // cf. https://github.com/embassy-rs/embassy/blob/main/embassy-stm32/src/gpio.rs#L652
-    /*
-    let af_num = ws.af_num();
-    let mut ws = Flex::new(ws);
-    ws.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
-
-    let af_num = ck.af_num();
-    let mut ck = Flex::new(ck);
-    ck.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
-
-    let af_num = sd.af_num();
-    let mut sd = Flex::new(sd);
-    sd.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
-
-    let af_num = sd_ext.af_num();
-    let mut sd_ext = Flex::new(sd_ext);
-    sd_ext.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
-    */
-
-    // Note: DMA initialization skipped as requested
-    // Note: I2S3 interrupt configuration skipped (HAL_NVIC_SetPriority/EnableIRQ)
-
-    I2Sext {
-        spi,
-        ws,
-        ck,
-        sd,
-        sd_ext,
     }
 }
