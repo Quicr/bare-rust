@@ -7,7 +7,7 @@ use embassy_stm32::{
     i2s::{ClockPolarity, Format, Standard},
     pac::spi::{vals::*, Spi},
     peripherals::{PB4, RCC},
-    spi::{CkPin, MisoPin, MosiPin, RxDma, TxDma, WsPin},
+    spi::{CkPin, MosiPin, RxDma, TxDma, WsPin},
     time::Hertz,
     Peri,
 };
@@ -249,25 +249,17 @@ impl<'d, T, W: Word> I2Sext<'d, T, W>
 where
     T: embassy_stm32::spi::Instance + I2sRegs,
 {
-    pub fn new<WS, CK, SD, SDEXT, TXDMA, RXDMA>(
+    pub fn new(
         spi: Peri<'d, T>,
-        ws: Peri<'d, WS>,
-        ck: Peri<'d, CK>,
-        sd: Peri<'d, SD>,
-        sd_ext: Peri<'d, SDEXT>,
-        txdma: Peri<'d, TXDMA>,
+        ws: Peri<'d, impl WsPin<T>>,
+        ck: Peri<'d, impl CkPin<T>>,
+        sd: Peri<'d, impl MosiPin<T>>,
+        sd_ext: Peri<'d, impl SdExtPin<T>>,
+        txdma: Peri<'d, impl TxDma<T>>,
         tx_buffer: &'d mut [W],
-        rxdma: Peri<'d, RXDMA>,
+        rxdma: Peri<'d, impl RxDma<T>>,
         rx_buffer: &'d mut [W],
-    ) -> Self
-    where
-        WS: WsPin<T>,
-        CK: CkPin<T>,
-        SD: MosiPin<T>,
-        SDEXT: SdExtPin<T> + MisoPin<T>,
-        TXDMA: TxDma<T>,
-        RXDMA: RxDma<T>,
-    {
+    ) -> Self {
         // Enable peripheral clocks
         T::enable_rcc();
         ws.enable_gpio_port();
@@ -288,7 +280,7 @@ where
         let mut sd = Flex::new(sd);
         sd.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
 
-        let af_num = <SDEXT as SdExtPin<T>>::af_num(&sd_ext);
+        let af_num = sd_ext.af_num();
         let mut sd_ext = Flex::new(sd_ext);
         sd_ext.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
 
