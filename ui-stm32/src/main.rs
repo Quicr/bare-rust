@@ -16,7 +16,6 @@ use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
-use embedded_hal::delay::DelayNs;
 use {defmt_rtt as _, panic_probe as _};
 
 // Configuration parameters
@@ -232,7 +231,7 @@ async fn main(_spawner: Spawner) {
     let mut tx_buf = [0u16; BUFFER_SIZE];
     let mut rx_buf = [0u16; BUFFER_SIZE];
 
-    let mut i2s: I2Sext<_, u16> = I2Sext::new_with_dma(
+    let mut i2s: I2Sext<_, u16> = I2Sext::new(
         p.SPI3,
         p.PA15,
         p.PC10,
@@ -256,26 +255,20 @@ async fn main(_spawner: Spawner) {
     let mut last_frame = [0; FRAME_SIZE];
     let mut curr_frame = [0; FRAME_SIZE];
     for _i in 0..(16_000 / square_frame.len()) {
-        trace!("tick");
-
-        i2s.transmit_receive_dma(&square_frame, &mut last_frame)
+        i2s.transmit_receive(&square_frame, &mut last_frame)
             .await
             .expect("Failed to transmit");
-
-        trace!("t0ck");
     }
     trace!("after tx");
 
     trace!("before txrx");
-    let mut last_frame = [0; FRAME_SIZE];
-    let mut curr_frame = [0; FRAME_SIZE];
     loop {
         trace!(
             "tick {}",
             last_frame.iter().map(|x| *x as usize).sum::<usize>()
         );
 
-        i2s.transmit_receive_dma(&last_frame, &mut curr_frame)
+        i2s.transmit_receive(&last_frame, &mut curr_frame)
             .await
             .expect("Failed to transmit/receive");
 
@@ -286,6 +279,4 @@ async fn main(_spawner: Spawner) {
 
         last_frame.copy_from_slice(&curr_frame);
     }
-
-    defmt::info!("done");
 }
