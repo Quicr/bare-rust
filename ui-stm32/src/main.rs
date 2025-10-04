@@ -16,6 +16,7 @@ use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
+use embedded_hal::delay::DelayNs;
 use {defmt_rtt as _, panic_probe as _};
 
 // Configuration parameters
@@ -223,8 +224,13 @@ async fn main(_spawner: Spawner) {
         config
     };
 
-    let mut tx_buf = [0u16; 400];
-    let mut rx_buf = [0u16; 400];
+    const LAMBDA: usize = 18;
+    const TARGET_FRAME_SIZE: usize = 4000;
+    const FRAME_SIZE: usize = TARGET_FRAME_SIZE - (TARGET_FRAME_SIZE % (2 * LAMBDA));
+    const BUFFER_SIZE: usize = 2 * FRAME_SIZE;
+
+    let mut tx_buf = [0u16; BUFFER_SIZE];
+    let mut rx_buf = [0u16; BUFFER_SIZE];
 
     let mut i2s: I2Sext<_, u16> = I2Sext::new_with_dma(
         p.SPI3,
@@ -240,32 +246,46 @@ async fn main(_spawner: Spawner) {
     i2s.init(&p.RCC, config).expect("Failed to initialize I2S");
     i2s.start();
 
-    let square_frame: [u16; 16_000] = core::array::from_fn(|i| {
-        const LAMBDA: u16 = 18; // Generates 444hz at 8khz sample rate
+    let square_frame: [u16; FRAME_SIZE] = core::array::from_fn(|i| {
         const AMPLITUDE: u16 = 0x1fff;
 
-        (((i as u16) / LAMBDA) % 2) * AMPLITUDE
+        (((i / LAMBDA) % 2) as u16) * AMPLITUDE
     });
 
     trace!("before tx");
-    /*
-    i2s.transmit(&square_frame, Some(100))
-        .expect("Failed to transmit");
-    */
-    i2s.write(&square_frame).await.expect("Failed to transmit");
+    let mut last_frame = [0; FRAME_SIZE];
+    let mut curr_frame = [0; FRAME_SIZE];
+    for _i in 0..(16_000 / square_frame.len()) {
+        trace!("tick");
+
+        i2s.transmit_receive_dma(&square_frame, &mut last_frame)
+            .await
+            .expect("Failed to transmit");
+
+        trace!("t0ck");
+    }
     trace!("after tx");
 
-    /*
     trace!("before txrx");
-    let mut last_frame = [0; 16_000];
-    let mut curr_frame = [0; 16_000];
+    let mut last_frame = [0; FRAME_SIZE];
+    let mut curr_frame = [0; FRAME_SIZE];
     loop {
-        i2s.transmit_receive(&last_frame, &mut curr_frame, Some(100))
+        trace!(
+            "tick {}",
+            last_frame.iter().map(|x| *x as usize).sum::<usize>()
+        );
+
+        i2s.transmit_receive_dma(&last_frame, &mut curr_frame)
+            .await
             .expect("Failed to transmit/receive");
+
+        trace!(
+            "t0ck {}",
+            curr_frame.iter().map(|x| *x as usize).sum::<usize>()
+        );
 
         last_frame.copy_from_slice(&curr_frame);
     }
-    */
 
     defmt::info!("done");
 }

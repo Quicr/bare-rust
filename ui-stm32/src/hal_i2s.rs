@@ -1,6 +1,8 @@
 use defmt::Format as DefmtFormat;
 use embassy_stm32::{
-    dma::{word::Word, ReadableRingBuffer, TransferOptions, WritableRingBuffer},
+    dma::{
+        word::Word, AnyChannel, ReadableRingBuffer, Request, TransferOptions, WritableRingBuffer,
+    },
     gpio::{AfType, Flex, OutputType, Pin, Speed},
     i2s::{ClockPolarity, Format, Standard},
     pac::spi::{vals::*, Spi},
@@ -10,6 +12,24 @@ use embassy_stm32::{
     Peri,
 };
 use num_enum::IntoPrimitive;
+
+struct ChannelAndRequest<'d> {
+    pub channel: Peri<'d, AnyChannel>,
+    pub request: Request,
+}
+
+macro_rules! new_dma {
+    ($name:ident) => {{
+        let dma = $name;
+        dma.remap();
+        let request = dma.request();
+        defmt::info!("dma request: {}", request);
+        Some(ChannelAndRequest {
+            channel: dma.into(),
+            request,
+        })
+    }};
+}
 
 // These mapping functions are copy/pasted private methods from i2s.rs
 const fn datlen(format: Format) -> Datlen {
@@ -226,12 +246,11 @@ where
     let tick_start = Instant::now();
 
     while !test_flag() {
-        let elapsed = tick_start.elapsed().as_millis() as u32;
-
-        if let Some(timeout) = timeout
-            && elapsed > timeout
-        {
-            return Err(Error::Timeout);
+        if let Some(timeout) = timeout {
+            let elapsed = tick_start.elapsed().as_millis() as u32;
+            if elapsed > timeout {
+                return Err(Error::Timeout);
+            }
         }
     }
 
@@ -373,33 +392,36 @@ where
         opts.complete_transfer_ir = true;
         opts.circular = true;
 
+        // Configure DMA channels
+        let txdma = new_dma!(txdma).map(|d| (d, tx_buffer));
+        let rxdma = new_dma!(rxdma).map(|d| (d, rx_buffer));
+
         // Create TX ring buffer (uses main I2S DR)
-        let tx_ring_buffer = unsafe {
-            WritableRingBuffer::new(
-                txdma,
-                embassy_stm32::dma::Request::from(0), // Will be properly configured by the DMA channel
-                regs.dr().as_ptr() as *mut W,
-                tx_buffer,
-                opts,
-            )
-        };
+        // TX uses DMA1_Stream7, Channel 0 (from Embassy's SPI3 TxDma trait)
+        let tx_ptr = regs.dr().as_ptr() as *mut W;
+        let tx_ring_buffer = txdma.map(|(ch, buf)| unsafe {
+            WritableRingBuffer::new(ch.channel, ch.request, tx_ptr, buf, opts)
+        });
 
         // Create RX ring buffer (uses extended I2S DR)
-        let rx_ring_buffer = unsafe {
-            ReadableRingBuffer::new(
-                rxdma,
-                embassy_stm32::dma::Request::from(0), // Will be properly configured by the DMA channel
-                regs_ext.dr().as_ptr() as *mut W,
-                rx_buffer,
-                opts,
-            )
-        };
+        // RX uses DMA1_Stream0, Channel 3 (I2S3ext, not SPI3!)
+        // Embassy's SPI3 RxDma uses Channel 0, but I2S3ext needs Channel 3
+        let rx_ptr = regs_ext.dr().as_ptr() as *mut W;
+        let rx_ring_buffer = rxdma.map(|(ch, buf)| unsafe {
+            let correct_request = 3u8; // I2S3ext uses DMA channel 3
+            defmt::info!(
+                "Overriding RX DMA request from {} to {}",
+                ch.request,
+                correct_request
+            );
+            ReadableRingBuffer::new(ch.channel, correct_request, rx_ptr, buf, opts)
+        });
 
         Self {
             regs,
             regs_ext,
-            tx_ring_buffer: Some(tx_ring_buffer),
-            rx_ring_buffer: Some(rx_ring_buffer),
+            tx_ring_buffer,
+            rx_ring_buffer,
             spi,
             ws,
             ck,
@@ -630,21 +652,49 @@ where
     /// This enables the DMA ring buffers and sets the DMA request enable bits on the I2S peripherals.
     /// After calling this, the I2S will continuously transfer audio data in the background.
     pub fn start(&mut self) {
-        if let Some(tx_ring_buffer) = &mut self.tx_ring_buffer {
-            tx_ring_buffer.start();
-            // Enable TX DMA request on main I2S peripheral
-            self.regs.cr2().modify(|w| w.set_txdmaen(true));
-        }
+        // Match STM HAL sequence for TX mode:
+        // 1. Enable RX DMA first
+        // 2. Enable RX DMA request on extended I2S
+        // 3. Enable TX DMA
+        // 4. Enable TX DMA request on main I2S
+        // 5. Enable extended I2S (receiver)
+        // 6. Enable main I2S (transmitter)
 
         if let Some(rx_ring_buffer) = &mut self.rx_ring_buffer {
+            defmt::info!("Starting RX ring buffer");
             rx_ring_buffer.start();
             // Enable RX DMA request on extended I2S peripheral
             self.regs_ext.cr2().modify(|w| w.set_rxdmaen(true));
+            defmt::info!("RX DMA enabled, CR2={:08x}", self.regs_ext.cr2().read().0);
         }
 
-        // Enable both I2S peripherals
+        if let Some(tx_ring_buffer) = &mut self.tx_ring_buffer {
+            defmt::info!("Starting TX ring buffer");
+            tx_ring_buffer.start();
+            // Enable TX DMA request on main I2S peripheral
+            self.regs.cr2().modify(|w| w.set_txdmaen(true));
+            defmt::info!("TX DMA enabled, CR2={:08x}", self.regs.cr2().read().0);
+        }
+
+        // Enable both I2S peripherals (extended first, then main)
         self.regs_ext.i2scfgr().modify(|w| w.set_i2se(true));
+        defmt::info!(
+            "I2S ext enabled, I2SCFGR={:08x}",
+            self.regs_ext.i2scfgr().read().0
+        );
+
         self.regs.i2scfgr().modify(|w| w.set_i2se(true));
+        defmt::info!(
+            "I2S main enabled, I2SCFGR={:08x}",
+            self.regs.i2scfgr().read().0
+        );
+
+        // Check status registers
+        defmt::info!(
+            "I2S SR={:08x}, I2Sext SR={:08x}",
+            self.regs.sr().read().0,
+            self.regs_ext.sr().read().0
+        );
     }
 
     /// Stop DMA transfers for both TX and RX.
@@ -684,7 +734,102 @@ where
         }
     }
 
+    /// Check how much data is available in the RX ring buffer (for debugging)
+    pub fn rx_available(&mut self) -> Result<usize, &str> {
+        let Some(rx_ring_buffer) = self.rx_ring_buffer.as_mut() else {
+            return Err("No ring buffer available");
+        };
+
+        match rx_ring_buffer.len() {
+            Ok(len) => Ok(len),
+            Err(err) => {
+                defmt::error!("ring buffer error: {:?}", err);
+                Err("ring buffer error")
+            }
+        }
+    }
+
+    /// Check status registers (for debugging)
+    pub fn check_status(&self) {
+        defmt::info!(
+            "Main I2S SR={:08x} (TXE={} BSY={} UDR={} OVR={})",
+            self.regs.sr().read().0,
+            self.regs.sr().read().txe(),
+            self.regs.sr().read().bsy(),
+            self.regs.sr().read().udr(),
+            self.regs.sr().read().ovr()
+        );
+
+        defmt::info!(
+            "Ext I2S SR={:08x} (RXNE={} BSY={} UDR={} OVR={})",
+            self.regs_ext.sr().read().0,
+            self.regs_ext.sr().read().rxne(),
+            self.regs_ext.sr().read().bsy(),
+            self.regs_ext.sr().read().udr(),
+            self.regs_ext.sr().read().ovr()
+        );
+    }
+
+    /// Perform synchronized full-duplex I2S transfer via DMA.
+    ///
+    /// This method transmits data from `tx_data` while simultaneously receiving into `rx_data`.
+    /// The buffers must be the same length. This matches the STM HAL's `HAL_I2SEx_TransmitReceive_DMA()`
+    /// behavior where TX and RX are synchronized for each audio frame.
+    ///
+    /// # Arguments
+    /// * `tx_data` - Data to transmit
+    /// * `rx_data` - Buffer to receive data into
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - DMA is not configured (ring buffers are None)
+    /// - Buffer lengths don't match
+    /// - DMA overrun/underrun occurs
+    pub async fn transmit_receive_dma(
+        &mut self,
+        tx_data: &[W],
+        rx_data: &mut [W],
+    ) -> Result<(), Error> {
+        if tx_data.len() != rx_data.len() {
+            return Err(Error::EmptyBuffer); // Reuse this error for length mismatch
+        }
+
+        match (&mut self.tx_ring_buffer, &mut self.rx_ring_buffer) {
+            (Some(tx_ring), Some(rx_ring)) => {
+                // In full-duplex mode, we need to coordinate TX and RX
+                // The STM HAL only uses RX DMA callbacks to drive both operations
+                // We'll use embassy_futures::join to do both operations concurrently
+
+                let tx_future = async {
+                    let rv = tx_ring.write_exact(tx_data).await;
+                    defmt::info!("tx_future done: {:?}", rv);
+                    rv
+                };
+                let rx_future = async {
+                    let rv = rx_ring.read_exact(rx_data).await;
+                    defmt::info!("rx_future done: {:?}", rv);
+                    rv
+                };
+
+                // Execute both DMA operations concurrently
+                let (tx_result, rx_result) =
+                    embassy_futures::join::join(tx_future, rx_future).await;
+
+                tx_result.map_err(|_| Error::Overrun)?;
+                rx_result.map_err(|_| Error::Overrun)?;
+
+                Ok(())
+            }
+            (None, _) => Err(Error::NotATransmitter),
+            (_, None) => Err(Error::NotAReceiver),
+        }
+    }
+
     /// Read data from the I2S receive ring buffer.
+    ///
+    /// **Note**: For full-duplex operation, prefer using `transmit_receive_dma()` instead,
+    /// as it ensures TX and RX stay synchronized per the I2S protocol.
+    ///
     /// This will wait asynchronously until the requested amount of data is available.
     /// The I2S is continuously receiving data in the background via DMA.
     pub async fn read(&mut self, data: &mut [W]) -> Result<(), Error> {
@@ -698,6 +843,10 @@ where
     }
 
     /// Write data to the I2S transmit ring buffer.
+    ///
+    /// **Note**: For full-duplex operation, prefer using `transmit_receive_dma()` instead,
+    /// as it ensures TX and RX stay synchronized per the I2S protocol.
+    ///
     /// This will wait asynchronously if there's not enough space in the buffer.
     /// The I2S is continuously transmitting data in the background via DMA.
     pub async fn write(&mut self, data: &[W]) -> Result<(), Error> {
