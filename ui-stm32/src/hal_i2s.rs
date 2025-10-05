@@ -1,13 +1,14 @@
 use defmt::Format as DefmtFormat;
 use embassy_stm32::{
     dma::{
-        word::Word, AnyChannel, ReadableRingBuffer, Request, TransferOptions, WritableRingBuffer,
+        word::Word, AnyChannel, Channel, ReadableRingBuffer, Request, TransferOptions,
+        WritableRingBuffer,
     },
     gpio::{AfType, Flex, OutputType, Pin, Speed},
     i2s::{ClockPolarity, Format, Standard},
     pac::spi::{vals::*, Spi},
-    peripherals::{PB4, RCC},
-    spi::{CkPin, MosiPin, RxDma, TxDma, WsPin},
+    peripherals::{DMA1_CH0, PB4, RCC},
+    spi::{CkPin, Instance, MosiPin, TxDma, WsPin},
     time::Hertz,
     Peri,
 };
@@ -190,6 +191,19 @@ impl I2sRegs for embassy_stm32::peripherals::SPI3 {
     }
 }
 
+pub trait RxDmaExt<T: Instance>: Channel {
+    fn request(&self) -> Request;
+    fn remap(&self);
+}
+
+impl RxDmaExt<embassy_stm32::peripherals::SPI3> for DMA1_CH0 {
+    fn request(&self) -> Request {
+        3
+    }
+
+    fn remap(&self) {}
+}
+
 trait EnableGpioPort {
     fn enable_gpio_port(&self);
 }
@@ -223,7 +237,7 @@ impl SdExtPin<embassy_stm32::peripherals::SPI3> for PB4 {
 
 pub struct I2Sext<'d, T, W: Word = u16>
 where
-    T: embassy_stm32::spi::Instance + I2sRegs,
+    T: Instance + I2sRegs,
 {
     regs: Spi,
     regs_ext: Spi,
@@ -247,7 +261,7 @@ where
 
 impl<'d, T, W: Word> I2Sext<'d, T, W>
 where
-    T: embassy_stm32::spi::Instance + I2sRegs,
+    T: Instance + I2sRegs,
 {
     pub fn new(
         spi: Peri<'d, T>,
@@ -257,7 +271,7 @@ where
         sd_ext: Peri<'d, impl SdExtPin<T>>,
         txdma: Peri<'d, impl TxDma<T>>,
         tx_buffer: &'d mut [W],
-        rxdma: Peri<'d, impl RxDma<T>>,
+        rxdma: Peri<'d, impl RxDmaExt<T>>,
         rx_buffer: &'d mut [W],
     ) -> Self {
         // Enable peripheral clocks
@@ -297,23 +311,15 @@ where
         let rxdma = new_dma!(rxdma).map(|d| (d, rx_buffer));
 
         // Create TX ring buffer (uses main I2S DR)
-        // TX uses DMA1_Stream7, Channel 0 (from Embassy's SPI3 TxDma trait)
         let tx_ptr = regs.dr().as_ptr() as *mut W;
         let tx_ring_buffer = txdma.map(|(ch, buf)| unsafe {
             WritableRingBuffer::new(ch.channel, ch.request, tx_ptr, buf, opts)
         });
 
         // Create RX ring buffer (uses extended I2S DR)
-        // RX uses DMA1_Stream0, Channel 3 (I2S3ext, not SPI3!)
-        // Embassy's SPI3 RxDma uses Channel 0, but I2S3ext needs Channel 3
         let rx_ptr = regs_ext.dr().as_ptr() as *mut W;
         let rx_ring_buffer = rxdma.map(|(ch, buf)| unsafe {
-            // XXX This is a bug in Embassy, or perhaps a mismatch between Embassy's targeting
-            // SPI and our targeting I2S3ext.  These numbers come from spi::TxDma; we may want to
-            // do something like define a TxDmaExt trait (similar to the SdExtPin), that would
-            // perform this override.
-            let correct_request = 3u8;
-            ReadableRingBuffer::new(ch.channel, correct_request, rx_ptr, buf, opts)
+            ReadableRingBuffer::new(ch.channel, ch.request, rx_ptr, buf, opts)
         });
 
         Self {
