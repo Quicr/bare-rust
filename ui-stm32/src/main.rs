@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![allow(dead_code)] // XXX
+// #![allow(dead_code)] // XXX
 
 mod board;
 mod hal_i2s;
@@ -207,19 +207,17 @@ async fn main(_spawner: Spawner) {
     // MX_I2S3_Init() - Configure I2S3 parameters
     let config = {
         use embassy_stm32::{
-            i2s::{ClockPolarity, Format, Standard},
+            i2s::{ClockPolarity, Config, Format, Mode, Standard},
             time::Hertz,
         };
-        use hal_i2s::Config;
 
         let mut config = Config::default();
-        config.mode = Mode::SlaveTx;
+        config.mode = Mode::Slave;
         config.standard = Standard::Philips;
         config.format = Format::Data16Channel32;
         config.master_clock = false;
         config.frequency = Hertz(8_000);
         config.clock_polarity = ClockPolarity::IdleLow;
-        config.full_duplex_mode = FullDuplexMode::Enable;
         config
     };
 

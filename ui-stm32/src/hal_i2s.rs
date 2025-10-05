@@ -5,7 +5,7 @@ use embassy_stm32::{
         WritableRingBuffer,
     },
     gpio::{AfType, Flex, OutputType, Pin, Speed},
-    i2s::{ClockPolarity, Format, Standard},
+    i2s::{ClockPolarity, Config, Error, Format, Mode, Standard},
     pac::spi::{vals::*, Spi},
     peripherals::{DMA1_CH0, PB4, RCC},
     spi::{CkPin, Instance, MosiPin, TxDma, WsPin},
@@ -98,64 +98,6 @@ fn compute_baud_rate(
         (true, 255)
     } else {
         ((division & 1) == 1, (division >> 1) as u8)
-    }
-}
-
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum Mode {
-    SlaveTx = 0x00000000,
-    SlaveRx = 0x00000100,
-    MasterTx = 0x00000200,
-    MasterRx = 0x00000300,
-}
-
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, IntoPrimitive)]
-pub enum FullDuplexMode {
-    Disable = 0x00000000,
-    Enable = 0x00000001,
-}
-
-#[derive(DefmtFormat, Debug, Clone, Copy, PartialEq)]
-pub enum Error {
-    Busy,
-    Timeout,
-    InvalidPrescaler,
-    EmptyBuffer,
-    Overrun,
-    NotATransmitter,
-    NotAReceiver,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TransferErrors {
-    pub underrun: bool,
-    pub overrun: bool,
-}
-
-#[derive(Clone, Copy)]
-pub struct Config {
-    pub mode: Mode,
-    pub standard: Standard,
-    pub format: Format,
-    pub master_clock: bool,
-    pub frequency: Hertz,
-    pub clock_polarity: ClockPolarity,
-    pub full_duplex_mode: FullDuplexMode,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            mode: Mode::SlaveTx,
-            standard: Standard::Philips,
-            format: Format::Data16Channel16,
-            master_clock: false,
-            frequency: Hertz(8_000),
-            clock_polarity: ClockPolarity::IdleLow,
-            full_duplex_mode: FullDuplexMode::Disable,
-        }
     }
 }
 
@@ -352,12 +294,16 @@ where
             w.set_mckoe(config.master_clock);
         });
 
-        // Clear I2SMOD, I2SE, I2SCFG, PCMSYNC, I2SSTD, CKPOL, DATLEN and CHLEN bits
-        // And configure the I2S with the InitStruct values
+        // Configure the I2S peripheral
+        // XXX We always configure the main peripheral as the transmit side.  Enabling swapping
+        // direction would require additional config variables.  This means that the ext side is
+        // always in SLAVE_RX mode below.
         self.regs.i2scfgr().modify(|w| {
-            // TODO use semantic modifiers
-            let mode: u32 = config.mode.into();
-            w.0 = mode;
+            w.0 = 0;
+            w.set_i2scfg(match config.mode {
+                Mode::Master => I2scfg::MASTER_TX,
+                Mode::Slave => I2scfg::SLAVE_TX,
+            });
             w.set_i2smod(true);
             w.set_i2sstd(to_i2sstd(config.standard));
             w.set_pcmsync(to_pcmsync(config.standard));
@@ -366,27 +312,18 @@ where
             w.set_ckpol(to_ckpol(config.clock_polarity));
         });
 
-        // Configure the I2S extended if the full duplex mode is enabled
-        if config.full_duplex_mode == FullDuplexMode::Enable {
-            // Get the mode to be configured for the extended I2S
-            let ext_mode = match config.mode {
-                Mode::MasterTx | Mode::SlaveTx => Mode::SlaveRx,
-                Mode::MasterRx | Mode::SlaveRx => Mode::SlaveTx,
-            };
-
-            // Configure the I2S Slave with the I2S Master parameter values
-            self.regs_ext.i2scfgr().modify(|w| {
-                // TODO use semantic modifiers
-                let mode: u32 = ext_mode.into();
-                w.0 = mode;
-                w.set_i2smod(true);
-                w.set_i2sstd(to_i2sstd(config.standard));
-                w.set_pcmsync(to_pcmsync(config.standard));
-                w.set_datlen(datlen(config.format));
-                w.set_chlen(chlen(config.format));
-                w.set_ckpol(to_ckpol(config.clock_polarity));
-            });
-        }
+        // Configure the Ext peripheral in the opposite direction, but otherwise same parameter values
+        self.regs_ext.i2scfgr().modify(|w| {
+            // TODO use semantic modifiers
+            w.0 = 0;
+            w.set_i2scfg(I2scfg::SLAVE_RX);
+            w.set_i2smod(true);
+            w.set_i2sstd(to_i2sstd(config.standard));
+            w.set_pcmsync(to_pcmsync(config.standard));
+            w.set_datlen(datlen(config.format));
+            w.set_chlen(chlen(config.format));
+            w.set_ckpol(to_ckpol(config.clock_polarity));
+        });
 
         Ok(())
     }
@@ -448,7 +385,7 @@ where
         rx_data: &mut [W],
     ) -> Result<(), Error> {
         if tx_data.len() != rx_data.len() {
-            return Err(Error::EmptyBuffer); // Reuse this error for length mismatch
+            return Err(Error::Overrun); // Reuse this error for length mismatch
         }
 
         match (&mut self.tx_ring_buffer, &mut self.rx_ring_buffer) {
