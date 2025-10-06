@@ -12,7 +12,7 @@ use ui_app::Event;
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::{i2s::I2Sext, mode::Async, usart::UartRx};
+use embassy_stm32::{i2s::I2S, mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
@@ -229,7 +229,7 @@ async fn main(_spawner: Spawner) {
     let mut tx_buf = [0u16; BUFFER_SIZE];
     let mut rx_buf = [0u16; BUFFER_SIZE];
 
-    let mut i2s: I2Sext<_, u16> = I2Sext::new(
+    let mut i2s: I2S<u16> = I2S::new_full_duplex(
         p.SPI3,
         p.PA15,
         p.PC10,
@@ -239,13 +239,12 @@ async fn main(_spawner: Spawner) {
         &mut tx_buf,
         p.DMA1_CH0,
         &mut rx_buf,
+        config.clone(),
     );
-    i2s.init(&p.RCC, config).expect("Failed to initialize I2S");
     i2s.start();
 
     let square_frame: [u16; FRAME_SIZE] = core::array::from_fn(|i| {
         const AMPLITUDE: u16 = 0x1fff;
-
         (((i / LAMBDA) % 2) as u16) * AMPLITUDE
     });
 
@@ -253,7 +252,7 @@ async fn main(_spawner: Spawner) {
     let mut last_frame = [0; FRAME_SIZE];
     let mut curr_frame = [0; FRAME_SIZE];
     for _i in 0..(16_000 / square_frame.len()) {
-        i2s.transmit_receive(&square_frame, &mut last_frame)
+        i2s.read_write(&square_frame, &mut last_frame)
             .await
             .expect("Failed to transmit");
     }
@@ -266,7 +265,7 @@ async fn main(_spawner: Spawner) {
             last_frame.iter().map(|x| *x as usize).sum::<usize>()
         );
 
-        i2s.transmit_receive(&last_frame, &mut curr_frame)
+        i2s.read_write(&last_frame, &mut curr_frame)
             .await
             .expect("Failed to transmit/receive");
 
