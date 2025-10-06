@@ -19,6 +19,7 @@ struct ChannelAndRequest<'d> {
     pub request: Request,
 }
 
+// This is exactly the new_dma macro from Embassy
 macro_rules! new_dma {
     ($name:ident) => {{
         let dma = $name;
@@ -29,6 +30,17 @@ macro_rules! new_dma {
             channel: dma.into(),
             request,
         })
+    }};
+}
+
+// This is similar to the new_pin macro from Embassy, but adapted to not use Embassy-private
+// functions.
+macro_rules! new_pin {
+    ($name:ident, $af_type:expr) => {{
+        let af_num = $name.af_num();
+        let mut pin = Flex::new($name);
+        pin.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+        pin
     }};
 }
 
@@ -224,21 +236,10 @@ where
         sd_ext.enable_gpio_port();
 
         // Configure the pins
-        let af_num = ws.af_num();
-        let mut ws = Flex::new(ws);
-        ws.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
-
-        let af_num = ck.af_num();
-        let mut ck = Flex::new(ck);
-        ck.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
-
-        let af_num = sd.af_num();
-        let mut sd = Flex::new(sd);
-        sd.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
-
-        let af_num = sd_ext.af_num();
-        let mut sd_ext = Flex::new(sd_ext);
-        sd_ext.set_as_af_unchecked(af_num, AfType::output(OutputType::PushPull, Speed::Low));
+        let ws = new_pin!(ws, AfType::output(OutputType::PushPull, Speed::Low));
+        let ck = new_pin!(ck, AfType::output(OutputType::PushPull, Speed::Low));
+        let sd = new_pin!(sd, AfType::output(OutputType::PushPull, Speed::Low));
+        let sd_ext = new_pin!(sd_ext, AfType::output(OutputType::PushPull, Speed::Low));
 
         let (regs, regs_ext) = T::get_regs();
 

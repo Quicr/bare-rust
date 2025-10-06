@@ -3,8 +3,8 @@
 // #![allow(dead_code)] // XXX
 
 mod board;
-mod hal_i2s;
-use hal_i2s::*;
+// mod hal_i2s;
+// use hal_i2s::*;
 
 use board::{AudioControl, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
@@ -12,7 +12,7 @@ use ui_app::Event;
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::{mode::Async, usart::UartRx};
+use embassy_stm32::{i2s::I2Sext, mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
 use embassy_time::Timer;
