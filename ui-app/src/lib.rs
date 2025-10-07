@@ -1,6 +1,6 @@
 #![no_std]
 
-use bitmap_font::{tamzen::FONT_10x20, BitmapFont, TextStyle};
+use bitmap_font::{BitmapFont, TextStyle, tamzen::FONT_10x20};
 use core::fmt::Write;
 use defmt::Format;
 use embedded_graphics::{
