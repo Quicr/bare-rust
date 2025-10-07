@@ -1,6 +1,6 @@
 #![no_std]
 
-use bitmap_font::{BitmapFont, TextStyle, tamzen::FONT_10x20};
+use bitmap_font::{tamzen::FONT_10x20, BitmapFont, TextStyle};
 use core::fmt::Write;
 use defmt::Format;
 use embedded_graphics::{
@@ -227,20 +227,6 @@ impl App {
     pub fn start(&mut self, out: &mut impl Outputs) {
         // Extinguish the status LED
         out.status_led().set_color(Color::Black);
-
-        // Read the EEPROM, XOR with 0xFF, write it, then read it back
-        let mut eeprom_data = [0u8; 256];
-        out.eeprom().read(&mut eeprom_data);
-        let hex: heapless::String<1024> = eeprom_data.encode_hex();
-        defmt::info!("eeprom before {}", hex);
-
-        eeprom_data.iter_mut().for_each(|x| *x ^= 0xff);
-        out.eeprom().write(&eeprom_data);
-
-        eeprom_data.fill(0);
-        out.eeprom().read(&mut eeprom_data);
-        let hex: heapless::String<1024> = eeprom_data.encode_hex();
-        defmt::info!("eeprom after {}", hex);
 
         // Draw a test pattern to the screen
         let rect = out.screen().bounding_box();
