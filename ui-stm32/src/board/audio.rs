@@ -2,7 +2,7 @@
 
 use embassy_stm32::{
     i2c::{I2c, Master},
-    i2s::I2S,
+    i2s::{self, I2S},
     mode::Blocking,
 };
 
@@ -30,11 +30,18 @@ impl<'a> ui_app::AudioData for AudioData<'a> {
     async fn read(&mut self) -> Frame {
         let zero = Frame::default();
         let mut out = Frame::default();
-        self.i2s
-            .read_write(&zero.0, &mut out.0)
-            .await
-            .map(|_| out)
-            .expect("oh no")
+
+        // Loop to retry on overrun failures
+        loop {
+            match self.i2s.read_write(&zero.0, &mut out.0).await {
+                Ok(_) => return out,
+                Err(i2s::Error::Overrun) => {
+                    self.i2s.clear();
+                    // and retry
+                }
+                Err(e) => defmt::panic!("read error: {:?}", e),
+            }
+        }
     }
 
     async fn write(&mut self, frame: &Frame) {

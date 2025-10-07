@@ -59,12 +59,12 @@ where
     fn write(&mut self, to_net: &ToNet) {
         match to_net {
             ToNet::Ping => {
-                const PING: u8 = 0x0e;
-                const PACKET: &[u8] = &[PING, 0x00, 0x00, 0x00, 0x00, 0xC0];
+                const PACKET: &[u8] = &[ToNet::Ping.tlv_type(), 0x00, 0x00, 0x00, 0x00, 0xC0];
                 self.tx.write(PACKET).unwrap();
             }
 
             _ => {
+                defmt::info!("skipping tx of packet with type {}", to_net.tlv_type());
                 // TODO write other message types
             }
         }

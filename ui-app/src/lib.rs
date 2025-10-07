@@ -89,6 +89,18 @@ pub enum ToNet {
     AudioEnd,
 }
 
+impl ToNet {
+    pub const fn tlv_type(&self) -> u8 {
+        // These types need to be kept in sync with ui_net_link.hh
+        match self {
+            Self::Ping => 0x0e,
+            Self::AudioStart => 0x03,
+            Self::AudioFrame(_) => 0x10,
+            Self::AudioEnd => 0x04,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Format)]
 pub enum Event {
     ButtonDown(Button),
@@ -358,7 +370,9 @@ impl App {
                 }
 
                 out.net_tx().write(&ToNet::AudioEnd);
-                out.audio_data().stop().await;
+                // TODO: Stop the audio buffer.  If we have this line right now, it causes a
+                // DmaUnsynced error.  Probably an error in the underlying driver code.
+                // out.audio_data().stop().await;
                 out.audio_control().enable_input(false);
                 self.ptt_state = PttState::Idle;
             }
