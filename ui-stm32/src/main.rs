@@ -99,11 +99,9 @@ async fn main(spawner: Spawner) {
     debug!("app start");
     app.start(&mut board);
 
-    /*
     // Main event loop
     loop {
         let event = EVENT_QUEUE.receive().await;
         app.handle(event, &mut board);
     }
-    */
 }
