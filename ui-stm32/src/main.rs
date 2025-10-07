@@ -1,10 +1,7 @@
 #![no_std]
 #![no_main]
-// #![allow(dead_code)] // XXX
 
 mod board;
-// mod hal_i2s;
-// use hal_i2s::*;
 
 use board::{AudioControl, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
@@ -108,39 +105,6 @@ async fn main(_spawner: Spawner) {
         let event = EVENT_QUEUE.receive().await;
         app.handle(event, &mut board);
     }
-    */
-
-    /*
-    ///// EEPROM Demo /////
-
-    // Read the current contents of the EEPROM
-    const I2C_ADDR: u8 = 0x50;
-    const ADDR: u8 = 0x00;
-
-    let mut data = [0u8; 256];
-    board
-        .i2c
-        .blocking_write_read(I2C_ADDR, &[ADDR], &mut data)
-        .unwrap();
-    let hex: heapless::String<1024> = data.encode_hex();
-    info!("eeprom before {}", hex);
-
-    // Overwrite the EEPROM with a new value
-    let mut data = [0xA0; 17];
-    for i in (0_u8..=0xff).step_by(16) {
-        data[0] = i;
-        board.i2c.blocking_write(I2C_ADDR, &data).unwrap();
-        Timer::after_millis(10).await;
-    }
-
-    // Read the value back out of the EEPROM
-    let mut data = [0u8; 256];
-    board
-        .i2c
-        .blocking_write_read(I2C_ADDR, &[ADDR], &mut data)
-        .unwrap();
-    let hex: heapless::String<1024> = data.encode_hex();
-    info!("eeprom after {}", hex);
     */
 
     ///// Audio Chip /////
