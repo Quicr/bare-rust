@@ -5,14 +5,14 @@ mod board;
 
 use board::{Board, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
-use ui_app::{App, AudioControl, Event, Outputs};
+use ui_app::{App, Event};
 
 use cortex_m::singleton;
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::{i2s::I2S, mode::Async, usart::UartRx};
+use embassy_stm32::{mode::Async, usart::UartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::{Channel, Sender};
+use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -22,8 +22,17 @@ const KEYBOARD_SCAN_MILLIS: u64 = 50;
 
 type EventChannel = Channel<CriticalSectionRawMutex, Event, EVENT_QUEUE_DEPTH>;
 type EventSender = Sender<'static, CriticalSectionRawMutex, Event, EVENT_QUEUE_DEPTH>;
+type EventReceiver = Receiver<'static, CriticalSectionRawMutex, Event, EVENT_QUEUE_DEPTH>;
 
 static EVENT_QUEUE: EventChannel = Channel::new();
+
+struct EventSource(EventReceiver);
+
+impl ui_app::EventSource for EventSource {
+    async fn receive(&mut self) -> Event {
+        self.0.receive().await
+    }
+}
 
 #[embassy_executor::task(pool_size = 2)]
 async fn monitor_button(mut button: Button, id: ButtonId, events: EventSender) {
@@ -38,8 +47,11 @@ async fn monitor_button(mut button: Button, id: ButtonId, events: EventSender) {
 #[embassy_executor::task]
 async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
     loop {
+        // XXX(RLB) This is currently broken.  The Timer call blocks forever.  I think something in
+        // the clock config has broken timers, but I'm not sure what.
         let _ = Timer::after_millis(KEYBOARD_SCAN_MILLIS).await;
         for event in keyboard.scan() {
+            defmt::trace!("keyboard event {}", event);
             events.send(event).await;
         }
     }
@@ -67,10 +79,7 @@ async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
 async fn main(spawner: Spawner) {
     info!("about to instantiate board");
 
-    const LAMBDA: usize = 18;
-    const TARGET_FRAME_SIZE: usize = 4000;
-    const FRAME_SIZE: usize = TARGET_FRAME_SIZE - (TARGET_FRAME_SIZE % (2 * LAMBDA));
-    const BUFFER_SIZE: usize = 2 * FRAME_SIZE;
+    const BUFFER_SIZE: usize = 2 * ui_app::FRAME_SIZE;
 
     let i2s_tx = singleton!(: [u16; BUFFER_SIZE] = [0; BUFFER_SIZE]).unwrap();
     let i2s_rx = singleton!(: [u16; BUFFER_SIZE] = [0; BUFFER_SIZE]).unwrap();
@@ -108,144 +117,81 @@ async fn main(spawner: Spawner) {
     debug!("app start");
     app.start(&mut board);
 
+    /*
     board.audio_control().start();
 
     let mut i2s = board.i2s.take().unwrap();
     i2s.start();
 
-    let square_frame: [u16; FRAME_SIZE] = core::array::from_fn(|i| {
+    let mut frames = FrameAudio { i2s };
+
+    let square_wave = {
         const AMPLITUDE: u16 = 0x1fff;
-        (((i / LAMBDA) % 2) as u16) * AMPLITUDE
-    });
+        const LAMBDA: usize = 18;
+        let hi = core::iter::repeat(AMPLITUDE).take(LAMBDA);
+        let lo = core::iter::repeat(0).take(LAMBDA);
+
+        hi.chain(lo).cycle().take(CHANNELS * SAMPLES_PER_SEC)
+    };
 
     trace!("before tx");
-    let mut last_frame = [0; FRAME_SIZE];
-    let mut curr_frame = [0; FRAME_SIZE];
-    for _i in 0..(16_000 / square_frame.len()) {
-        i2s.read_write(&square_frame, &mut last_frame)
-            .await
-            .expect("Failed to transmit");
-    }
+    frames.write_iter(square_wave).await;
     trace!("after tx");
 
-    trace!("before txrx");
-    for _i in 0..100 {
-        trace!(
-            "tick {}",
-            last_frame.iter().map(|x| *x as usize).sum::<usize>()
-        );
+    const RECORDING_LENGTH: usize = 2;
+    trace!("recording {} seconds audio", RECORDING_LENGTH);
+    let mut recording = [0u16; RECORDING_LENGTH * CHANNELS * SAMPLES_PER_SEC];
+    for chunk in recording.chunks_mut(FRAME_SIZE) {
+        let frame = frames.read().await;
+        chunk.copy_from_slice(&frame.0);
 
-        i2s.read_write(&last_frame, &mut curr_frame)
-            .await
-            .expect("Failed to transmit/receive");
-
-        trace!(
-            "t0ck {}",
-            curr_frame.iter().map(|x| *x as usize).sum::<usize>()
-        );
-
-        last_frame.copy_from_slice(&curr_frame);
+        trace!("rec {}", frame.0.iter().map(|x| *x as usize).sum::<usize>());
     }
+
+    trace!("playing recording");
+    for chunk in recording.chunks(FRAME_SIZE) {
+        let mut frame = Frame::zero();
+        frame.0.copy_from_slice(chunk);
+        frames.write(&frame).await;
+
+        trace!(
+            "play {}",
+            frame.0.iter().map(|x| *x as usize).sum::<usize>()
+        );
+    }
+    */
 
     // Main event loop
-    /*
-    loop {
-        let event = EVENT_QUEUE.receive().await;
-        app.handle(event, &mut board);
-    }
-    */
+    let receiver = EventSource(EVENT_QUEUE.receiver());
+    app.run(receiver, board).await;
 
-    /*
-    ///// Audio Chip /////
-    let config = {
-        use embassy_stm32::{rcc::*, time::Hertz};
+    // here
+    // app.handle(EVENT_QUEUE, board).await
 
-        let mut config = embassy_stm32::Config::default();
-
-        config.rcc.hse = Some(Hse {
-            freq: Hertz(6_000_000),
-            mode: HseMode::Bypass,
-        });
-        config.rcc.sys = Sysclk::PLL1_P;
-        config.rcc.pll_src = PllSource::HSE;
-        config.rcc.pll = Some(Pll {
-            prediv: PllPreDiv::DIV3,
-            mul: PllMul::MUL168,
-            divp: Some(PllPDiv::DIV2),
-            divq: Some(PllQDiv::DIV7),
-            divr: None,
-        });
-
-        config.rcc.ahb_pre = AHBPrescaler::DIV1;
-        config.rcc.apb1_pre = APBPrescaler::DIV4;
-        config.rcc.apb2_pre = APBPrescaler::DIV2;
-        config.rcc.ls = LsConfig {
-            rtc: RtcClockSource::LSI,
-            lsi: true,
-            lse: None,
-        };
-
-        // XXX(RLB) The prediv = M value here must be the same as the PLL config above.  The
-        // CubeMX clock tree shows one M value for both PLLs.
-        config.rcc.plli2s = Some(Pll {
-            prediv: PllPreDiv::DIV3,
-            mul: PllMul::MUL50,
-            divp: None,
-            divq: None,
-            divr: Some(PllRDiv::DIV2),
-        });
-
-        config
-    };
-    let p = embassy_stm32::init(config);
-
-    // Do audio chip setup over I2C
-    let config = {
-        use embassy_stm32::{gpio::Speed, i2c::*, time::Hertz};
-
-        let mut config = Config::default();
-
-        config.frequency = Hertz(100_000);
-        config.gpio_speed = Speed::VeryHigh;
-        config.sda_pullup = false;
-        config.scl_pullup = false;
-        config.timeout = embassy_time::Duration::from_millis(1000);
-
-        config
-    };
-    let mut i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, config);
-    let mut audio_control = AudioControl::new(&mut i2c);
-    audio_control.init();
-
-    // MX_I2S3_Init() - Configure I2S3 parameters
-    let config = {
-        use embassy_stm32::{
-            i2s::{ClockPolarity, Config, Format, Mode, Standard},
-            time::Hertz,
-        };
-
-        let mut config = Config::default();
-        config.mode = Mode::Slave;
-        config.standard = Standard::Philips;
-        config.format = Format::Data16Channel32;
-        config.master_clock = false;
-        config.frequency = Hertz(8_000);
-        config.clock_polarity = ClockPolarity::IdleLow;
-        config
-    };
-
-    let mut i2s: I2S<u16> = I2S::new_full_duplex(
-        p.SPI3,
-        p.PA15,
-        p.PC10,
-        p.PB5,
-        p.PB4,
-        p.DMA1_CH7,
-        &mut tx_buf,
-        p.DMA1_CH0,
-        &mut rx_buf,
-        config.clone(),
-    );
-    i2s.start();
-    */
+    // in ui_ap
+    // async fn handle(EVENT_QUEUE, board) {
+    //      loop match event {
+    //          ButtonDown => record(EVENT_QUEUE, &mut board),
+    //          StartOfTalk => play(EVENT_QUEUE, &mut board),
+    //      }
+    // }
+    //
+    // async fn record(...) {
+    //      loop select {
+    //          event = EVENT_QUEUE.receive() => match event {
+    //              ButtonUp => return;
+    //              _ => self.handle_event(event)
+    //          }
+    //          frame = board.audio().read() => {
+    //              // Transmit frame
+    //          }
+    //      }
+    // }
+    //
+    // async fn play(...) {
+    //      loop match event {
+    //          ReceivedFrame => board.audio().write(frame),
+    //          EndOfTalk => return;
+    //      }
+    // }
 }

@@ -1,8 +1,47 @@
 #![allow(dead_code)] // No need to use all of the fields on the device
 
-use embassy_stm32::i2c::I2c;
-use embassy_stm32::i2c::Master;
-use embassy_stm32::mode::Blocking;
+use embassy_stm32::{
+    i2c::{I2c, Master},
+    i2s::I2S,
+    mode::Blocking,
+};
+
+use ui_app::Frame;
+
+pub struct AudioData<'a> {
+    i2s: I2S<'a, u16>,
+}
+
+impl<'a> From<I2S<'a, u16>> for AudioData<'a> {
+    fn from(i2s: I2S<'a, u16>) -> Self {
+        Self { i2s }
+    }
+}
+
+impl<'a> ui_app::AudioData for AudioData<'a> {
+    async fn start(&mut self) {
+        self.i2s.start();
+    }
+
+    async fn stop(&mut self) {
+        self.i2s.stop().await;
+    }
+
+    async fn read(&mut self) -> Frame {
+        let zero = Frame::default();
+        let mut out = Frame::default();
+        self.i2s
+            .read_write(&zero.0, &mut out.0)
+            .await
+            .map(|_| out)
+            .expect("oh no")
+    }
+
+    async fn write(&mut self, frame: &Frame) {
+        let mut ignore = Frame::default();
+        self.i2s.read_write(&frame.0, &mut ignore.0).await.unwrap();
+    }
+}
 
 type I2C = I2c<'static, Blocking, Master>;
 const I2C_ADDR: u8 = 0x1a;
@@ -14,7 +53,16 @@ pub struct AudioControl<'a> {
 
 impl<'a> ui_app::AudioControl for AudioControl<'a> {
     fn start(&mut self) {
+        // TODO don't enable inputs and outputs here
         self.init()
+    }
+
+    fn enable_input(&mut self, _enabled: bool) {
+        // TODO enable inputs; done in start() right now
+    }
+
+    fn enable_output(&mut self, _enabled: bool) {
+        // TODO enable outputs; done in start() right now
     }
 }
 
@@ -238,39 +286,9 @@ impl<'a> AudioControl<'a> {
         })
     }
 
-    // XXX(RLB) Setup seems to go sideways (garbled ADC) if this function and power_on are not
-    // async.  Maybe it has something to do with timing?  Maybe main() needs to yield for something
-    // else to get time?
     pub fn init(&mut self) {
         self.power_on();
 
-        // Analog loopback experiment
-        /*
-        self.left_input_path(true);
-        self.left_output_path(true);
-        self.left_analog_bypass(true);
-        */
-
-        // Digital tone generation experiment
-        /*
-        self.left_output_path(true);
-        self.left_dac(true);
-        self.configure_dac(true, true, false);
-        self.enable_i2s();
-        */
-
-        // Digital loopback experiment
-        /*
-        self.left_input_path(true);
-        self.left_output_path(true);
-        self.left_adc(true);
-        self.left_dac(true);
-        self.configure_dac(true, true, false);
-        self.digital_loopback(true);
-        self.enable_i2s();
-        */
-
-        // Txrx experiment
         self.left_input_path(true);
         self.left_output_path(true);
         self.left_adc(true);

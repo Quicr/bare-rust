@@ -1,4 +1,5 @@
-use super::{AudioControl, Button, Eeprom, Keyboard, NetTx, StatusLed};
+use super::{AudioControl, AudioData, Button, Eeprom, Keyboard, NetTx, StatusLed};
+use core::sync::atomic::{AtomicBool, Ordering};
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_stm32::{
     bind_interrupts,
@@ -106,16 +107,19 @@ pub struct Board {
     screen: Ili9341<DisplayData, Output<'static>>,
     net_tx: NetTx<UartTx<'static, Async>>,
     i2c: I2c<'static, Blocking, Master>,
+    audio_data: AudioData<'static>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
     pub net_rx: Option<UartRx<'static, Async>>,
-    pub i2s: Option<I2S<'static, u16>>,
 }
 
 bind_interrupts!(struct Irqs {
     USART2 => usart::InterruptHandler<peripherals::USART2>;
 });
+
+static BUTTON_A_DOWN: AtomicBool = AtomicBool::new(false);
+static BUTTON_B_DOWN: AtomicBool = AtomicBool::new(false);
 
 impl Board {
     pub fn new(i2s_tx: &'static mut [u16], i2s_rx: &'static mut [u16]) -> Self {
@@ -168,8 +172,8 @@ impl Board {
         let status_led = StatusLed { r, g, b };
 
         // Buttons
-        let button_a = ExtiInput::new(p.PC1, p.EXTI1, Pull::Up);
-        let button_b = ExtiInput::new(p.PC0, p.EXTI0, Pull::Up);
+        let button_a = Button::new(ExtiInput::new(p.PC1, p.EXTI1, Pull::Up), &BUTTON_A_DOWN);
+        let button_b = Button::new(ExtiInput::new(p.PC0, p.EXTI0, Pull::Up), &BUTTON_B_DOWN);
 
         // Keyboard
         let cols = [
@@ -265,22 +269,31 @@ impl Board {
                 config,
             )
         };
+        let audio_data = AudioData::from(i2s);
 
         Self {
             status_led,
             screen,
             net_tx,
             i2c,
+            audio_data,
             button_a: Some(button_a),
             button_b: Some(button_b),
             keyboard: Some(keyboard),
             net_rx: Some(net_rx),
-            i2s: Some(i2s),
         }
     }
 }
 
 impl Outputs for Board {
+    fn button_a_down(&self) -> bool {
+        BUTTON_A_DOWN.load(Ordering::SeqCst)
+    }
+
+    fn button_b_down(&self) -> bool {
+        BUTTON_B_DOWN.load(Ordering::SeqCst)
+    }
+
     fn status_led(&mut self) -> &mut impl Led {
         &mut self.status_led
     }
@@ -299,6 +312,10 @@ impl Outputs for Board {
 
     fn audio_control(&mut self) -> impl ui_app::AudioControl {
         AudioControl::new(&mut self.i2c)
+    }
+
+    fn audio_data(&mut self) -> &mut impl ui_app::AudioData {
+        &mut self.audio_data
     }
 
     fn log(&mut self, message: &str) {

@@ -63,6 +63,10 @@ where
                 const PACKET: &[u8] = &[PING, 0x00, 0x00, 0x00, 0x00, 0xC0];
                 self.tx.write(PACKET).unwrap();
             }
+
+            _ => {
+                // TODO write other message types
+            }
         }
     }
 }

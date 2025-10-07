@@ -21,6 +21,7 @@ pub use ev12::*;
 pub use ev13::*;
 
 // Provide some common functionality
+use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_stm32::{
     exti::ExtiInput,
     gpio::Output,
@@ -38,7 +39,7 @@ mod net;
 pub use net::{NetRx, NetTx};
 
 mod audio;
-pub use audio::AudioControl;
+pub use audio::{AudioControl, AudioData};
 
 struct StatusLed {
     r: Output<'static>,
@@ -54,7 +55,26 @@ impl Led for StatusLed {
     }
 }
 
-pub type Button = ExtiInput<'static>;
+pub struct Button {
+    exti: ExtiInput<'static>,
+    down: &'static AtomicBool,
+}
+
+impl Button {
+    pub fn new(exti: ExtiInput<'static>, down: &'static AtomicBool) -> Self {
+        Self { exti, down }
+    }
+
+    pub async fn wait_for_rising_edge(&mut self) {
+        self.exti.wait_for_rising_edge().await;
+        self.down.store(true, Ordering::SeqCst);
+    }
+
+    pub async fn wait_for_falling_edge(&mut self) {
+        self.exti.wait_for_falling_edge().await;
+        self.down.store(false, Ordering::SeqCst);
+    }
+}
 
 struct Eeprom<'a> {
     i2c: &'a mut I2c<'static, Blocking, Master>,
