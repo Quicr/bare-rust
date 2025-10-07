@@ -12,7 +12,6 @@ use embedded_graphics::{
     text::Text,
 };
 use heapless::String;
-use hex::ToHex;
 
 #[derive(Copy, Clone, Debug, PartialEq, Format)]
 pub enum Key {
