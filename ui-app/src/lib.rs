@@ -1,6 +1,6 @@
 #![no_std]
 
-use bitmap_font::{BitmapFont, TextStyle, tamzen::FONT_10x20};
+use bitmap_font::{tamzen::FONT_10x20, BitmapFont, TextStyle};
 use core::fmt::Write;
 use defmt::Format;
 use embedded_graphics::{
@@ -196,11 +196,16 @@ pub trait Eeprom {
     fn write(&mut self, data: &[u8; 256]);
 }
 
+pub trait AudioControl {
+    fn start(&mut self);
+}
+
 pub trait Outputs {
     fn status_led(&mut self) -> &mut impl Led;
     fn screen(&mut self) -> &mut impl DrawTarget<Color = Rgb565>;
     fn net_tx(&mut self) -> &mut impl NetTx;
     fn eeprom(&mut self) -> impl Eeprom;
+    fn audio_control(&mut self) -> impl AudioControl;
     fn log(&mut self, message: &str);
 }
 

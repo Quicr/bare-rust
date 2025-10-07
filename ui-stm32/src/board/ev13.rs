@@ -1,10 +1,11 @@
-use super::{Button, Eeprom, Keyboard, NetTx, StatusLed};
+use super::{AudioControl, Button, Eeprom, Keyboard, NetTx, StatusLed};
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
     gpio::{Input, Level, Output, Pull, Speed},
     i2c::{mode::Master, I2c},
+    i2s::I2S,
     mode::{Async, Blocking},
     peripherals,
     spi::{Spi, Word},
@@ -109,6 +110,7 @@ pub struct Board {
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
     pub net_rx: Option<UartRx<'static, Async>>,
+    pub i2s: Option<I2S<'static, u16>>,
 }
 
 bind_interrupts!(struct Irqs {
@@ -116,7 +118,7 @@ bind_interrupts!(struct Irqs {
 });
 
 impl Board {
-    pub async fn new() -> Self {
+    pub fn new(i2s_tx: &'static mut [u16], i2s_rx: &'static mut [u16]) -> Self {
         let config = {
             use embassy_stm32::{rcc::*, time::Hertz};
 
@@ -243,6 +245,27 @@ impl Board {
             I2c::new_blocking(p.I2C1, p.PB6, p.PB7, config)
         };
 
+        // I2S interface
+        let i2s: I2S<u16> = {
+            use embassy_stm32::{
+                i2s::{ClockPolarity, Config, Format, Mode, Standard},
+                time::Hertz,
+            };
+
+            let mut config = Config::default();
+            config.mode = Mode::Slave;
+            config.standard = Standard::Philips;
+            config.format = Format::Data16Channel32;
+            config.master_clock = false;
+            config.frequency = Hertz(8_000);
+            config.clock_polarity = ClockPolarity::IdleLow;
+
+            I2S::new_full_duplex(
+                p.SPI3, p.PA15, p.PC10, p.PB5, p.PB4, p.DMA1_CH7, i2s_tx, p.DMA1_CH0, i2s_rx,
+                config,
+            )
+        };
+
         Self {
             status_led,
             screen,
@@ -252,6 +275,7 @@ impl Board {
             button_b: Some(button_b),
             keyboard: Some(keyboard),
             net_rx: Some(net_rx),
+            i2s: Some(i2s),
         }
     }
 }
@@ -271,6 +295,10 @@ impl Outputs for Board {
 
     fn eeprom(&mut self) -> impl ui_app::Eeprom {
         Eeprom { i2c: &mut self.i2c }
+    }
+
+    fn audio_control(&mut self) -> impl ui_app::AudioControl {
+        AudioControl::new(&mut self.i2c)
     }
 
     fn log(&mut self, message: &str) {

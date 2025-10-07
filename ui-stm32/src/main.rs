@@ -3,10 +3,11 @@
 
 mod board;
 
-use board::{AudioControl, Button, Keyboard, NetRx};
+use board::{Board, Button, Keyboard, NetRx};
 use ui_app::Button as ButtonId;
-use ui_app::Event;
+use ui_app::{App, AudioControl, Event, Outputs};
 
+use cortex_m::singleton;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::{i2s::I2S, mode::Async, usart::UartRx};
@@ -63,11 +64,18 @@ async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
 }
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
-    /*
+async fn main(spawner: Spawner) {
     info!("about to instantiate board");
 
-    let mut board = Board::new().await;
+    const LAMBDA: usize = 18;
+    const TARGET_FRAME_SIZE: usize = 4000;
+    const FRAME_SIZE: usize = TARGET_FRAME_SIZE - (TARGET_FRAME_SIZE % (2 * LAMBDA));
+    const BUFFER_SIZE: usize = 2 * FRAME_SIZE;
+
+    let i2s_tx = singleton!(: [u16; BUFFER_SIZE] = [0; BUFFER_SIZE]).unwrap();
+    let i2s_rx = singleton!(: [u16; BUFFER_SIZE] = [0; BUFFER_SIZE]).unwrap();
+
+    let mut board = Board::new(i2s_tx, i2s_rx);
     let mut app = App::new();
 
     info!("done setting up board and app");
@@ -100,13 +108,19 @@ async fn main(_spawner: Spawner) {
     debug!("app start");
     app.start(&mut board);
 
+    board.audio_control().start();
+
+    let mut i2s = board.i2s.take().unwrap();
+
     // Main event loop
+    /*
     loop {
         let event = EVENT_QUEUE.receive().await;
         app.handle(event, &mut board);
     }
     */
 
+    /*
     ///// Audio Chip /////
     let config = {
         use embassy_stm32::{rcc::*, time::Hertz};
@@ -164,8 +178,8 @@ async fn main(_spawner: Spawner) {
 
         config
     };
-    let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, config);
-    let mut audio_control = AudioControl::new(i2c);
+    let mut i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB6, p.PB7, config);
+    let mut audio_control = AudioControl::new(&mut i2c);
     audio_control.init();
 
     // MX_I2S3_Init() - Configure I2S3 parameters
@@ -185,14 +199,6 @@ async fn main(_spawner: Spawner) {
         config
     };
 
-    const LAMBDA: usize = 18;
-    const TARGET_FRAME_SIZE: usize = 4000;
-    const FRAME_SIZE: usize = TARGET_FRAME_SIZE - (TARGET_FRAME_SIZE % (2 * LAMBDA));
-    const BUFFER_SIZE: usize = 2 * FRAME_SIZE;
-
-    let mut tx_buf = [0u16; BUFFER_SIZE];
-    let mut rx_buf = [0u16; BUFFER_SIZE];
-
     let mut i2s: I2S<u16> = I2S::new_full_duplex(
         p.SPI3,
         p.PA15,
@@ -206,6 +212,7 @@ async fn main(_spawner: Spawner) {
         config.clone(),
     );
     i2s.start();
+    */
 
     let square_frame: [u16; FRAME_SIZE] = core::array::from_fn(|i| {
         const AMPLITUDE: u16 = 0x1fff;

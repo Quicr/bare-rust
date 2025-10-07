@@ -8,14 +8,20 @@ type I2C = I2c<'static, Blocking, Master>;
 const I2C_ADDR: u8 = 0x1a;
 
 pub struct AudioControl<'a> {
-    i2c: &'a mut I2c<'a, Blocking, Master>,
+    i2c: &'a mut I2c<'static, Blocking, Master>,
     regs: Registers,
 }
 
-impl AudioControl {
+impl<'a> ui_app::AudioControl for AudioControl<'a> {
+    fn start(&mut self) {
+        self.init()
+    }
+}
+
+impl<'a> AudioControl<'a> {
     const VALUE_MASK: u16 = 0x1ff;
 
-    pub fn new(i2c: I2c<'static, Blocking, Master>) -> Self {
+    pub fn new(i2c: &'a mut I2c<'static, Blocking, Master>) -> Self {
         Self {
             i2c,
             regs: Registers::default(),
