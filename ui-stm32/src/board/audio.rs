@@ -7,8 +7,8 @@ use embassy_stm32::mode::Blocking;
 type I2C = I2c<'static, Blocking, Master>;
 const I2C_ADDR: u8 = 0x1a;
 
-pub struct AudioControl {
-    i2c: I2c<'static, Blocking, Master>,
+pub struct AudioControl<'a> {
+    i2c: &'a mut I2c<'a, Blocking, Master>,
     regs: Registers,
 }
 

@@ -1,5 +1,9 @@
 use ui_app::*;
 
+use embedded_graphics::{
+    draw_target::DrawTarget, pixelcolor::Rgb565, prelude::*, primitives::Rectangle,
+};
+
 #[derive(Default)]
 struct MockLed {
     color: Option<Color>,
@@ -15,21 +19,22 @@ impl Led for MockLed {
 #[derive(Default)]
 struct MockScreen;
 
-impl Screen for MockScreen {
-    fn width(&self) -> usize {
-        240
+impl Dimensions for MockScreen {
+    fn bounding_box(&self) -> Rectangle {
+        Rectangle::new(Point::new(0, 0), Size::new(240, 320))
     }
+}
 
-    fn height(&self) -> usize {
-        320
-    }
+impl DrawTarget for MockScreen {
+    type Color = Rgb565;
+    type Error = String;
 
-    fn fill(&mut self, _color: u16) {
-        // TODO: Store pixels
-    }
-
-    fn draw(&mut self, _left: usize, _right: usize, _top: usize, _bottom: usize, _data: &[u16]) {
-        // TODO: Store pixels
+    fn draw_iter<I>(&mut self, _pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        // TODO(RLB) Store pixels
+        Ok(())
     }
 }
 
@@ -44,11 +49,32 @@ impl NetTx for MockNetTx {
     }
 }
 
+struct MockEeprom {
+    data: [u8; 256],
+}
+
+impl Default for MockEeprom {
+    fn default() -> Self {
+        Self { data: [0; 256] }
+    }
+}
+
+impl Eeprom for &mut MockEeprom {
+    fn read(&mut self, data: &mut [u8; 256]) {
+        data.copy_from_slice(&self.data);
+    }
+
+    fn write(&mut self, data: &[u8; 256]) {
+        self.data.copy_from_slice(data);
+    }
+}
+
 #[derive(Default)]
 struct MockOutputs {
     status_led: MockLed,
     screen: MockScreen,
     net_tx: MockNetTx,
+    eeprom: MockEeprom,
     last_message: String,
 }
 
@@ -57,12 +83,16 @@ impl Outputs for MockOutputs {
         &mut self.status_led
     }
 
-    fn screen(&mut self) -> &mut impl Screen {
+    fn screen(&mut self) -> &mut impl DrawTarget<Color = Rgb565> {
         &mut self.screen
     }
 
     fn net_tx(&mut self) -> &mut impl NetTx {
         &mut self.net_tx
+    }
+
+    fn eeprom(&mut self) -> impl Eeprom {
+        &mut self.eeprom
     }
 
     fn log(&mut self, message: &str) {
@@ -141,10 +171,27 @@ fn key_logging() {
     assert_eq!(outputs.last_message, "");
 
     app.handle(Event::KeyDown(Key::A, KeyValue::Char('a')), &mut outputs);
-    assert_eq!(outputs.last_message, "key down");
+    assert_eq!(outputs.last_message, "key down: A Char('a')");
 
     app.handle(Event::KeyUp(Key::A), &mut outputs);
-    assert_eq!(outputs.last_message, "key up");
+    assert_eq!(outputs.last_message, "key up: A");
+}
+
+#[test]
+fn message_buffer_tolerates_overflow() {
+    let mut outputs = MockOutputs::default();
+    let mut app = App::new();
+    app.start(&mut outputs);
+
+    for _i in 0..1000 {
+        app.handle(Event::KeyDown(Key::A, KeyValue::Char('a')), &mut outputs);
+    }
+
+    app.handle(Event::KeyDown(Key::Enter, KeyValue::Enter), &mut outputs);
+    assert_eq!(
+        outputs.last_message,
+        "sending message: aaaaaaaaaaaaaaaaaaaaaaaa"
+    );
 }
 
 #[test]
