@@ -40,12 +40,12 @@ impl DrawTarget for MockScreen {
 
 #[derive(Default)]
 struct MockNetTx {
-    last_to_net: Option<ToNet>,
+    sent: Vec<ToNet>,
 }
 
 impl NetTx for MockNetTx {
     fn write(&mut self, to_net: &ToNet) {
-        self.last_to_net = Some(*to_net);
+        self.sent.push(to_net.clone());
     }
 }
 
@@ -70,15 +70,77 @@ impl Eeprom for &mut MockEeprom {
 }
 
 #[derive(Default)]
+struct MockAudioControl {
+    started: bool,
+    enable_input: bool,
+    enable_output: bool,
+}
+
+impl AudioControl for &mut MockAudioControl {
+    fn start(&mut self) {
+        self.started = true;
+    }
+
+    fn enable_input(&mut self, enabled: bool) {
+        self.enable_input = enabled;
+    }
+
+    fn enable_output(&mut self, enabled: bool) {
+        self.enable_output = enabled;
+    }
+}
+
+#[derive(Default)]
+struct MockAudioData {
+    started: bool,
+    read_count: u16,
+    read: Vec<Frame>,
+    written: Vec<Frame>,
+}
+
+impl AudioData for MockAudioData {
+    async fn start(&mut self) {
+        self.started = true;
+    }
+
+    async fn stop(&mut self) {
+        self.started = true;
+    }
+
+    async fn read(&mut self) -> Frame {
+        let frame = Frame([self.read_count; FRAME_SIZE]);
+        self.read_count = self.read_count.wrapping_add(1);
+        self.read.push(frame.clone());
+        frame
+    }
+
+    async fn write(&mut self, frame: &Frame) {
+        self.written.push(frame.clone());
+    }
+}
+
+#[derive(Default)]
 struct MockOutputs {
+    button_a_down: bool,
+    button_b_down: bool,
     status_led: MockLed,
     screen: MockScreen,
     net_tx: MockNetTx,
     eeprom: MockEeprom,
     last_message: String,
+    audio_control: MockAudioControl,
+    audio_data: MockAudioData,
 }
 
 impl Outputs for MockOutputs {
+    fn button_a_down(&self) -> bool {
+        self.button_a_down
+    }
+
+    fn button_b_down(&self) -> bool {
+        self.button_b_down
+    }
+
     fn status_led(&mut self) -> &mut impl Led {
         &mut self.status_led
     }
@@ -95,13 +157,21 @@ impl Outputs for MockOutputs {
         &mut self.eeprom
     }
 
+    fn audio_control(&mut self) -> impl AudioControl {
+        &mut self.audio_control
+    }
+
+    fn audio_data(&mut self) -> &mut impl AudioData {
+        &mut self.audio_data
+    }
+
     fn log(&mut self, message: &str) {
         self.last_message = message.into();
     }
 }
 
-#[test]
-fn default_black() {
+#[tokio::test]
+async fn default_black() {
     let mut outputs = MockOutputs::default();
     let mut app = App::new();
     app.start(&mut outputs);
@@ -109,97 +179,100 @@ fn default_black() {
     assert_eq!(outputs.status_led.color, Some(Color::Black));
 }
 
-#[test]
-fn individual_buttons() {
-    fn individual_button(button: Button, color: Color) {
+#[tokio::test]
+async fn individual_buttons() {
+    async fn individual_button(button: Button, color: Color) {
         let mut outputs = MockOutputs::default();
         let mut app = App::new();
         app.start(&mut outputs);
         assert_eq!(outputs.status_led.color, Some(Color::Black));
 
         // Up should have no effect
-        app.handle(Event::ButtonUp(button), &mut outputs);
+        app.handle(Event::ButtonUp(button), &mut outputs).await;
         assert_eq!(outputs.status_led.color, Some(Color::Black));
 
         // Pushing the button should illuminate the LED
-        app.handle(Event::ButtonDown(button), &mut outputs);
+        app.handle(Event::ButtonDown(button), &mut outputs).await;
         assert_eq!(outputs.status_led.color, Some(color));
 
         // Down should be idempotent
-        app.handle(Event::ButtonDown(button), &mut outputs);
+        app.handle(Event::ButtonDown(button), &mut outputs).await;
         assert_eq!(outputs.status_led.color, Some(color));
 
         // Up should extinguish the LED
-        app.handle(Event::ButtonUp(button), &mut outputs);
+        app.handle(Event::ButtonUp(button), &mut outputs).await;
         assert_eq!(outputs.status_led.color, Some(Color::Black));
 
         // Up should be idempotent
-        app.handle(Event::ButtonUp(button), &mut outputs);
+        app.handle(Event::ButtonUp(button), &mut outputs).await;
         assert_eq!(outputs.status_led.color, Some(Color::Black));
     }
 
-    individual_button(Button::A, Color::Green);
-    individual_button(Button::B, Color::Blue);
+    individual_button(Button::A, Color::Green).await;
+    individual_button(Button::B, Color::Blue).await;
 }
 
-#[test]
-fn buttons_compose() {
+#[tokio::test]
+async fn buttons_compose() {
     let mut outputs = MockOutputs::default();
     let mut app = App::new();
     app.start(&mut outputs);
     assert_eq!(outputs.status_led.color, Some(Color::Black));
 
-    app.handle(Event::ButtonDown(Button::B), &mut outputs);
+    app.handle(Event::ButtonDown(Button::B), &mut outputs).await;
     assert_eq!(outputs.status_led.color, Some(Color::Blue));
 
-    app.handle(Event::ButtonDown(Button::A), &mut outputs);
+    app.handle(Event::ButtonDown(Button::A), &mut outputs).await;
     assert_eq!(outputs.status_led.color, Some(Color::Cyan));
 
-    app.handle(Event::ButtonUp(Button::B), &mut outputs);
+    app.handle(Event::ButtonUp(Button::B), &mut outputs).await;
     assert_eq!(outputs.status_led.color, Some(Color::Green));
 
-    app.handle(Event::ButtonUp(Button::A), &mut outputs);
+    app.handle(Event::ButtonUp(Button::A), &mut outputs).await;
     assert_eq!(outputs.status_led.color, Some(Color::Black));
 }
 
-#[test]
-fn key_logging() {
+#[tokio::test]
+async fn key_logging() {
     let mut outputs = MockOutputs::default();
     let mut app = App::new();
     app.start(&mut outputs);
 
     assert_eq!(outputs.last_message, "");
 
-    app.handle(Event::KeyDown(Key::A, KeyValue::Char('a')), &mut outputs);
+    app.handle(Event::KeyDown(Key::A, KeyValue::Char('a')), &mut outputs)
+        .await;
     assert_eq!(outputs.last_message, "key down: A Char('a')");
 
-    app.handle(Event::KeyUp(Key::A), &mut outputs);
+    app.handle(Event::KeyUp(Key::A), &mut outputs).await;
     assert_eq!(outputs.last_message, "key up: A");
 }
 
-#[test]
-fn message_buffer_tolerates_overflow() {
+#[tokio::test]
+async fn message_buffer_tolerates_overflow() {
     let mut outputs = MockOutputs::default();
     let mut app = App::new();
     app.start(&mut outputs);
 
     for _i in 0..1000 {
-        app.handle(Event::KeyDown(Key::A, KeyValue::Char('a')), &mut outputs);
+        app.handle(Event::KeyDown(Key::A, KeyValue::Char('a')), &mut outputs)
+            .await;
     }
 
-    app.handle(Event::KeyDown(Key::Enter, KeyValue::Enter), &mut outputs);
+    app.handle(Event::KeyDown(Key::Enter, KeyValue::Enter), &mut outputs)
+        .await;
     assert_eq!(
         outputs.last_message,
         "sending message: aaaaaaaaaaaaaaaaaaaaaaaa"
     );
 }
 
-#[test]
-fn button_a_sends_ping() {
+#[tokio::test]
+async fn button_a_sends_ping() {
     let mut outputs = MockOutputs::default();
     let mut app = App::new();
     app.start(&mut outputs);
 
-    app.handle(Event::ButtonDown(Button::A), &mut outputs);
-    assert_eq!(outputs.net_tx.last_to_net, Some(ToNet::Ping));
+    app.handle(Event::ButtonDown(Button::A), &mut outputs).await;
+    assert_eq!(&outputs.net_tx.sent, &[ToNet::Ping]);
 }
