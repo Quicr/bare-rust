@@ -276,3 +276,45 @@ async fn button_a_sends_ping() {
     app.handle(Event::ButtonDown(Button::A), &mut outputs).await;
     assert_eq!(&outputs.net_tx.sent, &[ToNet::Ping]);
 }
+
+#[tokio::test]
+async fn receive_ptt() {
+    let mut outputs = MockOutputs::default();
+    let mut app = App::new();
+    app.start(&mut outputs);
+
+    // Signal the start of audio
+    app.handle(Event::FromNet(FromNet::AudioStart), &mut outputs)
+        .await;
+    assert_eq!(outputs.audio_control.started, true);
+    assert_eq!(outputs.audio_control.enable_output, true);
+    assert_eq!(outputs.audio_data.started, true);
+
+    // Send a few frames
+    let mut frames = vec![Frame::default(); 3];
+    for (i, frame) in frames.iter_mut().enumerate() {
+        frame.0.fill(i as u16);
+        let from_net = Event::FromNet(FromNet::AudioFrame(frame.clone()));
+        app.handle(from_net, &mut outputs).await;
+    }
+
+    assert_eq!(outputs.audio_data.written, frames);
+
+    // Signal the end of audio
+    app.handle(Event::FromNet(FromNet::AudioEnd), &mut outputs)
+        .await;
+    assert_eq!(outputs.audio_control.started, true);
+    assert_eq!(outputs.audio_control.enable_output, false);
+    // TODO re-enable
+    // assert_eq!(outputs.audio_data.start, false);
+
+    // Verify that out-of-context audio gets dropped
+    let from_net = Event::FromNet(FromNet::AudioFrame(frames[0].clone()));
+    app.handle(from_net, &mut outputs).await;
+
+    assert_eq!(outputs.audio_data.written, frames);
+    assert_eq!(
+        outputs.last_message,
+        "Dropped out-of-context message from NET chip"
+    );
+}

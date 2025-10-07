@@ -307,6 +307,9 @@ impl App {
         // Extinguish the status LED
         out.status_led().set_color(Color::Black);
 
+        // Start up the audio interface
+        out.audio_control().start();
+
         // Draw a test pattern to the screen
         let rect = out.screen().bounding_box();
 
