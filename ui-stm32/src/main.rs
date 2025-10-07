@@ -111,6 +111,41 @@ async fn main(spawner: Spawner) {
     board.audio_control().start();
 
     let mut i2s = board.i2s.take().unwrap();
+    i2s.start();
+
+    let square_frame: [u16; FRAME_SIZE] = core::array::from_fn(|i| {
+        const AMPLITUDE: u16 = 0x1fff;
+        (((i / LAMBDA) % 2) as u16) * AMPLITUDE
+    });
+
+    trace!("before tx");
+    let mut last_frame = [0; FRAME_SIZE];
+    let mut curr_frame = [0; FRAME_SIZE];
+    for _i in 0..(16_000 / square_frame.len()) {
+        i2s.read_write(&square_frame, &mut last_frame)
+            .await
+            .expect("Failed to transmit");
+    }
+    trace!("after tx");
+
+    trace!("before txrx");
+    for _i in 0..100 {
+        trace!(
+            "tick {}",
+            last_frame.iter().map(|x| *x as usize).sum::<usize>()
+        );
+
+        i2s.read_write(&last_frame, &mut curr_frame)
+            .await
+            .expect("Failed to transmit/receive");
+
+        trace!(
+            "t0ck {}",
+            curr_frame.iter().map(|x| *x as usize).sum::<usize>()
+        );
+
+        last_frame.copy_from_slice(&curr_frame);
+    }
 
     // Main event loop
     /*
@@ -213,38 +248,4 @@ async fn main(spawner: Spawner) {
     );
     i2s.start();
     */
-
-    let square_frame: [u16; FRAME_SIZE] = core::array::from_fn(|i| {
-        const AMPLITUDE: u16 = 0x1fff;
-        (((i / LAMBDA) % 2) as u16) * AMPLITUDE
-    });
-
-    trace!("before tx");
-    let mut last_frame = [0; FRAME_SIZE];
-    let mut curr_frame = [0; FRAME_SIZE];
-    for _i in 0..(16_000 / square_frame.len()) {
-        i2s.read_write(&square_frame, &mut last_frame)
-            .await
-            .expect("Failed to transmit");
-    }
-    trace!("after tx");
-
-    trace!("before txrx");
-    loop {
-        trace!(
-            "tick {}",
-            last_frame.iter().map(|x| *x as usize).sum::<usize>()
-        );
-
-        i2s.read_write(&last_frame, &mut curr_frame)
-            .await
-            .expect("Failed to transmit/receive");
-
-        trace!(
-            "t0ck {}",
-            curr_frame.iter().map(|x| *x as usize).sum::<usize>()
-        );
-
-        last_frame.copy_from_slice(&curr_frame);
-    }
 }
