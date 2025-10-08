@@ -1,68 +1,50 @@
 #![no_std]
 #![no_main]
-#![allow(unused_variables)]
-
-use core::arch::asm;
 
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::{
     bind_interrupts,
-    gpio::{Level, Output, Speed},
     mode::Async,
     peripherals, usart,
     usart::{Config, DataBits, Parity, StopBits, Uart, UartRx, UartTx},
 };
 use {defmt_rtt as _, panic_probe as _};
 
+use ui_embassy::gpio::{GpioPeripherals, NetControl, RgbLed, UiControl};
+use ui_embassy::state::State;
+
 bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
     USART2 => usart::InterruptHandler<peripherals::USART2>;
+    // TODO: USART3/4 may not be fully supported by Embassy on STM32F072CB
+    // Need to investigate correct UART peripheral for NET (PB10/PB11)
 });
 
 type Tx = UartTx<'static, Async>;
 type Rx = UartRx<'static, Async>;
-type Led = Output<'static>;
-
-const DMA_BUFFER_SIZE: usize = 1024;
-
-#[embassy_executor::task(pool_size = 2)]
-async fn pipe(mut to: Tx, from: Rx, mut led: Led) {
-    // Configure a ring buffer on the DMA receiver
-    let mut dma_buf = [0u8; DMA_BUFFER_SIZE];
-    let mut from = from.into_ring_buffered(&mut dma_buf);
-
-    // Copy from input to output
-    let mut buf = [0u8; 4];
-    loop {
-        let n = unwrap!(from.read(&mut buf).await);
-        unwrap!(to.write(&buf[..n]).await);
-        led.toggle();
-    }
-}
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    info!("Starting MGMT firmware");
     let p = embassy_stm32::init(Default::default());
 
-    // Instantiate LEDs
-    let mut led_a_r = Output::new(p.PA4, Level::High, Speed::Low);
-    let mut led_a_g = Output::new(p.PA6, Level::High, Speed::Low);
-    let mut led_a_b = Output::new(p.PA7, Level::High, Speed::Low);
-    let mut led_b_r = Output::new(p.PB0, Level::High, Speed::Low);
-    let mut led_b_g = Output::new(p.PB6, Level::High, Speed::Low);
-    let mut led_b_b = Output::new(p.PB15, Level::High, Speed::Low);
+    // Initialize GPIO peripherals
+    let mut gpio = GpioPeripherals {
+        led_a: RgbLed::new(p.PA4, p.PA6, p.PA7),  // NET LED
+        led_b: RgbLed::new(p.PB0, p.PB6, p.PB15), // UI LED
+        ui_control: UiControl::new(p.PB3, p.PA15, p.PB8),
+        net_control: NetControl::new(p.PB4, p.PB5),
+    };
 
-    // Grab the UI Boot and Reset pins
-    let ui_nrst = Output::new(p.PB3, Level::High, Speed::Low);
+    // Turn off all LEDs initially
+    gpio.led_a.off();
+    gpio.led_b.off();
 
-    led_b_r.set_low();
-    led_b_b.set_low();
-    led_a_r.set_high();
-    led_a_g.set_low();
+    info!("GPIO initialized");
 
-    // Configure USB-side UART
-    let config = {
+    // Configure UART1 (USB)
+    let usb_config = {
         let mut config = Config::default();
         config.baudrate = 115200;
         config.data_bits = DataBits::DataBits8;
@@ -71,12 +53,40 @@ async fn main(spawner: Spawner) {
         config
     };
     let usb_uart = Uart::new(
-        p.USART1, p.PA10, p.PA9, Irqs, p.DMA1_CH2, p.DMA1_CH3, config,
+        p.USART1, p.PA10, // RX
+        p.PA9,  // TX
+        Irqs, p.DMA1_CH2, p.DMA1_CH3, usb_config,
     )
     .unwrap();
 
-    let (usb_tx, usb_rx) = usb_uart.split();
+    // Configure UART2 (UI)
+    let ui_config = {
+        let mut config = Config::default();
+        config.baudrate = 115200;
+        config.data_bits = DataBits::DataBits8;
+        config.stop_bits = StopBits::STOP1;
+        config.parity = Parity::ParityNone;
+        config
+    };
+    let ui_uart = Uart::new(
+        p.USART2, p.PA3, // RX (UI_RX1_MGMT)
+        p.PA2, // TX (UI_TX1_MGMT)
+        Irqs, p.DMA1_CH4, p.DMA1_CH5, ui_config,
+    )
+    .unwrap();
 
-    // Echo the USB UART back to itself
-    unwrap!(spawner.spawn(pipe(usb_tx, usb_rx, led_b_g)));
+    // TODO: Configure UART3/4 (NET) - need to figure out correct peripheral for PB10/PB11
+    // For STM32F072CB, USART3/4 might have limited Embassy support
+    // let net_config = ...
+    // let net_uart = ...
+
+    info!("UARTs initialized (USB, UI). NET UART TODO");
+
+    // TODO: Set up UART routing and command handling
+    // For now, just blink LEDs to show we're alive
+    loop {
+        gpio.led_a.toggle_green();
+        gpio.led_b.toggle_blue();
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(500)).await;
+    }
 }
