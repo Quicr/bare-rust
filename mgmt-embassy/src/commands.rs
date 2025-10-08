@@ -170,8 +170,8 @@ impl Default for TlvParser {
 /// Command handler context
 pub struct CommandContext {
     pub routing: &'static Mutex<ThreadModeRawMutex, UartRouting>,
-    pub ui_control: &'static Mutex<ThreadModeRawMutex, UiControl>,
-    pub net_control: &'static Mutex<ThreadModeRawMutex, NetControl>,
+    pub ui_control: &'static Mutex<ThreadModeRawMutex, Option<UiControl>>,
+    pub net_control: &'static Mutex<ThreadModeRawMutex, Option<NetControl>>,
     pub state: &'static Mutex<ThreadModeRawMutex, State>,
 }
 
@@ -200,13 +200,17 @@ impl CommandContext {
     pub async fn handle_reset_ui(&self) {
         info!("Resetting UI chip");
         let mut ui_control = self.ui_control.lock().await;
-        ui_control.normal_mode().await;
+        if let Some(ref mut ctrl) = *ui_control {
+            ctrl.normal_mode().await;
+        }
     }
 
     pub async fn handle_reset_net(&self) {
         info!("Resetting NET chip");
         let mut net_control = self.net_control.lock().await;
-        net_control.normal_mode().await;
+        if let Some(ref mut ctrl) = *net_control {
+            ctrl.normal_mode().await;
+        }
     }
 
     pub async fn handle_flash_ui(&self) {
@@ -215,7 +219,9 @@ impl CommandContext {
         // Hold NET in reset
         {
             let mut net_control = self.net_control.lock().await;
-            net_control.hold_in_reset().await;
+            if let Some(ref mut ctrl) = *net_control {
+                ctrl.hold_in_reset().await;
+            }
         }
 
         // Configure routing: USB->UI, UI->USB, NET->None
@@ -237,7 +243,9 @@ impl CommandContext {
         // Hold UI in reset
         {
             let mut ui_control = self.ui_control.lock().await;
-            ui_control.hold_in_reset().await;
+            if let Some(ref mut ctrl) = *ui_control {
+                ctrl.hold_in_reset().await;
+            }
         }
 
         // Configure routing: USB->NET, NET->USB, UI->None

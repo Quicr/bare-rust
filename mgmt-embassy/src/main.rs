@@ -16,7 +16,7 @@ use ui_embassy::{
     commands::{CommandContext, TlvParser},
     gpio::{GpioPeripherals, NetControl, RgbLed, UiControl},
     state::{State, DEFAULT_STATE},
-    uart::{uart_rx_task, uart_tx_task, TxChannels, UartMessage, UartRouting, DMA_BUFFER_SIZE},
+    uart::{UartRouting, DMA_BUFFER_SIZE},
 };
 
 bind_interrupts!(struct Irqs {
@@ -25,13 +25,14 @@ bind_interrupts!(struct Irqs {
     USART3_4 => usart::InterruptHandler<peripherals::USART3>;
 });
 
-// Static allocations for UART infrastructure and state
-static TX_CHANNELS: TxChannels = TxChannels::new();
+// Static allocations for state and chip controls
 static UART_ROUTING: Mutex<ThreadModeRawMutex, UartRouting> = Mutex::new(UartRouting::new());
 static STATE: Mutex<ThreadModeRawMutex, State> = Mutex::new(DEFAULT_STATE);
+static UI_CONTROL: Mutex<ThreadModeRawMutex, Option<UiControl>> = Mutex::new(None);
+static NET_CONTROL: Mutex<ThreadModeRawMutex, Option<NetControl>> = Mutex::new(None);
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     info!("Starting MGMT firmware");
     let p = embassy_stm32::init(Default::default());
 
@@ -100,40 +101,20 @@ async fn main(spawner: Spawner) {
     info!("UARTs initialized");
 
     // Split UARTs into RX and TX
-    let (usb_tx, usb_rx) = usb_uart.split();
-    let (ui_tx, ui_rx) = ui_uart.split();
-    let (net_tx, net_rx) = net_uart.split();
+    let (mut usb_tx, usb_rx) = usb_uart.split();
+    let (mut ui_tx, ui_rx) = ui_uart.split();
+    let (mut net_tx, net_rx) = net_uart.split();
 
-    // Create ring-buffered RX
-    static mut USB_RX_BUF: [u8; DMA_BUFFER_SIZE] = [0u8; DMA_BUFFER_SIZE];
-    static mut UI_RX_BUF: [u8; DMA_BUFFER_SIZE] = [0u8; DMA_BUFFER_SIZE];
-    static mut NET_RX_BUF: [u8; DMA_BUFFER_SIZE] = [0u8; DMA_BUFFER_SIZE];
+    // Create DMA buffers as local variables (owned by main task)
+    let mut usb_rx_buf = [0u8; DMA_BUFFER_SIZE];
+    let mut ui_rx_buf = [0u8; DMA_BUFFER_SIZE];
+    let mut net_rx_buf = [0u8; DMA_BUFFER_SIZE];
 
-    let usb_rx = usb_rx.into_ring_buffered(unsafe { &mut USB_RX_BUF });
-    let ui_rx = ui_rx.into_ring_buffered(unsafe { &mut UI_RX_BUF });
-    let net_rx = net_rx.into_ring_buffered(unsafe { &mut NET_RX_BUF });
+    let mut usb_rx = usb_rx.into_ring_buffered(&mut usb_rx_buf);
+    let mut ui_rx = ui_rx.into_ring_buffered(&mut ui_rx_buf);
+    let mut net_rx = net_rx.into_ring_buffered(&mut net_rx_buf);
 
-    // Spawn UART tasks
-    spawner
-        .spawn(usb_rx_task(usb_rx))
-        .expect("Failed to spawn USB RX task");
-    spawner
-        .spawn(usb_tx_task(usb_tx))
-        .expect("Failed to spawn USB TX task");
-    spawner
-        .spawn(ui_rx_task(ui_rx))
-        .expect("Failed to spawn UI RX task");
-    spawner
-        .spawn(ui_tx_task(ui_tx))
-        .expect("Failed to spawn UI TX task");
-    spawner
-        .spawn(net_rx_task(net_rx))
-        .expect("Failed to spawn NET RX task");
-    spawner
-        .spawn(net_tx_task(net_tx))
-        .expect("Failed to spawn NET TX task");
-
-    info!("UART tasks spawned");
+    info!("UARTs configured");
 
     // Initialize chips to normal mode
     gpio.ui_control.normal_mode().await;
@@ -152,99 +133,123 @@ async fn main(spawner: Spawner) {
         }
     }
 
-    // Spawn command parser task
-    spawner
-        .spawn(command_parser_task(gpio.ui_control, gpio.net_control))
-        .expect("Failed to spawn command parser task");
+    // Store chip controls in statics for command context
+    *UI_CONTROL.lock().await = Some(gpio.ui_control);
+    *NET_CONTROL.lock().await = Some(gpio.net_control);
 
-    info!("Command parser spawned");
-
-    // Main loop - blink LED to show we're alive
-    loop {
-        gpio.led_a.toggle_green();
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(1000)).await;
-    }
-}
-
-// UART task wrappers
-#[embassy_executor::task]
-async fn usb_rx_task(rx: embassy_stm32::usart::RingBufferedUartRx<'static>) {
-    uart_rx_task(rx, &TX_CHANNELS, &UART_ROUTING, "USB", |r| r.usb_path).await;
-}
-
-#[embassy_executor::task]
-async fn usb_tx_task(tx: embassy_stm32::usart::UartTx<'static, Async>) {
-    uart_tx_task(tx, &TX_CHANNELS.usb, "USB").await;
-}
-
-#[embassy_executor::task]
-async fn ui_rx_task(rx: embassy_stm32::usart::RingBufferedUartRx<'static>) {
-    uart_rx_task(rx, &TX_CHANNELS, &UART_ROUTING, "UI", |r| r.ui_path).await;
-}
-
-#[embassy_executor::task]
-async fn ui_tx_task(tx: embassy_stm32::usart::UartTx<'static, Async>) {
-    uart_tx_task(tx, &TX_CHANNELS.ui, "UI").await;
-}
-
-#[embassy_executor::task]
-async fn net_rx_task(rx: embassy_stm32::usart::RingBufferedUartRx<'static>) {
-    uart_rx_task(rx, &TX_CHANNELS, &UART_ROUTING, "NET", |r| r.net_path).await;
-}
-
-#[embassy_executor::task]
-async fn net_tx_task(tx: embassy_stm32::usart::UartTx<'static, Async>) {
-    uart_tx_task(tx, &TX_CHANNELS.net, "NET").await;
-}
-
-#[embassy_executor::task]
-async fn command_parser_task(ui_control: UiControl, net_control: NetControl) {
-    info!("Command parser task started");
-
-    // Create command context - using unsafe static references
-    // This is safe because we're the only task accessing these controls
-    let ui_control_ref: &'static Mutex<ThreadModeRawMutex, UiControl> = unsafe {
-        static mut UI_CTRL: Option<Mutex<ThreadModeRawMutex, UiControl>> = None;
-        UI_CTRL = Some(Mutex::new(ui_control));
-        UI_CTRL.as_ref().unwrap()
-    };
-
-    let net_control_ref: &'static Mutex<ThreadModeRawMutex, NetControl> = unsafe {
-        static mut NET_CTRL: Option<Mutex<ThreadModeRawMutex, NetControl>> = None;
-        NET_CTRL = Some(Mutex::new(net_control));
-        NET_CTRL.as_ref().unwrap()
-    };
-
+    // Create command context
     let context = CommandContext {
         routing: &UART_ROUTING,
-        ui_control: ui_control_ref,
-        net_control: net_control_ref,
+        ui_control: unsafe { core::mem::transmute(&UI_CONTROL) },
+        net_control: unsafe { core::mem::transmute(&NET_CONTROL) },
         state: &STATE,
     };
 
     let mut parser = TlvParser::new();
 
+    info!("Starting main loop");
+
+    let mut buf = [0u8; 64];
+    let mut led_timer = embassy_time::Instant::now();
+
+    // Main loop - handle UART routing and command parsing
     loop {
-        let msg = TX_CHANNELS.internal.receive().await;
+        // Blink LED every second
+        if led_timer.elapsed().as_millis() >= 1000 {
+            gpio.led_a.toggle_green();
+            led_timer = embassy_time::Instant::now();
+        }
 
-        match msg {
-            UartMessage::Data(data) => {
-                // Parse TLV commands
-                if let Some((command, cmd_data)) = parser.process(&data) {
-                    info!("Received command: {:?}", command);
+        // Read from USB UART and route
+        match usb_rx.read(&mut buf).await {
+            Ok(n) if n > 0 => {
+                let routing = UART_ROUTING.lock().await;
+                route_data(
+                    &buf[..n],
+                    routing.usb_path,
+                    &mut usb_tx,
+                    &mut ui_tx,
+                    &mut net_tx,
+                )
+                .await;
 
-                    // Execute command
-                    if let Some(response) = context.execute(command, &cmd_data).await {
-                        // Send response to USB
-                        if let Ok(vec) = heapless::Vec::from_slice(response) {
-                            let _ = TX_CHANNELS.usb.send(UartMessage::Data(vec)).await;
+                // Parse commands from internal
+                if routing.usb_path == ui_embassy::uart::TxPath::Internal {
+                    drop(routing);
+                    if let Some((command, cmd_data)) = parser.process(&buf[..n]) {
+                        info!("Received command: {:?}", command);
+                        if let Some(response) = context.execute(command, &cmd_data).await {
+                            let _ = usb_tx.write(response).await;
                         }
                     }
                 }
             }
-            UartMessage::SingleByte(_) => {
-                // Ignore single byte messages in internal channel
+            _ => {}
+        }
+
+        // Read from UI UART and route
+        match ui_rx.read(&mut buf).await {
+            Ok(n) if n > 0 => {
+                let routing = UART_ROUTING.lock().await;
+                route_data(
+                    &buf[..n],
+                    routing.ui_path,
+                    &mut usb_tx,
+                    &mut ui_tx,
+                    &mut net_tx,
+                )
+                .await;
             }
+            _ => {}
+        }
+
+        // Read from NET UART and route
+        match net_rx.read(&mut buf).await {
+            Ok(n) if n > 0 => {
+                let routing = UART_ROUTING.lock().await;
+                route_data(
+                    &buf[..n],
+                    routing.net_path,
+                    &mut usb_tx,
+                    &mut ui_tx,
+                    &mut net_tx,
+                )
+                .await;
+            }
+            _ => {}
+        }
+
+        embassy_time::Timer::after(embassy_time::Duration::from_micros(100)).await;
+    }
+}
+
+// Helper function to route data between UARTs
+async fn route_data(
+    data: &[u8],
+    path: ui_embassy::uart::TxPath,
+    usb_tx: &mut embassy_stm32::usart::UartTx<'static, Async>,
+    ui_tx: &mut embassy_stm32::usart::UartTx<'static, Async>,
+    net_tx: &mut embassy_stm32::usart::UartTx<'static, Async>,
+) {
+    use ui_embassy::uart::TxPath;
+
+    match path {
+        TxPath::None => {}
+        TxPath::Usb => {
+            let _ = usb_tx.write(data).await;
+        }
+        TxPath::Ui => {
+            let _ = ui_tx.write(data).await;
+        }
+        TxPath::Net => {
+            let _ = net_tx.write(data).await;
+        }
+        TxPath::UiNet => {
+            let _ = ui_tx.write(data).await;
+            let _ = net_tx.write(data).await;
+        }
+        TxPath::Internal => {
+            // Command parsing happens inline in main loop
         }
     }
 }
