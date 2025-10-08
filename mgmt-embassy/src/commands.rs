@@ -1,8 +1,6 @@
 // Command definitions and handlers
 
 use defmt::*;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::mutex::Mutex;
 use num_enum::TryFromPrimitive;
 
 use crate::{
@@ -160,12 +158,9 @@ impl Default for TlvParser {
 
 /// Command handler context
 pub struct CommandContext<'a> {
-    // Mutex is needed even with single task for:
-    // 1. Interior mutability
-    // 2. Send/Sync safety across async await points
-    pub routing: &'a Mutex<ThreadModeRawMutex, UartRouting>,
-    pub ui_control: &'a Mutex<ThreadModeRawMutex, UiControl>,
-    pub net_control: &'a Mutex<ThreadModeRawMutex, NetControl>,
+    pub routing: &'a mut UartRouting,
+    pub ui_control: &'a mut UiControl,
+    pub net_control: &'a mut NetControl,
 }
 
 /// Command handlers
@@ -178,118 +173,98 @@ impl<'a> CommandContext<'a> {
         b"HELLO, I AM A HACTAR DEVICE"
     }
 
-    pub async fn handle_hard_reset(&self) {
+    pub async fn handle_hard_reset(&mut self) {
         info!("Hard reset requested");
         // Reset both chips
         self.handle_reset().await;
         // Reset routing to defaults (Debug mode: logs enabled)
-        let mut routing = self.routing.lock().await;
-        routing.usb_path = TxPath::Internal;
-        routing.ui_path = TxPath::Usb;
-        routing.net_path = TxPath::Usb;
+        self.routing.usb_path = TxPath::Internal;
+        self.routing.ui_path = TxPath::Usb;
+        self.routing.net_path = TxPath::Usb;
     }
 
-    pub async fn handle_reset(&self) {
+    pub async fn handle_reset(&mut self) {
         self.handle_reset_ui().await;
         self.handle_reset_net().await;
     }
 
-    pub async fn handle_reset_ui(&self) {
+    pub async fn handle_reset_ui(&mut self) {
         info!("Resetting UI chip");
-        let mut ui_control = self.ui_control.lock().await;
-        ui_control.normal_mode();
+        self.ui_control.normal_mode();
     }
 
-    pub async fn handle_reset_net(&self) {
+    pub async fn handle_reset_net(&mut self) {
         info!("Resetting NET chip");
-        let mut net_control = self.net_control.lock().await;
-        net_control.normal_mode();
+        self.net_control.normal_mode();
     }
 
-    pub async fn handle_flash_ui(&self) {
+    pub async fn handle_flash_ui(&mut self) {
         info!("Entering UI flash mode");
 
         // Hold NET in reset
-        {
-            let mut net_control = self.net_control.lock().await;
-            net_control.hold_in_reset();
-        }
+        self.net_control.hold_in_reset();
 
         // Configure routing: USB->UI, UI->USB, NET->None
-        {
-            let mut routing = self.routing.lock().await;
-            routing.usb_path = TxPath::Ui;
-            routing.ui_path = TxPath::Usb;
-            routing.net_path = TxPath::None;
-        }
+        self.routing.usb_path = TxPath::Ui;
+        self.routing.ui_path = TxPath::Usb;
+        self.routing.net_path = TxPath::None;
 
         // Flash mode sequence handled in main loop
     }
 
-    pub async fn handle_flash_net(&self) {
+    pub async fn handle_flash_net(&mut self) {
         info!("Entering NET flash mode");
 
         // Hold UI in reset
-        {
-            let mut ui_control = self.ui_control.lock().await;
-            ui_control.hold_in_reset();
-        }
+        self.ui_control.hold_in_reset();
 
         // Configure routing: USB->NET, NET->USB, UI->None
-        {
-            let mut routing = self.routing.lock().await;
-            routing.usb_path = TxPath::Net;
-            routing.net_path = TxPath::Usb;
-            routing.ui_path = TxPath::None;
-        }
+        self.routing.usb_path = TxPath::Net;
+        self.routing.net_path = TxPath::Usb;
+        self.routing.ui_path = TxPath::None;
 
         // Flash mode sequence handled in main loop
     }
 
-    pub async fn handle_enable_logs(&self) {
+    pub async fn handle_enable_logs(&mut self) {
         self.handle_enable_logs_ui().await;
         self.handle_enable_logs_net().await;
     }
 
-    pub async fn handle_enable_logs_ui(&self) {
+    pub async fn handle_enable_logs_ui(&mut self) {
         info!("Enabling UI logs");
-        let mut routing = self.routing.lock().await;
-        routing.ui_path = TxPath::Usb;
+        self.routing.ui_path = TxPath::Usb;
     }
 
-    pub async fn handle_enable_logs_net(&self) {
+    pub async fn handle_enable_logs_net(&mut self) {
         info!("Enabling NET logs");
-        let mut routing = self.routing.lock().await;
-        routing.net_path = TxPath::Usb;
+        self.routing.net_path = TxPath::Usb;
     }
 
-    pub async fn handle_disable_logs(&self) {
+    pub async fn handle_disable_logs(&mut self) {
         self.handle_disable_logs_ui().await;
         self.handle_disable_logs_net().await;
     }
 
-    pub async fn handle_disable_logs_ui(&self) {
+    pub async fn handle_disable_logs_ui(&mut self) {
         info!("Disabling UI logs");
-        let mut routing = self.routing.lock().await;
-        routing.ui_path = TxPath::None;
+        self.routing.ui_path = TxPath::None;
     }
 
-    pub async fn handle_disable_logs_net(&self) {
+    pub async fn handle_disable_logs_net(&mut self) {
         info!("Disabling NET logs");
-        let mut routing = self.routing.lock().await;
-        routing.net_path = TxPath::None;
+        self.routing.net_path = TxPath::None;
     }
 
-    pub async fn handle_default_logging(&self) {
+    pub async fn handle_default_logging(&mut self) {
         info!("Setting default logging");
         // Default is Debug mode: enable logs
-        let mut routing = self.routing.lock().await;
-        routing.ui_path = TxPath::Usb;
-        routing.net_path = TxPath::Usb;
+        self.routing.ui_path = TxPath::Usb;
+        self.routing.net_path = TxPath::Usb;
     }
 
     pub async fn execute<'b>(
-        &self,
+        &mut self,
         command: Command,
         data: &'b heapless::Vec<u8, 64>,
     ) -> Option<CommandResponse<'b>> {

@@ -13,7 +13,6 @@ use embassy_stm32::{
     peripherals, usart,
     usart::{Config, DataBits, Parity, StopBits, Uart},
 };
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::{
@@ -26,13 +25,6 @@ bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
     USART2 => usart::InterruptHandler<peripherals::USART2>;
     USART3_4 => usart::InterruptHandler<peripherals::USART3>;
-});
-
-// Static allocation for UART routing
-static UART_ROUTING: Mutex<ThreadModeRawMutex, UartRouting> = Mutex::new(UartRouting {
-    usb_path: uart::TxPath::Internal,
-    ui_path: uart::TxPath::None,
-    net_path: uart::TxPath::None,
 });
 
 #[embassy_executor::main]
@@ -124,23 +116,14 @@ async fn main(_spawner: Spawner) {
     gpio.ui_control.normal_mode();
     gpio.net_control.normal_mode();
 
+    // Create local mutable variables for routing and chip controls
+    let mut routing = UartRouting::default();
+    let mut ui_control = gpio.ui_control;
+    let mut net_control = gpio.net_control;
+
     // Set default logging (Debug mode: logs enabled)
-    {
-        let mut routing = UART_ROUTING.lock().await;
-        routing.ui_path = crate::uart::TxPath::Usb;
-        routing.net_path = crate::uart::TxPath::Usb;
-    }
-
-    // Wrap chip controls in Mutex for interior mutability
-    let ui_control = Mutex::new(gpio.ui_control);
-    let net_control = Mutex::new(gpio.net_control);
-
-    // Create command context
-    let context = CommandContext {
-        routing: &UART_ROUTING,
-        ui_control: &ui_control,
-        net_control: &net_control,
-    };
+    routing.ui_path = crate::uart::TxPath::Usb;
+    routing.net_path = crate::uart::TxPath::Usb;
 
     let mut parser = TlvParser::new();
 
@@ -160,7 +143,6 @@ async fn main(_spawner: Spawner) {
         // Read from USB UART and route
         match usb_rx.read(&mut buf).await {
             Ok(n) if n > 0 => {
-                let routing = UART_ROUTING.lock().await;
                 route_data(
                     &buf[..n],
                     routing.usb_path,
@@ -172,9 +154,13 @@ async fn main(_spawner: Spawner) {
 
                 // Parse commands from internal
                 if routing.usb_path == crate::uart::TxPath::Internal {
-                    drop(routing);
                     if let Some((command, cmd_data)) = parser.process(&buf[..n]) {
                         info!("Received command: {:?}", command);
+                        let mut context = CommandContext {
+                            routing: &mut routing,
+                            ui_control: &mut ui_control,
+                            net_control: &mut net_control,
+                        };
                         if let Some(response) = context.execute(command, &cmd_data).await {
                             match response {
                                 CommandResponse::Data(data) => {
@@ -229,10 +215,7 @@ async fn main(_spawner: Spawner) {
                                     .await;
 
                                     // Put UI chip into bootloader mode
-                                    {
-                                        let mut ui_ctrl = ui_control.lock().await;
-                                        ui_ctrl.bootloader_mode();
-                                    }
+                                    ui_control.bootloader_mode();
 
                                     // Send Ready byte
                                     let _ = usb_tx.write(&[READY_BYTE]).await;
@@ -249,10 +232,7 @@ async fn main(_spawner: Spawner) {
                                     .await;
 
                                     // Put NET chip into bootloader mode
-                                    {
-                                        let mut net_ctrl = net_control.lock().await;
-                                        net_ctrl.bootloader_mode();
-                                    }
+                                    net_control.bootloader_mode();
 
                                     // Send Ready byte
                                     let _ = usb_tx.write(&[READY_BYTE]).await;
@@ -281,7 +261,6 @@ async fn main(_spawner: Spawner) {
         // Read from UI UART and route
         match ui_rx.read(&mut buf).await {
             Ok(n) if n > 0 => {
-                let routing = UART_ROUTING.lock().await;
                 route_data(
                     &buf[..n],
                     routing.ui_path,
@@ -297,7 +276,6 @@ async fn main(_spawner: Spawner) {
         // Read from NET UART and route
         match net_rx.read(&mut buf).await {
             Ok(n) if n > 0 => {
-                let routing = UART_ROUTING.lock().await;
                 route_data(
                     &buf[..n],
                     routing.net_path,
