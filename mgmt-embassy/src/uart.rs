@@ -6,8 +6,6 @@ pub enum TxPath {
     Usb,
     Ui,
     Net,
-    #[allow(dead_code)]
-    UiNet,
     Internal,
 }
 
@@ -21,19 +19,13 @@ pub struct UartRouting {
     pub net_path: TxPath,
 }
 
-impl UartRouting {
-    pub const fn new() -> Self {
+impl Default for UartRouting {
+    fn default() -> Self {
         Self {
             usb_path: TxPath::Internal, // USB defaults to internal (command parsing)
             ui_path: TxPath::None,
             net_path: TxPath::None,
         }
-    }
-}
-
-impl Default for UartRouting {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

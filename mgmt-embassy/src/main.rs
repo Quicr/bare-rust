@@ -31,7 +31,11 @@ bind_interrupts!(struct Irqs {
 });
 
 // Static allocations for state and chip controls
-static UART_ROUTING: Mutex<ThreadModeRawMutex, UartRouting> = Mutex::new(UartRouting::new());
+static UART_ROUTING: Mutex<ThreadModeRawMutex, UartRouting> = Mutex::new(UartRouting {
+    usb_path: uart::TxPath::Internal,
+    ui_path: uart::TxPath::None,
+    net_path: uart::TxPath::None,
+});
 static STATE: Mutex<ThreadModeRawMutex, State> = Mutex::new(State::new());
 static UI_CONTROL: Mutex<ThreadModeRawMutex, Option<UiControl>> = Mutex::new(None);
 static NET_CONTROL: Mutex<ThreadModeRawMutex, Option<NetControl>> = Mutex::new(None);
@@ -342,10 +346,6 @@ async fn route_data(
             let _ = ui_tx.write(data).await;
         }
         TxPath::Net => {
-            let _ = net_tx.write(data).await;
-        }
-        TxPath::UiNet => {
-            let _ = ui_tx.write(data).await;
             let _ = net_tx.write(data).await;
         }
         TxPath::Internal => {
