@@ -13,8 +13,10 @@ use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
 use {defmt_rtt as _, panic_probe as _};
 
 use ui_embassy::{
+    commands::{CommandContext, TlvParser},
     gpio::{GpioPeripherals, NetControl, RgbLed, UiControl},
-    uart::{uart_rx_task, uart_tx_task, TxChannels, UartRouting, DMA_BUFFER_SIZE},
+    state::{State, DEFAULT_STATE},
+    uart::{uart_rx_task, uart_tx_task, TxChannels, UartMessage, UartRouting, DMA_BUFFER_SIZE},
 };
 
 bind_interrupts!(struct Irqs {
@@ -24,9 +26,10 @@ bind_interrupts!(struct Irqs {
     // Need to investigate correct UART peripheral for NET (PB10/PB11)
 });
 
-// Static allocations for UART infrastructure
+// Static allocations for UART infrastructure and state
 static TX_CHANNELS: TxChannels = TxChannels::new();
 static UART_ROUTING: Mutex<ThreadModeRawMutex, UartRouting> = Mutex::new(UartRouting::new());
+static STATE: Mutex<ThreadModeRawMutex, State> = Mutex::new(DEFAULT_STATE);
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -108,13 +111,36 @@ async fn main(spawner: Spawner) {
 
     info!("UART tasks spawned");
 
-    // TODO: Spawn command parser task
+    // Initialize chips to normal mode
+    gpio.ui_control.normal_mode().await;
+    gpio.net_control.normal_mode().await;
+
+    // Set default logging based on initial state
+    {
+        let state = STATE.lock().await;
+        let mut routing = UART_ROUTING.lock().await;
+        match *state {
+            State::Debug => {
+                routing.ui_path = ui_embassy::uart::TxPath::Usb;
+                routing.net_path = ui_embassy::uart::TxPath::Usb;
+            }
+            _ => {}
+        }
+    }
+
+    // Spawn command parser task
+    spawner
+        .spawn(command_parser_task(gpio.ui_control, gpio.net_control))
+        .expect("Failed to spawn command parser task");
+
+    info!("Command parser spawned");
+
     // TODO: Spawn NET UART tasks when peripheral is figured out
 
-    // Main loop - for now just blink LEDs
+    // Main loop - blink LED to show we're alive
     loop {
         gpio.led_a.toggle_green();
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(500)).await;
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(1000)).await;
     }
 }
 
@@ -137,4 +163,56 @@ async fn ui_rx_task(rx: embassy_stm32::usart::RingBufferedUartRx<'static>) {
 #[embassy_executor::task]
 async fn ui_tx_task(tx: embassy_stm32::usart::UartTx<'static, Async>) {
     uart_tx_task(tx, &TX_CHANNELS.ui, "UI").await;
+}
+
+#[embassy_executor::task]
+async fn command_parser_task(mut ui_control: UiControl, mut net_control: NetControl) {
+    info!("Command parser task started");
+
+    // Create command context - using unsafe static references
+    // This is safe because we're the only task accessing these controls
+    let ui_control_ref: &'static Mutex<ThreadModeRawMutex, UiControl> = unsafe {
+        static mut UI_CTRL: Option<Mutex<ThreadModeRawMutex, UiControl>> = None;
+        UI_CTRL = Some(Mutex::new(ui_control));
+        UI_CTRL.as_ref().unwrap()
+    };
+
+    let net_control_ref: &'static Mutex<ThreadModeRawMutex, NetControl> = unsafe {
+        static mut NET_CTRL: Option<Mutex<ThreadModeRawMutex, NetControl>> = None;
+        NET_CTRL = Some(Mutex::new(net_control));
+        NET_CTRL.as_ref().unwrap()
+    };
+
+    let context = CommandContext {
+        routing: &UART_ROUTING,
+        ui_control: ui_control_ref,
+        net_control: net_control_ref,
+        state: &STATE,
+    };
+
+    let mut parser = TlvParser::new();
+
+    loop {
+        let msg = TX_CHANNELS.internal.receive().await;
+
+        match msg {
+            UartMessage::Data(data) => {
+                // Parse TLV commands
+                if let Some((command, cmd_data)) = parser.process(&data) {
+                    info!("Received command: {:?}", command);
+
+                    // Execute command
+                    if let Some(response) = context.execute(command, &cmd_data).await {
+                        // Send response to USB
+                        if let Ok(vec) = heapless::Vec::from_slice(response) {
+                            let _ = TX_CHANNELS.usb.send(UartMessage::Data(vec)).await;
+                        }
+                    }
+                }
+            }
+            UartMessage::SingleByte(_) => {
+                // Ignore single byte messages in internal channel
+            }
+        }
+    }
 }

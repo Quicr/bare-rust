@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
 pub enum Command {
     Version = 0,
     WhoAreYou = 1,
