@@ -11,7 +11,7 @@ use embassy_stm32::{
     bind_interrupts,
     mode::Async,
     peripherals, usart,
-    usart::{Config, DataBits, Parity, StopBits, Uart},
+    usart::{Config, DataBits, Parity, RingBufferedUartRx, StopBits, Uart},
 };
 use {defmt_rtt as _, panic_probe as _};
 
@@ -140,130 +140,98 @@ async fn main(_spawner: Spawner) {
             led_timer = embassy_time::Instant::now();
         }
 
-        // Read from USB UART and route
-        match usb_rx.read(&mut buf).await {
-            Ok(n) if n > 0 => {
-                route_data(
-                    &buf[..n],
-                    routing.usb_path,
-                    &mut usb_tx,
-                    &mut ui_tx,
-                    &mut net_tx,
-                )
-                .await;
+        if routing.usb_path != crate::uart::TxPath::Internal {
+            // If we are not reading commands from USB, read from USB UART and route
+            let data = must_read(&mut usb_rx, &mut buf).await;
+            route_data(data, routing.usb_path, &mut usb_tx, &mut ui_tx, &mut net_tx).await;
+        } else {
+            let data = must_read(&mut usb_rx, &mut buf).await;
 
-                // Parse commands from internal
-                if routing.usb_path == crate::uart::TxPath::Internal {
-                    if let Some((command, cmd_data)) = parser.process(&buf[..n]) {
-                        info!("Received command: {:?}", command);
-                        let mut context = CommandContext {
-                            routing: &mut routing,
-                            ui_control: &mut ui_control,
-                            net_control: &mut net_control,
-                        };
-                        if let Some(response) = context.execute(command, &cmd_data).await {
-                            match response {
-                                CommandResponse::Data(data) => {
-                                    let _ = usb_tx.write(data).await;
-                                }
-                                CommandResponse::FlashUi => {
-                                    // Send OK byte
-                                    let _ = usb_tx.write(&[OK_BYTE]).await;
+            let (command, cmd_data) = parser.process(data).expect("Invalid command");
 
-                                    let flash_config = {
-                                        let mut config = Config::default();
-                                        config.baudrate = 115200;
-                                        config.data_bits = DataBits::DataBits9;
-                                        config.stop_bits = StopBits::STOP1;
-                                        config.parity = Parity::ParityEven;
-                                        config
-                                    };
+            info!("Received command: {:?}", command);
+            let mut context = CommandContext {
+                routing: &mut routing,
+                ui_control: &mut ui_control,
+                net_control: &mut net_control,
+            };
 
-                                    usb_rx.set_config(&flash_config).unwrap();
-                                    usb_tx.set_config(&flash_config).unwrap();
+            let response = context
+                .execute(command, &cmd_data)
+                .await
+                .expect("Command failure");
 
-                                    // Delay to allow UART reconfiguration to settle
-                                    embassy_time::Timer::after(
-                                        embassy_time::Duration::from_millis(200),
-                                    )
-                                    .await;
+            match response {
+                CommandResponse::FlashUi => {
+                    // Send OK byte
+                    let _ = usb_tx.write(&[OK_BYTE]).await;
 
-                                    // Put UI chip into bootloader mode
-                                    ui_control.bootloader_mode();
+                    let flash_config = {
+                        let mut config = Config::default();
+                        config.baudrate = 115200;
+                        config.data_bits = DataBits::DataBits9;
+                        config.stop_bits = StopBits::STOP1;
+                        config.parity = Parity::ParityEven;
+                        config
+                    };
 
-                                    // Send Ready byte
-                                    let _ = usb_tx.write(&[READY_BYTE]).await;
-                                    info!("UI flash mode active - bootloader ready");
-                                }
-                                CommandResponse::FlashNet => {
-                                    // Send OK byte
-                                    let _ = usb_tx.write(&[OK_BYTE]).await;
+                    usb_rx.set_config(&flash_config).unwrap();
+                    usb_tx.set_config(&flash_config).unwrap();
 
-                                    // Delay before entering bootloader mode
-                                    embassy_time::Timer::after(
-                                        embassy_time::Duration::from_millis(200),
-                                    )
-                                    .await;
+                    // Delay to allow UART reconfiguration to settle
+                    embassy_time::Timer::after(embassy_time::Duration::from_millis(200)).await;
 
-                                    // Put NET chip into bootloader mode
-                                    net_control.bootloader_mode();
+                    // Put UI chip into bootloader mode
+                    ui_control.bootloader_mode();
 
-                                    // Send Ready byte
-                                    let _ = usb_tx.write(&[READY_BYTE]).await;
-                                    info!("NET flash mode active - bootloader ready");
-                                }
-                                CommandResponse::ForwardToUi(data) => {
-                                    // Forward data to UI UART
-                                    let _ = ui_tx.write(&data).await;
-                                }
-                                CommandResponse::ForwardToNet(data) => {
-                                    // Forward data to NET UART
-                                    let _ = net_tx.write(&data).await;
-                                }
-                                CommandResponse::Loopback(data) => {
-                                    // Loopback data to USB UART
-                                    let _ = usb_tx.write(&data).await;
-                                }
-                            }
-                        }
-                    }
+                    // Send Ready byte
+                    let _ = usb_tx.write(&[READY_BYTE]).await;
+                    info!("UI flash mode active - bootloader ready");
+                }
+                CommandResponse::FlashNet => {
+                    // Send OK byte
+                    let _ = usb_tx.write(&[OK_BYTE]).await;
+
+                    // Delay before entering bootloader mode
+                    embassy_time::Timer::after(embassy_time::Duration::from_millis(200)).await;
+
+                    // Put NET chip into bootloader mode
+                    net_control.bootloader_mode();
+
+                    // Send Ready byte
+                    let _ = usb_tx.write(&[READY_BYTE]).await;
+                    info!("NET flash mode active - bootloader ready");
+                }
+                CommandResponse::ToUi(data) => {
+                    // Forward data to UI UART
+                    let _ = ui_tx.write(&data).await;
+                }
+                CommandResponse::ToNet(data) => {
+                    // Forward data to NET UART
+                    let _ = net_tx.write(&data).await;
+                }
+                CommandResponse::ToUsb(data) => {
+                    // Forward data to USB UART
+                    let _ = usb_tx.write(&data).await;
                 }
             }
-            _ => {}
         }
 
         // Read from UI UART and route
-        match ui_rx.read(&mut buf).await {
-            Ok(n) if n > 0 => {
-                route_data(
-                    &buf[..n],
-                    routing.ui_path,
-                    &mut usb_tx,
-                    &mut ui_tx,
-                    &mut net_tx,
-                )
-                .await;
-            }
-            _ => {}
-        }
+        let data = must_read(&mut ui_rx, &mut buf).await;
+        route_data(data, routing.ui_path, &mut usb_tx, &mut ui_tx, &mut net_tx).await;
 
         // Read from NET UART and route
-        match net_rx.read(&mut buf).await {
-            Ok(n) if n > 0 => {
-                route_data(
-                    &buf[..n],
-                    routing.net_path,
-                    &mut usb_tx,
-                    &mut ui_tx,
-                    &mut net_tx,
-                )
-                .await;
-            }
-            _ => {}
-        }
+        let data = must_read(&mut net_rx, &mut buf).await;
+        route_data(data, routing.net_path, &mut usb_tx, &mut ui_tx, &mut net_tx).await;
 
         embassy_time::Timer::after(embassy_time::Duration::from_micros(100)).await;
     }
+}
+
+async fn must_read<'a>(rx: &mut RingBufferedUartRx<'_>, buf: &'a mut [u8]) -> &'a [u8] {
+    let n = rx.read(buf).await.unwrap();
+    &buf[..n]
 }
 
 // Helper function to route data between UARTs
@@ -275,6 +243,10 @@ async fn route_data(
     net_tx: &mut embassy_stm32::usart::UartTx<'static, Async>,
 ) {
     use crate::uart::TxPath;
+
+    if data.is_empty() {
+        return;
+    }
 
     match path {
         TxPath::None => {}
