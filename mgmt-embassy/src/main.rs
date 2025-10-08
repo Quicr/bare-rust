@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-mod chip_control;
 mod commands;
 mod gpio;
 mod state;
@@ -123,8 +122,8 @@ async fn main(_spawner: Spawner) {
     info!("UARTs configured");
 
     // Initialize chips to normal mode
-    gpio.ui_control.normal_mode().await;
-    gpio.net_control.normal_mode().await;
+    gpio.ui_control.normal_mode();
+    gpio.net_control.normal_mode();
 
     // Set default logging based on initial state
     {
@@ -238,7 +237,7 @@ async fn main(_spawner: Spawner) {
                                     {
                                         let mut ui_control = UI_CONTROL.lock().await;
                                         if let Some(ref mut ctrl) = *ui_control {
-                                            ctrl.bootloader_mode().await;
+                                            ctrl.bootloader_mode();
                                         }
                                     }
 
@@ -260,7 +259,7 @@ async fn main(_spawner: Spawner) {
                                     {
                                         let mut net_control = NET_CONTROL.lock().await;
                                         if let Some(ref mut ctrl) = *net_control {
-                                            ctrl.bootloader_mode().await;
+                                            ctrl.bootloader_mode();
                                         }
                                     }
 

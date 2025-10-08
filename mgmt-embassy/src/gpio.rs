@@ -1,7 +1,9 @@
 use embassy_stm32::{
-    gpio::{Flex, Level, Output, Speed},
+    gpio::{Flex, Level, Output, Pull, Speed},
     Peri,
 };
+use embassy_time::Delay;
+use embedded_hal::delay::DelayNs;
 
 /// RGB LED controller
 pub struct RgbLed {
@@ -114,4 +116,92 @@ pub struct GpioPeripherals {
     pub led_b: RgbLed,
     pub ui_control: UiControl,
     pub net_control: NetControl,
+}
+
+/// Control functions for NET chip
+impl NetControl {
+    /// Power cycle the NET chip reset pin
+    fn power_cycle(&mut self, delay_ms: u64) {
+        let mut delay = Delay;
+        self.nrst.set_low();
+        delay.delay_ms(delay_ms as u32);
+        self.nrst.set_high();
+    }
+
+    /// Put NET chip into bootloader mode
+    pub fn bootloader_mode(&mut self) {
+        self.power_cycle(10);
+
+        // Bring boot low for ESP bootloader mode
+        self.boot.set_low();
+
+        // Power cycle
+        self.power_cycle(10);
+    }
+
+    /// Put NET chip into normal mode
+    pub fn normal_mode(&mut self) {
+        self.boot.set_high();
+
+        // Power cycle
+        self.power_cycle(10);
+    }
+
+    /// Hold NET chip in reset
+    pub fn hold_in_reset(&mut self) {
+        let mut delay = Delay;
+        self.boot.set_high();
+
+        // Reset and hold
+        self.nrst.set_low();
+        delay.delay_ms(100);
+    }
+}
+
+/// Control functions for UI chip
+impl UiControl {
+    /// Put UI chip into bootloader mode (boot0=1, boot1=0)
+    pub fn bootloader_mode(&mut self) {
+        self.boot0.set_high();
+        self.boot1.set_low();
+
+        // Power cycle
+        self.power_cycle();
+    }
+
+    /// Put UI chip into normal mode (boot0=0, boot1=1)
+    pub fn normal_mode(&mut self) {
+        self.boot0.set_low();
+        self.boot1.set_high();
+
+        // Power cycle
+        self.power_cycle();
+    }
+
+    /// Hold UI chip in reset
+    pub fn hold_in_reset(&mut self) {
+        self.boot0.set_low();
+        self.boot1.set_high();
+
+        self.nrst.set_as_output(Speed::Low);
+        self.nrst.set_low();
+    }
+
+    /// Power cycle the UI chip
+    pub fn power_cycle(&mut self) {
+        let mut delay = Delay;
+        // Set nrst as output
+        self.nrst.set_as_output(Speed::Low);
+        self.nrst.set_low();
+        delay.delay_ms(10);
+
+        self.nrst.set_high();
+        delay.delay_ms(10);
+
+        self.nrst.set_low();
+        delay.delay_ms(10);
+
+        // Switch to input mode with pull-up (matching C code behavior)
+        self.nrst.set_as_input(Pull::Up);
+    }
 }

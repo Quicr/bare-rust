@@ -16,6 +16,7 @@ embassy-stm32 = { version = "0.3.0", features = ["defmt", "stm32f072cb", "memory
 embassy-sync = { version = "0.7.0", features = ["defmt"] }
 embassy-time = { version = "0.4.0", features = ["defmt"] }
 heapless = "0.8"
+embedded-hal = "1.0"
 
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 

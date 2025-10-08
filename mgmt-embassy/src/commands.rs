@@ -216,7 +216,7 @@ impl CommandContext {
         info!("Resetting UI chip");
         let mut ui_control = self.ui_control.lock().await;
         if let Some(ref mut ctrl) = *ui_control {
-            ctrl.normal_mode().await;
+            ctrl.normal_mode();
         }
     }
 
@@ -224,7 +224,7 @@ impl CommandContext {
         info!("Resetting NET chip");
         let mut net_control = self.net_control.lock().await;
         if let Some(ref mut ctrl) = *net_control {
-            ctrl.normal_mode().await;
+            ctrl.normal_mode();
         }
     }
 
@@ -235,7 +235,7 @@ impl CommandContext {
         {
             let mut net_control = self.net_control.lock().await;
             if let Some(ref mut ctrl) = *net_control {
-                ctrl.hold_in_reset().await;
+                ctrl.hold_in_reset();
             }
         }
 
@@ -257,7 +257,7 @@ impl CommandContext {
         {
             let mut ui_control = self.ui_control.lock().await;
             if let Some(ref mut ctrl) = *ui_control {
-                ctrl.hold_in_reset().await;
+                ctrl.hold_in_reset();
             }
         }
 
