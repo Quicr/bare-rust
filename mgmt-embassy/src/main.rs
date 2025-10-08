@@ -170,18 +170,6 @@ async fn main(_spawner: Spawner) {
                                     // Send OK byte
                                     let _ = usb_tx.write(&[OK_BYTE]).await;
 
-                                    // Reconfigure USB UART to 9E1 for UI bootloader
-                                    info!("Reconfiguring USB UART to 9E1");
-                                    drop(usb_tx);
-                                    drop(usb_rx);
-
-                                    // Steal peripherals to recreate UART with 9E1 config
-                                    let usart1 = unsafe { peripherals::USART1::steal() };
-                                    let pa9 = unsafe { peripherals::PA9::steal() };
-                                    let pa10 = unsafe { peripherals::PA10::steal() };
-                                    let dma1_ch2 = unsafe { peripherals::DMA1_CH2::steal() };
-                                    let dma1_ch3 = unsafe { peripherals::DMA1_CH3::steal() };
-
                                     let flash_config = {
                                         let mut config = Config::default();
                                         config.baudrate = 115200;
@@ -191,22 +179,8 @@ async fn main(_spawner: Spawner) {
                                         config
                                     };
 
-                                    let usb_uart = Uart::new(
-                                        usart1,
-                                        pa10,
-                                        pa9,
-                                        Irqs,
-                                        dma1_ch2,
-                                        dma1_ch3,
-                                        flash_config,
-                                    )
-                                    .unwrap();
-                                    let (new_usb_tx, new_usb_rx) = usb_uart.split();
-
-                                    // Recreate ring buffer with new DMA buffer
-                                    usb_rx_buf = [0u8; DMA_BUFFER_SIZE];
-                                    usb_tx = new_usb_tx;
-                                    usb_rx = new_usb_rx.into_ring_buffered(&mut usb_rx_buf);
+                                    usb_rx.set_config(&flash_config).unwrap();
+                                    usb_tx.set_config(&flash_config).unwrap();
 
                                     // Delay to allow UART reconfiguration to settle
                                     embassy_time::Timer::after(
