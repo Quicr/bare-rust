@@ -29,8 +29,8 @@ static EVENT_QUEUE: EventChannel = Channel::new();
 struct EventSource(EventReceiver);
 
 impl ui_app::EventSource for EventSource {
-    async fn receive(&mut self) -> Event {
-        self.0.receive().await
+    async fn receive(&mut self) -> Option<Event> {
+        Some(self.0.receive().await)
     }
 }
 
