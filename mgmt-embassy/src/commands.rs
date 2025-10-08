@@ -159,20 +159,17 @@ impl Default for TlvParser {
 }
 
 /// Command handler context
-pub struct CommandContext {
+pub struct CommandContext<'a> {
     // Mutex is needed even with single task for:
-    // 1. Interior mutability of statics
+    // 1. Interior mutability
     // 2. Send/Sync safety across async await points
-    pub routing: &'static Mutex<ThreadModeRawMutex, UartRouting>,
-    // Option is needed because static initialization can't call new() with peripherals
-    // Peripherals are only available after embassy_stm32::init() in main()
-    // After initialization in main, these are always Some
-    pub ui_control: &'static Mutex<ThreadModeRawMutex, Option<UiControl>>,
-    pub net_control: &'static Mutex<ThreadModeRawMutex, Option<NetControl>>,
+    pub routing: &'a Mutex<ThreadModeRawMutex, UartRouting>,
+    pub ui_control: &'a Mutex<ThreadModeRawMutex, UiControl>,
+    pub net_control: &'a Mutex<ThreadModeRawMutex, NetControl>,
 }
 
 /// Command handlers
-impl CommandContext {
+impl<'a> CommandContext<'a> {
     pub async fn handle_version(&self) -> &'static [u8] {
         VERSION
     }
@@ -200,17 +197,13 @@ impl CommandContext {
     pub async fn handle_reset_ui(&self) {
         info!("Resetting UI chip");
         let mut ui_control = self.ui_control.lock().await;
-        if let Some(ref mut ctrl) = *ui_control {
-            ctrl.normal_mode();
-        }
+        ui_control.normal_mode();
     }
 
     pub async fn handle_reset_net(&self) {
         info!("Resetting NET chip");
         let mut net_control = self.net_control.lock().await;
-        if let Some(ref mut ctrl) = *net_control {
-            ctrl.normal_mode();
-        }
+        net_control.normal_mode();
     }
 
     pub async fn handle_flash_ui(&self) {
@@ -219,9 +212,7 @@ impl CommandContext {
         // Hold NET in reset
         {
             let mut net_control = self.net_control.lock().await;
-            if let Some(ref mut ctrl) = *net_control {
-                ctrl.hold_in_reset();
-            }
+            net_control.hold_in_reset();
         }
 
         // Configure routing: USB->UI, UI->USB, NET->None
@@ -241,9 +232,7 @@ impl CommandContext {
         // Hold UI in reset
         {
             let mut ui_control = self.ui_control.lock().await;
-            if let Some(ref mut ctrl) = *ui_control {
-                ctrl.hold_in_reset();
-            }
+            ui_control.hold_in_reset();
         }
 
         // Configure routing: USB->NET, NET->USB, UI->None
@@ -299,11 +288,11 @@ impl CommandContext {
         routing.net_path = TxPath::Usb;
     }
 
-    pub async fn execute<'a>(
+    pub async fn execute<'b>(
         &self,
         command: Command,
-        data: &'a heapless::Vec<u8, 64>,
-    ) -> Option<CommandResponse<'a>> {
+        data: &'b heapless::Vec<u8, 64>,
+    ) -> Option<CommandResponse<'b>> {
         match command {
             Command::Version => Some(CommandResponse::Data(self.handle_version().await)),
             Command::WhoAreYou => Some(CommandResponse::Data(self.handle_who_are_you().await)),

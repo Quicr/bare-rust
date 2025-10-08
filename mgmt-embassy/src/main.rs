@@ -28,14 +28,12 @@ bind_interrupts!(struct Irqs {
     USART3_4 => usart::InterruptHandler<peripherals::USART3>;
 });
 
-// Static allocations for chip controls
+// Static allocation for UART routing
 static UART_ROUTING: Mutex<ThreadModeRawMutex, UartRouting> = Mutex::new(UartRouting {
     usb_path: uart::TxPath::Internal,
     ui_path: uart::TxPath::None,
     net_path: uart::TxPath::None,
 });
-static UI_CONTROL: Mutex<ThreadModeRawMutex, Option<UiControl>> = Mutex::new(None);
-static NET_CONTROL: Mutex<ThreadModeRawMutex, Option<NetControl>> = Mutex::new(None);
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -133,15 +131,15 @@ async fn main(_spawner: Spawner) {
         routing.net_path = crate::uart::TxPath::Usb;
     }
 
-    // Store chip controls in statics for command context
-    *UI_CONTROL.lock().await = Some(gpio.ui_control);
-    *NET_CONTROL.lock().await = Some(gpio.net_control);
+    // Wrap chip controls in Mutex for interior mutability
+    let ui_control = Mutex::new(gpio.ui_control);
+    let net_control = Mutex::new(gpio.net_control);
 
     // Create command context
     let context = CommandContext {
         routing: &UART_ROUTING,
-        ui_control: &UI_CONTROL,
-        net_control: &NET_CONTROL,
+        ui_control: &ui_control,
+        net_control: &net_control,
     };
 
     let mut parser = TlvParser::new();
@@ -232,10 +230,8 @@ async fn main(_spawner: Spawner) {
 
                                     // Put UI chip into bootloader mode
                                     {
-                                        let mut ui_control = UI_CONTROL.lock().await;
-                                        if let Some(ref mut ctrl) = *ui_control {
-                                            ctrl.bootloader_mode();
-                                        }
+                                        let mut ui_ctrl = ui_control.lock().await;
+                                        ui_ctrl.bootloader_mode();
                                     }
 
                                     // Send Ready byte
@@ -254,10 +250,8 @@ async fn main(_spawner: Spawner) {
 
                                     // Put NET chip into bootloader mode
                                     {
-                                        let mut net_control = NET_CONTROL.lock().await;
-                                        if let Some(ref mut ctrl) = *net_control {
-                                            ctrl.bootloader_mode();
-                                        }
+                                        let mut net_ctrl = net_control.lock().await;
+                                        net_ctrl.bootloader_mode();
                                     }
 
                                     // Send Ready byte
