@@ -20,6 +20,7 @@ embedded-hal = "1.0"
 
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 num_enum = { version = "0.7.4", default-features = false }
+embedded-io-async = "0.6.1"
 
 [profile.release]
 debug = 2

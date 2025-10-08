@@ -32,6 +32,7 @@ impl RgbLed {
         self.b.set_level(if b { Level::Low } else { Level::High });
     }
 
+    #[allow(dead_code)]
     pub fn off(&mut self) {
         self.set_rgb(false, false, false);
     }
@@ -108,14 +109,6 @@ impl NetControl {
             boot: Output::new(boot, Level::High, Speed::Low),
         }
     }
-}
-
-/// All GPIO peripherals
-pub struct GpioPeripherals {
-    pub led_a: RgbLed,
-    pub led_b: RgbLed,
-    pub ui_control: UiControl,
-    pub net_control: NetControl,
 }
 
 /// Control functions for NET chip
