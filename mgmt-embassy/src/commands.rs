@@ -61,6 +61,23 @@ impl Command {
 
 pub const CMD_COUNT: usize = 18;
 
+/// Response from command execution
+#[derive(Debug)]
+pub enum CommandResponse {
+    /// Send data response
+    Data(&'static [u8]),
+    /// Enter UI flash mode
+    FlashUi,
+    /// Enter NET flash mode
+    FlashNet,
+    /// Forward data to UI UART
+    ForwardToUi(heapless::Vec<u8, 64>),
+    /// Forward data to NET UART
+    ForwardToNet(heapless::Vec<u8, 64>),
+    /// Loopback data to USB UART
+    Loopback(heapless::Vec<u8, 64>),
+}
+
 /// TLV packet parser state
 #[derive(Debug)]
 pub enum ParserState {
@@ -232,9 +249,7 @@ impl CommandContext {
             routing.net_path = TxPath::None;
         }
 
-        // TODO: Send OK byte and reconfigure UART to 9E1
-        // TODO: Put UI into bootloader mode
-        // TODO: Send Ready byte
+        // Flash mode sequence handled in main loop
     }
 
     pub async fn handle_flash_net(&self) {
@@ -256,9 +271,7 @@ impl CommandContext {
             routing.ui_path = TxPath::None;
         }
 
-        // TODO: Send OK byte
-        // TODO: Put NET into bootloader mode
-        // TODO: Send Ready byte
+        // Flash mode sequence handled in main loop
     }
 
     pub async fn handle_enable_logs(&self) {
@@ -313,64 +326,70 @@ impl CommandContext {
         }
     }
 
-    pub async fn execute(&self, command: Command, _data: &[u8]) -> Option<&'static [u8]> {
+    pub async fn execute(
+        &self,
+        command: Command,
+        data: &heapless::Vec<u8, 64>,
+    ) -> Option<CommandResponse> {
         match command {
-            Command::Version => Some(self.handle_version().await),
-            Command::WhoAreYou => Some(self.handle_who_are_you().await),
+            Command::Version => Some(CommandResponse::Data(self.handle_version().await)),
+            Command::WhoAreYou => Some(CommandResponse::Data(self.handle_who_are_you().await)),
             Command::HardReset => {
                 self.handle_hard_reset().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::Reset => {
                 self.handle_reset().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::ResetUi => {
                 self.handle_reset_ui().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::ResetNet => {
                 self.handle_reset_net().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::FlashUi => {
                 self.handle_flash_ui().await;
-                None // Special handling needed
+                Some(CommandResponse::FlashUi)
             }
             Command::FlashNet => {
                 self.handle_flash_net().await;
-                None // Special handling needed
+                Some(CommandResponse::FlashNet)
             }
             Command::EnableLogs => {
                 self.handle_enable_logs().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::EnableLogsUi => {
                 self.handle_enable_logs_ui().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::EnableLogsNet => {
                 self.handle_enable_logs_net().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::DisableLogs => {
                 self.handle_disable_logs().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::DisableLogsUi => {
                 self.handle_disable_logs_ui().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::DisableLogsNet => {
                 self.handle_disable_logs_net().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
             Command::DefaultLogging => {
                 self.handle_default_logging().await;
-                Some(OK_ASCII)
+                Some(CommandResponse::Data(OK_ASCII))
             }
-            // Data forwarding commands - handled separately
-            Command::ToUi | Command::ToNet | Command::Loopback => None,
+            // Data forwarding commands
+            Command::ToUi => Some(CommandResponse::ForwardToUi(data.clone())),
+            Command::ToNet => Some(CommandResponse::ForwardToNet(data.clone())),
+            Command::Loopback => Some(CommandResponse::Loopback(data.clone())),
         }
     }
 }

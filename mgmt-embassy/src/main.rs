@@ -13,10 +13,10 @@ use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
 use {defmt_rtt as _, panic_probe as _};
 
 use ui_embassy::{
-    commands::{CommandContext, TlvParser},
+    commands::{CommandContext, CommandResponse, TlvParser},
     gpio::{GpioPeripherals, NetControl, RgbLed, UiControl},
     state::{State, DEFAULT_STATE},
-    uart::{UartRouting, DMA_BUFFER_SIZE},
+    uart::{UartRouting, DMA_BUFFER_SIZE, OK_BYTE, READY_BYTE},
 };
 
 bind_interrupts!(struct Irqs {
@@ -179,7 +179,105 @@ async fn main(_spawner: Spawner) {
                     if let Some((command, cmd_data)) = parser.process(&buf[..n]) {
                         info!("Received command: {:?}", command);
                         if let Some(response) = context.execute(command, &cmd_data).await {
-                            let _ = usb_tx.write(response).await;
+                            match response {
+                                CommandResponse::Data(data) => {
+                                    let _ = usb_tx.write(data).await;
+                                }
+                                CommandResponse::FlashUi => {
+                                    // Send OK byte
+                                    let _ = usb_tx.write(&[OK_BYTE]).await;
+
+                                    // Reconfigure USB UART to 9E1 for UI bootloader
+                                    info!("Reconfiguring USB UART to 9E1");
+                                    drop(usb_tx);
+                                    drop(usb_rx);
+
+                                    // Steal peripherals to recreate UART with 9E1 config
+                                    let usart1 = unsafe { peripherals::USART1::steal() };
+                                    let pa9 = unsafe { peripherals::PA9::steal() };
+                                    let pa10 = unsafe { peripherals::PA10::steal() };
+                                    let dma1_ch2 = unsafe { peripherals::DMA1_CH2::steal() };
+                                    let dma1_ch3 = unsafe { peripherals::DMA1_CH3::steal() };
+
+                                    let flash_config = {
+                                        let mut config = Config::default();
+                                        config.baudrate = 115200;
+                                        config.data_bits = DataBits::DataBits9;
+                                        config.stop_bits = StopBits::STOP1;
+                                        config.parity = Parity::ParityEven;
+                                        config
+                                    };
+
+                                    let usb_uart = Uart::new(
+                                        usart1,
+                                        pa10,
+                                        pa9,
+                                        Irqs,
+                                        dma1_ch2,
+                                        dma1_ch3,
+                                        flash_config,
+                                    )
+                                    .unwrap();
+                                    let (new_usb_tx, new_usb_rx) = usb_uart.split();
+
+                                    // Recreate ring buffer with new DMA buffer
+                                    usb_rx_buf = [0u8; DMA_BUFFER_SIZE];
+                                    usb_tx = new_usb_tx;
+                                    usb_rx = new_usb_rx.into_ring_buffered(&mut usb_rx_buf);
+
+                                    // Delay to allow UART reconfiguration to settle
+                                    embassy_time::Timer::after(
+                                        embassy_time::Duration::from_millis(200),
+                                    )
+                                    .await;
+
+                                    // Put UI chip into bootloader mode
+                                    {
+                                        let mut ui_control = UI_CONTROL.lock().await;
+                                        if let Some(ref mut ctrl) = *ui_control {
+                                            ctrl.bootloader_mode().await;
+                                        }
+                                    }
+
+                                    // Send Ready byte
+                                    let _ = usb_tx.write(&[READY_BYTE]).await;
+                                    info!("UI flash mode active - bootloader ready");
+                                }
+                                CommandResponse::FlashNet => {
+                                    // Send OK byte
+                                    let _ = usb_tx.write(&[OK_BYTE]).await;
+
+                                    // Delay before entering bootloader mode
+                                    embassy_time::Timer::after(
+                                        embassy_time::Duration::from_millis(200),
+                                    )
+                                    .await;
+
+                                    // Put NET chip into bootloader mode
+                                    {
+                                        let mut net_control = NET_CONTROL.lock().await;
+                                        if let Some(ref mut ctrl) = *net_control {
+                                            ctrl.bootloader_mode().await;
+                                        }
+                                    }
+
+                                    // Send Ready byte
+                                    let _ = usb_tx.write(&[READY_BYTE]).await;
+                                    info!("NET flash mode active - bootloader ready");
+                                }
+                                CommandResponse::ForwardToUi(data) => {
+                                    // Forward data to UI UART
+                                    let _ = ui_tx.write(&data).await;
+                                }
+                                CommandResponse::ForwardToNet(data) => {
+                                    // Forward data to NET UART
+                                    let _ = net_tx.write(&data).await;
+                                }
+                                CommandResponse::Loopback(data) => {
+                                    // Loopback data to USB UART
+                                    let _ = usb_tx.write(&data).await;
+                                }
+                            }
                         }
                     }
                 }

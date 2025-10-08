@@ -1,4 +1,4 @@
-use embassy_stm32::gpio::Output;
+use embassy_stm32::gpio::{Output, Pull, Speed};
 use embassy_time::{Duration, Timer};
 
 use crate::gpio::{NetControl, UiControl};
@@ -66,20 +66,24 @@ impl UiControl {
         self.boot0.set_low();
         self.boot1.set_high();
 
+        self.nrst.set_as_output(Speed::Low);
         self.nrst.set_low();
     }
 
     /// Power cycle the UI chip
     pub async fn power_cycle(&mut self) {
-        // The C code does some pin mode switching here
-        // For now, we'll do a simple power cycle
-        // TODO: May need to handle pin mode changes differently
+        // Set nrst as output
+        self.nrst.set_as_output(Speed::Low);
         self.nrst.set_low();
         Timer::after(Duration::from_millis(10)).await;
+
         self.nrst.set_high();
         Timer::after(Duration::from_millis(10)).await;
+
         self.nrst.set_low();
-        // Note: C code switches to input mode here
-        // This may need special handling in the main code
+        Timer::after(Duration::from_millis(10)).await;
+
+        // Switch to input mode with pull-up (matching C code behavior)
+        self.nrst.set_as_input(Pull::Up);
     }
 }

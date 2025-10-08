@@ -1,5 +1,5 @@
 use embassy_stm32::{
-    gpio::{Level, Output, Speed},
+    gpio::{Flex, Level, Output, Speed},
     Peri,
 };
 
@@ -61,7 +61,7 @@ impl RgbLed {
 
 /// Control pins for UI chip
 pub struct UiControl {
-    pub nrst: Output<'static>,
+    pub nrst: Flex<'static>,
     pub boot0: Output<'static>,
     pub boot1: Output<'static>,
 }
@@ -72,8 +72,12 @@ impl UiControl {
         boot0: Peri<'static, impl embassy_stm32::gpio::Pin>,
         boot1: Peri<'static, impl embassy_stm32::gpio::Pin>,
     ) -> Self {
+        let mut nrst_flex = Flex::new(nrst);
+        nrst_flex.set_as_output(Speed::Low);
+        nrst_flex.set_high();
+
         Self {
-            nrst: Output::new(nrst, Level::High, Speed::Low),
+            nrst: nrst_flex,
             boot0: Output::new(boot0, Level::Low, Speed::Low),
             boot1: Output::new(boot1, Level::High, Speed::Low),
         }
