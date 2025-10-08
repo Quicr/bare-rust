@@ -166,7 +166,7 @@ async fn ui_tx_task(tx: embassy_stm32::usart::UartTx<'static, Async>) {
 }
 
 #[embassy_executor::task]
-async fn command_parser_task(mut ui_control: UiControl, mut net_control: NetControl) {
+async fn command_parser_task(ui_control: UiControl, net_control: NetControl) {
     info!("Command parser task started");
 
     // Create command context - using unsafe static references
