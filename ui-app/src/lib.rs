@@ -271,7 +271,7 @@ pub trait Outputs {
 }
 
 pub trait EventSource {
-    async fn receive(&mut self) -> Event;
+    async fn receive(&mut self) -> Option<Event>;
 }
 
 #[derive(Debug, PartialEq, Format)]
@@ -368,10 +368,12 @@ impl App {
                 out.audio_data().start().await;
 
                 while out.button_b_down() {
+                    out.log("frame");
                     let frame = out.audio_data().read().await;
                     out.net_tx().write(&ToNet::AudioFrame(frame));
                 }
 
+                out.log("button b up (via down)");
                 out.net_tx().write(&ToNet::AudioEnd);
                 // TODO: Stop the audio buffer.  If we have this line right now, it causes a
                 // DmaUnsynced error.  Probably an error in the underlying driver code.
@@ -488,8 +490,7 @@ impl App {
     }
 
     pub async fn run(&mut self, mut events: impl EventSource, mut board: impl Outputs) {
-        loop {
-            let event = events.receive().await;
+        while let Some(event) = events.receive().await {
             self.handle(event, &mut board).await;
         }
     }

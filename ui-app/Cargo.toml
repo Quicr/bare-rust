@@ -12,4 +12,4 @@ heapless = "0.9.1"
 hex = { version = "0.4.3", default-features = false }
 
 [dev-dependencies]
-tokio = { version = "1.47.1", features = ["rt", "macros"] }
+tokio = { version = "1.47.1", features = ["time", "rt", "macros", "sync"] }
