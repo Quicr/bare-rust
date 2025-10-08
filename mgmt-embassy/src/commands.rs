@@ -6,7 +6,7 @@ use embassy_sync::mutex::Mutex;
 
 use crate::{
     gpio::{NetControl, UiControl},
-    state::{State, DEFAULT_STATE},
+    state::State,
     uart::{TxPath, UartRouting, OK_ASCII},
 };
 
@@ -58,8 +58,6 @@ impl Command {
         }
     }
 }
-
-pub const CMD_COUNT: usize = 18;
 
 /// Response from command execution
 #[derive(Debug)]
@@ -206,7 +204,7 @@ impl CommandContext {
     pub async fn handle_hard_reset(&self) {
         info!("Hard reset requested");
         let mut state = self.state.lock().await;
-        *state = DEFAULT_STATE;
+        *state = State::default();
     }
 
     pub async fn handle_reset(&self) {
@@ -322,7 +320,6 @@ impl CommandContext {
                 routing.ui_path = TxPath::Usb;
                 routing.net_path = TxPath::Usb;
             }
-            _ => {}
         }
     }
 

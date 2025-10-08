@@ -1,8 +1,18 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
-    Running,
+    #[allow(dead_code)]
     Normal,
     Debug,
 }
 
-pub const DEFAULT_STATE: State = State::Debug;
+impl Default for State {
+    fn default() -> Self {
+        State::Debug
+    }
+}
+
+impl State {
+    pub const fn new() -> Self {
+        State::Debug
+    }
+}

@@ -1,6 +1,12 @@
 #![no_std]
 #![no_main]
 
+mod chip_control;
+mod commands;
+mod gpio;
+mod state;
+mod uart;
+
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::{
@@ -12,10 +18,10 @@ use embassy_stm32::{
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
 use {defmt_rtt as _, panic_probe as _};
 
-use ui_embassy::{
+use crate::{
     commands::{CommandContext, CommandResponse, TlvParser},
     gpio::{GpioPeripherals, NetControl, RgbLed, UiControl},
-    state::{State, DEFAULT_STATE},
+    state::State,
     uart::{UartRouting, DMA_BUFFER_SIZE, OK_BYTE, READY_BYTE},
 };
 
@@ -27,7 +33,7 @@ bind_interrupts!(struct Irqs {
 
 // Static allocations for state and chip controls
 static UART_ROUTING: Mutex<ThreadModeRawMutex, UartRouting> = Mutex::new(UartRouting::new());
-static STATE: Mutex<ThreadModeRawMutex, State> = Mutex::new(DEFAULT_STATE);
+static STATE: Mutex<ThreadModeRawMutex, State> = Mutex::new(State::new());
 static UI_CONTROL: Mutex<ThreadModeRawMutex, Option<UiControl>> = Mutex::new(None);
 static NET_CONTROL: Mutex<ThreadModeRawMutex, Option<NetControl>> = Mutex::new(None);
 
@@ -124,12 +130,9 @@ async fn main(_spawner: Spawner) {
     {
         let state = STATE.lock().await;
         let mut routing = UART_ROUTING.lock().await;
-        match *state {
-            State::Debug => {
-                routing.ui_path = ui_embassy::uart::TxPath::Usb;
-                routing.net_path = ui_embassy::uart::TxPath::Usb;
-            }
-            _ => {}
+        if *state == State::Debug {
+            routing.ui_path = crate::uart::TxPath::Usb;
+            routing.net_path = crate::uart::TxPath::Usb;
         }
     }
 
@@ -140,8 +143,8 @@ async fn main(_spawner: Spawner) {
     // Create command context
     let context = CommandContext {
         routing: &UART_ROUTING,
-        ui_control: unsafe { core::mem::transmute(&UI_CONTROL) },
-        net_control: unsafe { core::mem::transmute(&NET_CONTROL) },
+        ui_control: &UI_CONTROL,
+        net_control: &NET_CONTROL,
         state: &STATE,
     };
 
@@ -174,7 +177,7 @@ async fn main(_spawner: Spawner) {
                 .await;
 
                 // Parse commands from internal
-                if routing.usb_path == ui_embassy::uart::TxPath::Internal {
+                if routing.usb_path == crate::uart::TxPath::Internal {
                     drop(routing);
                     if let Some((command, cmd_data)) = parser.process(&buf[..n]) {
                         info!("Received command: {:?}", command);
@@ -324,12 +327,12 @@ async fn main(_spawner: Spawner) {
 // Helper function to route data between UARTs
 async fn route_data(
     data: &[u8],
-    path: ui_embassy::uart::TxPath,
+    path: crate::uart::TxPath,
     usb_tx: &mut embassy_stm32::usart::UartTx<'static, Async>,
     ui_tx: &mut embassy_stm32::usart::UartTx<'static, Async>,
     net_tx: &mut embassy_stm32::usart::UartTx<'static, Async>,
 ) {
-    use ui_embassy::uart::TxPath;
+    use crate::uart::TxPath;
 
     match path {
         TxPath::None => {}

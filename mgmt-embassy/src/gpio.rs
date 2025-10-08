@@ -34,26 +34,32 @@ impl RgbLed {
         self.set_rgb(false, false, false);
     }
 
+    #[allow(dead_code)]
     pub fn set_red(&mut self) {
         self.set_rgb(true, false, false);
     }
 
+    #[allow(dead_code)]
     pub fn set_green(&mut self) {
         self.set_rgb(false, true, false);
     }
 
+    #[allow(dead_code)]
     pub fn set_blue(&mut self) {
         self.set_rgb(false, false, true);
     }
 
+    #[allow(dead_code)]
     pub fn toggle_red(&mut self) {
         self.r.toggle();
     }
 
+    #[allow(dead_code)]
     pub fn toggle_green(&mut self) {
         self.g.toggle();
     }
 
+    #[allow(dead_code)]
     pub fn toggle_blue(&mut self) {
         self.b.toggle();
     }
