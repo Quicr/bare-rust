@@ -87,18 +87,7 @@ pub enum ToNet {
     AudioStart,
     AudioFrame(Frame),
     AudioEnd,
-}
-
-impl ToNet {
-    pub const fn tlv_type(&self) -> u8 {
-        // These types need to be kept in sync with ui_net_link.hh
-        match self {
-            Self::Ping => 0x0e,
-            Self::AudioStart => 0x03,
-            Self::AudioFrame(_) => 0x10,
-            Self::AudioEnd => 0x04,
-        }
-    }
+    Chat(String<128>),
 }
 
 #[derive(Clone, Debug, PartialEq, Format)]
@@ -286,7 +275,7 @@ pub struct App {
     a_down: bool,
     b_down: bool,
     ptt_state: PttState,
-    message_buffer: String<24>,
+    message_buffer: String<128>,
 }
 
 impl App {
