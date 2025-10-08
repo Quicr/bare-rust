@@ -22,8 +22,7 @@ use ui_embassy::{
 bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
     USART2 => usart::InterruptHandler<peripherals::USART2>;
-    // TODO: USART3/4 may not be fully supported by Embassy on STM32F072CB
-    // Need to investigate correct UART peripheral for NET (PB10/PB11)
+    USART3_4 => usart::InterruptHandler<peripherals::USART3>;
 });
 
 // Static allocations for UART infrastructure and state
@@ -82,18 +81,37 @@ async fn main(spawner: Spawner) {
     )
     .unwrap();
 
+    // Configure UART3 (NET)
+    let net_config = {
+        let mut config = Config::default();
+        config.baudrate = 115200;
+        config.data_bits = DataBits::DataBits8;
+        config.stop_bits = StopBits::STOP1;
+        config.parity = Parity::ParityNone;
+        config
+    };
+    let net_uart = Uart::new(
+        p.USART3, p.PB11, // RX (NET_RX1_MGMT)
+        p.PB10, // TX (NET_TX1_MGMT)
+        Irqs, p.DMA1_CH7, p.DMA1_CH6, net_config,
+    )
+    .unwrap();
+
     info!("UARTs initialized");
 
     // Split UARTs into RX and TX
     let (usb_tx, usb_rx) = usb_uart.split();
     let (ui_tx, ui_rx) = ui_uart.split();
+    let (net_tx, net_rx) = net_uart.split();
 
     // Create ring-buffered RX
     static mut USB_RX_BUF: [u8; DMA_BUFFER_SIZE] = [0u8; DMA_BUFFER_SIZE];
     static mut UI_RX_BUF: [u8; DMA_BUFFER_SIZE] = [0u8; DMA_BUFFER_SIZE];
+    static mut NET_RX_BUF: [u8; DMA_BUFFER_SIZE] = [0u8; DMA_BUFFER_SIZE];
 
     let usb_rx = usb_rx.into_ring_buffered(unsafe { &mut USB_RX_BUF });
     let ui_rx = ui_rx.into_ring_buffered(unsafe { &mut UI_RX_BUF });
+    let net_rx = net_rx.into_ring_buffered(unsafe { &mut NET_RX_BUF });
 
     // Spawn UART tasks
     spawner
@@ -108,6 +126,12 @@ async fn main(spawner: Spawner) {
     spawner
         .spawn(ui_tx_task(ui_tx))
         .expect("Failed to spawn UI TX task");
+    spawner
+        .spawn(net_rx_task(net_rx))
+        .expect("Failed to spawn NET RX task");
+    spawner
+        .spawn(net_tx_task(net_tx))
+        .expect("Failed to spawn NET TX task");
 
     info!("UART tasks spawned");
 
@@ -135,8 +159,6 @@ async fn main(spawner: Spawner) {
 
     info!("Command parser spawned");
 
-    // TODO: Spawn NET UART tasks when peripheral is figured out
-
     // Main loop - blink LED to show we're alive
     loop {
         gpio.led_a.toggle_green();
@@ -163,6 +185,16 @@ async fn ui_rx_task(rx: embassy_stm32::usart::RingBufferedUartRx<'static>) {
 #[embassy_executor::task]
 async fn ui_tx_task(tx: embassy_stm32::usart::UartTx<'static, Async>) {
     uart_tx_task(tx, &TX_CHANNELS.ui, "UI").await;
+}
+
+#[embassy_executor::task]
+async fn net_rx_task(rx: embassy_stm32::usart::RingBufferedUartRx<'static>) {
+    uart_rx_task(rx, &TX_CHANNELS, &UART_ROUTING, "NET", |r| r.net_path).await;
+}
+
+#[embassy_executor::task]
+async fn net_tx_task(tx: embassy_stm32::usart::UartTx<'static, Async>) {
+    uart_tx_task(tx, &TX_CHANNELS.net, "NET").await;
 }
 
 #[embassy_executor::task]
