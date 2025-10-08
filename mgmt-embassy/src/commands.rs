@@ -3,6 +3,7 @@
 use defmt::*;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
+use num_enum::TryFromPrimitive;
 
 use crate::{
     gpio::{NetControl, UiControl},
@@ -11,7 +12,7 @@ use crate::{
 };
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format, TryFromPrimitive)]
 pub enum Command {
     Version = 0,
     WhoAreYou = 1,
@@ -33,47 +34,23 @@ pub enum Command {
     Loopback = 17,
 }
 
-impl Command {
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Command::Version),
-            1 => Some(Command::WhoAreYou),
-            2 => Some(Command::HardReset),
-            3 => Some(Command::Reset),
-            4 => Some(Command::ResetUi),
-            5 => Some(Command::ResetNet),
-            6 => Some(Command::FlashUi),
-            7 => Some(Command::FlashNet),
-            8 => Some(Command::EnableLogs),
-            9 => Some(Command::EnableLogsUi),
-            10 => Some(Command::EnableLogsNet),
-            11 => Some(Command::DisableLogs),
-            12 => Some(Command::DisableLogsUi),
-            13 => Some(Command::DisableLogsNet),
-            14 => Some(Command::DefaultLogging),
-            15 => Some(Command::ToUi),
-            16 => Some(Command::ToNet),
-            17 => Some(Command::Loopback),
-            _ => None,
-        }
-    }
-}
+const VERSION: &[u8] = b"v1.0.0\n";
 
 /// Response from command execution
 #[derive(Debug)]
-pub enum CommandResponse {
+pub enum CommandResponse<'a> {
     /// Send data response
-    Data(&'static [u8]),
+    Data(&'a [u8]),
     /// Enter UI flash mode
     FlashUi,
     /// Enter NET flash mode
     FlashNet,
     /// Forward data to UI UART
-    ForwardToUi(heapless::Vec<u8, 64>),
+    ForwardToUi(&'a [u8]),
     /// Forward data to NET UART
-    ForwardToNet(heapless::Vec<u8, 64>),
+    ForwardToNet(&'a [u8]),
     /// Loopback data to USB UART
-    Loopback(heapless::Vec<u8, 64>),
+    Loopback(&'a [u8]),
 }
 
 /// TLV packet parser state
@@ -121,7 +98,7 @@ impl TlvParser {
                             self.header_buf[4],
                         ]);
 
-                        if let Some(command) = Command::from_u8(cmd_byte) {
+                        if let Ok(command) = Command::try_from(cmd_byte) {
                             if length == 0 {
                                 // Zero-length command, execute immediately
                                 self.reset();
@@ -184,7 +161,13 @@ impl Default for TlvParser {
 
 /// Command handler context
 pub struct CommandContext {
+    // Mutex is needed even with single task for:
+    // 1. Interior mutability of statics
+    // 2. Send/Sync safety across async await points
     pub routing: &'static Mutex<ThreadModeRawMutex, UartRouting>,
+    // Option is needed because static initialization can't call new() with peripherals
+    // Peripherals are only available after embassy_stm32::init() in main()
+    // After initialization in main, these are always Some
     pub ui_control: &'static Mutex<ThreadModeRawMutex, Option<UiControl>>,
     pub net_control: &'static Mutex<ThreadModeRawMutex, Option<NetControl>>,
     pub state: &'static Mutex<ThreadModeRawMutex, State>,
@@ -193,8 +176,7 @@ pub struct CommandContext {
 /// Command handlers
 impl CommandContext {
     pub async fn handle_version(&self) -> &'static [u8] {
-        // TODO: Get actual version
-        b"v1.0.0\n"
+        VERSION
     }
 
     pub async fn handle_who_are_you(&self) -> &'static [u8] {
@@ -323,11 +305,11 @@ impl CommandContext {
         }
     }
 
-    pub async fn execute(
+    pub async fn execute<'a>(
         &self,
         command: Command,
-        data: &heapless::Vec<u8, 64>,
-    ) -> Option<CommandResponse> {
+        data: &'a heapless::Vec<u8, 64>,
+    ) -> Option<CommandResponse<'a>> {
         match command {
             Command::Version => Some(CommandResponse::Data(self.handle_version().await)),
             Command::WhoAreYou => Some(CommandResponse::Data(self.handle_who_are_you().await)),
@@ -384,9 +366,9 @@ impl CommandContext {
                 Some(CommandResponse::Data(OK_ASCII))
             }
             // Data forwarding commands
-            Command::ToUi => Some(CommandResponse::ForwardToUi(data.clone())),
-            Command::ToNet => Some(CommandResponse::ForwardToNet(data.clone())),
-            Command::Loopback => Some(CommandResponse::Loopback(data.clone())),
+            Command::ToUi => Some(CommandResponse::ForwardToUi(data.as_slice())),
+            Command::ToNet => Some(CommandResponse::ForwardToNet(data.as_slice())),
+            Command::Loopback => Some(CommandResponse::Loopback(data.as_slice())),
         }
     }
 }
