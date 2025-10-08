@@ -3,7 +3,6 @@
 
 mod commands;
 mod gpio;
-mod state;
 mod uart;
 
 use defmt::*;
@@ -20,7 +19,6 @@ use {defmt_rtt as _, panic_probe as _};
 use crate::{
     commands::{CommandContext, CommandResponse, TlvParser},
     gpio::{GpioPeripherals, NetControl, RgbLed, UiControl},
-    state::State,
     uart::{UartRouting, DMA_BUFFER_SIZE, OK_BYTE, READY_BYTE},
 };
 
@@ -30,13 +28,12 @@ bind_interrupts!(struct Irqs {
     USART3_4 => usart::InterruptHandler<peripherals::USART3>;
 });
 
-// Static allocations for state and chip controls
+// Static allocations for chip controls
 static UART_ROUTING: Mutex<ThreadModeRawMutex, UartRouting> = Mutex::new(UartRouting {
     usb_path: uart::TxPath::Internal,
     ui_path: uart::TxPath::None,
     net_path: uart::TxPath::None,
 });
-static STATE: Mutex<ThreadModeRawMutex, State> = Mutex::new(State::new());
 static UI_CONTROL: Mutex<ThreadModeRawMutex, Option<UiControl>> = Mutex::new(None);
 static NET_CONTROL: Mutex<ThreadModeRawMutex, Option<NetControl>> = Mutex::new(None);
 
@@ -129,14 +126,11 @@ async fn main(_spawner: Spawner) {
     gpio.ui_control.normal_mode();
     gpio.net_control.normal_mode();
 
-    // Set default logging based on initial state
+    // Set default logging (Debug mode: logs enabled)
     {
-        let state = STATE.lock().await;
         let mut routing = UART_ROUTING.lock().await;
-        if *state == State::Debug {
-            routing.ui_path = crate::uart::TxPath::Usb;
-            routing.net_path = crate::uart::TxPath::Usb;
-        }
+        routing.ui_path = crate::uart::TxPath::Usb;
+        routing.net_path = crate::uart::TxPath::Usb;
     }
 
     // Store chip controls in statics for command context
@@ -148,7 +142,6 @@ async fn main(_spawner: Spawner) {
         routing: &UART_ROUTING,
         ui_control: &UI_CONTROL,
         net_control: &NET_CONTROL,
-        state: &STATE,
     };
 
     let mut parser = TlvParser::new();

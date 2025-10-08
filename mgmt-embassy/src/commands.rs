@@ -7,7 +7,6 @@ use num_enum::TryFromPrimitive;
 
 use crate::{
     gpio::{NetControl, UiControl},
-    state::State,
     uart::{TxPath, UartRouting, OK_ASCII},
 };
 
@@ -170,7 +169,6 @@ pub struct CommandContext {
     // After initialization in main, these are always Some
     pub ui_control: &'static Mutex<ThreadModeRawMutex, Option<UiControl>>,
     pub net_control: &'static Mutex<ThreadModeRawMutex, Option<NetControl>>,
-    pub state: &'static Mutex<ThreadModeRawMutex, State>,
 }
 
 /// Command handlers
@@ -185,8 +183,13 @@ impl CommandContext {
 
     pub async fn handle_hard_reset(&self) {
         info!("Hard reset requested");
-        let mut state = self.state.lock().await;
-        *state = State::default();
+        // Reset both chips
+        self.handle_reset().await;
+        // Reset routing to defaults (Debug mode: logs enabled)
+        let mut routing = self.routing.lock().await;
+        routing.usb_path = TxPath::Internal;
+        routing.ui_path = TxPath::Usb;
+        routing.net_path = TxPath::Usb;
     }
 
     pub async fn handle_reset(&self) {
@@ -290,19 +293,10 @@ impl CommandContext {
 
     pub async fn handle_default_logging(&self) {
         info!("Setting default logging");
-        let state = self.state.lock().await;
+        // Default is Debug mode: enable logs
         let mut routing = self.routing.lock().await;
-
-        match *state {
-            State::Normal => {
-                routing.ui_path = TxPath::None;
-                routing.net_path = TxPath::None;
-            }
-            State::Debug => {
-                routing.ui_path = TxPath::Usb;
-                routing.net_path = TxPath::Usb;
-            }
-        }
+        routing.ui_path = TxPath::Usb;
+        routing.net_path = TxPath::Usb;
     }
 
     pub async fn execute<'a>(
