@@ -73,12 +73,15 @@ pub enum Button {
     B,
 }
 
+pub const MAX_MESSAGE_LEN: usize = 128;
+
 #[derive(Clone, Debug, PartialEq, Format)]
 pub enum FromNet {
     Pong,
     AudioStart,
     AudioFrame(Frame),
     AudioEnd,
+    Chat(String<MAX_MESSAGE_LEN>),
 }
 
 #[derive(Clone, Debug, PartialEq, Format)]
@@ -87,7 +90,7 @@ pub enum ToNet {
     AudioStart,
     AudioFrame(Frame),
     AudioEnd,
-    Chat(String<128>),
+    Chat(String<MAX_MESSAGE_LEN>),
 }
 
 #[derive(Clone, Debug, PartialEq, Format)]

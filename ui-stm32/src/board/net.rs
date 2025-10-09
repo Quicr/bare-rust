@@ -1,5 +1,6 @@
+use heapless::String;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use ui_app::{FromNet, ToNet, FRAME_SIZE};
+use ui_app::{Frame, FromNet, ToNet, FRAME_SIZE, MAX_MESSAGE_LEN};
 
 // XXX(RLB) This reader will only work as long as the data in the value of the TLV doesn't have any
 // characters that need to be escaped according to SLIP.  Also, it only supports TLVs with up to
@@ -17,32 +18,10 @@ where
     }
 
     pub async fn next(&mut self) -> Option<FromNet> {
-        let mut type_ = [0u8; 1];
-        let mut length = [0u8; 4];
-        let mut value = [0u8; 128];
-
-        self.rx.read(&mut type_).await.unwrap();
-        self.rx.read(&mut length).await.unwrap();
-
-        let length = u32::from_be_bytes(length) as usize;
-        let delimited_value = &mut value[..(length + 1)];
-        self.rx.read(delimited_value).await.unwrap();
-
-        match type_[0] {
-            0x0f => {
-                defmt::assert_eq!(length, 0);
-                Some(FromNet::Pong)
-            }
-            _ => {
-                defmt::debug!("skipping TLV of type {:x}", type_[0]);
-                None
-            }
-        }
+        Some(FromNet::read_tlv(&mut self.rx).await)
     }
 }
 
-// XXX(RLB) This is just a fixed writer right now, with no generic logic for SLIP or the TLV
-// format.  It will need to be generalized.
 pub struct NetTx<Writer> {
     tx: Writer,
 }
@@ -58,63 +37,22 @@ where
     Writer: embedded_io::Write,
 {
     fn write(&mut self, to_net: &ToNet) {
-        match to_net {
-            ToNet::Ping => {
-                let packet = Ping;
-                packet.write(&mut self.tx);
-            }
-
-            ToNet::AudioFrame(frame) => {
-                let mut frame_data = [0u8; 2 * FRAME_SIZE];
-
-                for (x8, x16) in frame_data.chunks_mut(2).zip(frame.0.iter()) {
-                    x8.copy_from_slice(&x16.to_be_bytes());
-                }
-
-                let packet = Message {
-                    channel_id: ChannelId::Ptt,
-                    body: MediaMessage {
-                        is_last: false,
-                        payload: &frame_data,
-                    },
-                };
-
-                packet.write(&mut self.tx);
-            }
-
-            ToNet::Chat(chat) => {
-                let packet = Message {
-                    channel_id: ChannelId::Ptt,
-                    body: ChatMessage {
-                        payload: &chat.as_bytes(),
-                    },
-                };
-
-                packet.write(&mut self.tx);
-            }
-
-            to_net => {
-                defmt::info!("skipping tx of {:?}", to_net);
-                // TODO write other message types
-            }
-        }
+        to_net.write_tlv(&mut self.tx);
     }
 }
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, Debug, IntoPrimitive, TryFromPrimitive)]
-enum PacketType {
-    Ping = 0x03,
+enum PacketTypeToNet {
     Message = 0x09,
+    Ping = 0x0e,
 }
 
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, Debug, IntoPrimitive, TryFromPrimitive)]
-enum MessageType {
-    Media = 0x01,
-    AIRequest = 0x02,
-    AIResponse = 0x03,
-    Chat = 0x04,
+enum PacketTypeFromNet {
+    Message = 0x09,
+    Pong = 0x0f,
 }
 
 #[repr(u8)]
@@ -127,11 +65,68 @@ enum ChannelId {
     Count = 4,
 }
 
+trait TlvRead {
+    async fn read_tlv(r: &mut impl embedded_io_async::Read) -> Self;
+}
+
+impl TlvRead for FromNet {
+    async fn read_tlv(r: &mut impl embedded_io_async::Read) -> Self {
+        let mut type_length = [0u8; 5];
+        r.read_exact(&mut type_length).await.unwrap();
+
+        let packet_type = PacketTypeFromNet::try_from(type_length[0]).unwrap();
+        let len = u32::from_be_bytes(type_length[1..].try_into().unwrap()) as usize;
+
+        match packet_type {
+            PacketTypeFromNet::Pong => Self::Pong,
+            PacketTypeFromNet::Message => {
+                let mut channel_id = [0];
+                r.read(&mut channel_id).await.unwrap();
+                let channel_id = ChannelId::try_from(channel_id[0]).unwrap();
+
+                match channel_id {
+                    ChannelId::Ptt => {
+                        let mut frame_data = [0u8; 2 * FRAME_SIZE];
+                        assert_eq!(len, frame_data.len() + 1);
+                        r.read_exact(&mut frame_data).await.unwrap();
+
+                        let mut frame = Frame::default();
+                        for (x8, x16) in frame_data.chunks(2).zip(frame.0.iter_mut()) {
+                            *x16 = u16::from_be_bytes(x8.try_into().unwrap());
+                        }
+
+                        Self::AudioFrame(frame)
+                    }
+                    ChannelId::Chat => {
+                        let mut msg = [0; MAX_MESSAGE_LEN];
+                        assert!(len < msg.len());
+
+                        r.read_exact(&mut msg[..len]).await.unwrap();
+                        Self::Chat(String::from_iter(msg.into_iter().map(|b| char::from(b))))
+                    }
+
+                    _ => unreachable!("Unsupported Channel ID"),
+                }
+            }
+        }
+    }
+}
+
+trait TlvWrite {
+    fn write_tlv(&self, w: &mut impl embedded_io::Write);
+}
+
+impl TlvWrite for ToNet {
+    fn write_tlv(&self, w: &mut impl embedded_io::Write) {
+        todo!();
+    }
+}
+
+/*
 trait Tlv {
     const TYPE: PacketType;
     fn len(&self) -> usize;
     fn write_payload(&self, w: &mut impl embedded_io::Write);
-
     fn write(&self, w: &mut impl embedded_io::Write) {
         let len = self.len() as u32;
         w.write(&[Self::TYPE.into()]).unwrap();
@@ -217,3 +212,4 @@ impl<B: MessageBody> Tlv for Message<B> {
         self.body.write(w);
     }
 }
+*/
