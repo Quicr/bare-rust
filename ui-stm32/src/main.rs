@@ -67,10 +67,7 @@ async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
     let mut from = NetRx::new(&mut from);
 
     loop {
-        let Some(from_net) = from.next().await else {
-            continue;
-        };
-
+        let from_net = from.next().await;
         events.send(Event::FromNet(from_net)).await;
     }
 }

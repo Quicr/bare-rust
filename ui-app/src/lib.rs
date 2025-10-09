@@ -78,18 +78,14 @@ pub const MAX_MESSAGE_LEN: usize = 128;
 #[derive(Clone, Debug, PartialEq, Format)]
 pub enum FromNet {
     Pong,
-    AudioStart,
     AudioFrame(Frame),
-    AudioEnd,
     Chat(String<MAX_MESSAGE_LEN>),
 }
 
 #[derive(Clone, Debug, PartialEq, Format)]
 pub enum ToNet {
     Ping,
-    AudioStart,
     AudioFrame(Frame),
-    AudioEnd,
     Chat(String<MAX_MESSAGE_LEN>),
 }
 
@@ -301,6 +297,8 @@ impl App {
 
         // Start up the audio interface
         out.audio_control().start();
+        out.audio_control().enable_input(true);
+        out.audio_control().enable_output(true);
 
         // Draw a test pattern to the screen
         let rect = out.screen().bounding_box();
@@ -355,8 +353,6 @@ impl App {
                 out.status_led().set(false, self.a_down, self.b_down);
 
                 self.ptt_state = PttState::Transmitting;
-                out.net_tx().write(&ToNet::AudioStart);
-                out.audio_control().enable_input(true);
                 out.audio_data().start().await;
 
                 while out.button_b_down() {
@@ -366,11 +362,9 @@ impl App {
                 }
 
                 out.log("button b up (via down)");
-                out.net_tx().write(&ToNet::AudioEnd);
                 // TODO: Stop the audio buffer.  If we have this line right now, it causes a
                 // DmaUnsynced error.  Probably an error in the underlying driver code.
                 // out.audio_data().stop().await;
-                out.audio_control().enable_input(false);
                 self.ptt_state = PttState::Idle;
             }
         }
@@ -449,20 +443,9 @@ impl App {
                 out.log("pong");
             }
 
-            FromNet::AudioStart if self.ptt_state == PttState::Idle => {
-                self.ptt_state = PttState::Receiving;
-                out.audio_control().enable_output(true);
-                out.audio_data().start().await;
-            }
-
             FromNet::AudioFrame(frame) if self.ptt_state == PttState::Receiving => {
+                out.audio_data().start().await;
                 out.audio_data().write(&frame).await
-            }
-
-            FromNet::AudioEnd if self.ptt_state == PttState::Receiving => {
-                self.ptt_state = PttState::Idle;
-                out.audio_control().enable_output(false);
-                out.audio_data().stop().await;
             }
 
             _ => {

@@ -17,8 +17,8 @@ where
         Self { rx }
     }
 
-    pub async fn next(&mut self) -> Option<FromNet> {
-        Some(FromNet::read_tlv(&mut self.rx).await)
+    pub async fn next(&mut self) -> FromNet {
+        FromNet::read_tlv(&mut self.rx).await
     }
 }
 
@@ -118,98 +118,36 @@ trait TlvWrite {
 
 impl TlvWrite for ToNet {
     fn write_tlv(&self, w: &mut impl embedded_io::Write) {
-        todo!();
+        match self {
+            Self::Ping => {
+                w.write(&[PacketTypeToNet::Ping.into(), 0, 0, 0, 0])
+                    .unwrap();
+            }
+            Self::AudioFrame(frame) => {
+                let len = (frame.0.len() + 1) as u32;
+                let mut header = [0; 6];
+                header[0] = PacketTypeToNet::Message.into();
+                header[1..5].copy_from_slice(&len.to_be_bytes());
+                header[5] = ChannelId::Ptt.into();
+
+                let mut frame_data = [0; 2 * FRAME_SIZE];
+                for (x8, x16) in frame_data.chunks_mut(2).zip(frame.0.iter()) {
+                    x8.copy_from_slice(&x16.to_be_bytes());
+                }
+
+                w.write(&header).unwrap();
+                w.write(&frame_data).unwrap();
+            }
+            Self::Chat(msg) => {
+                let len = (msg.len() + 1) as u32;
+                let mut header = [0; 6];
+                header[0] = PacketTypeToNet::Message.into();
+                header[1..5].copy_from_slice(&len.to_be_bytes());
+                header[5] = ChannelId::Ptt.into();
+
+                w.write(&header).unwrap();
+                w.write(msg.as_str().as_bytes()).unwrap();
+            }
+        }
     }
 }
-
-/*
-trait Tlv {
-    const TYPE: PacketType;
-    fn len(&self) -> usize;
-    fn write_payload(&self, w: &mut impl embedded_io::Write);
-    fn write(&self, w: &mut impl embedded_io::Write) {
-        let len = self.len() as u32;
-        w.write(&[Self::TYPE.into()]).unwrap();
-        w.write(&len.to_be_bytes()).unwrap();
-        self.write_payload(w);
-    }
-}
-
-struct Ping;
-
-impl Tlv for Ping {
-    const TYPE: PacketType = PacketType::Ping;
-
-    fn len(&self) -> usize {
-        0
-    }
-
-    fn write_payload(&self, _w: &mut impl embedded_io::Write) {}
-}
-
-trait MessageBody {
-    const MESSAGE_TYPE: MessageType;
-    fn len(&self) -> usize;
-    fn write(&self, w: &mut impl embedded_io::Write);
-}
-
-struct MediaMessage<'a> {
-    is_last: bool,
-    payload: &'a [u8],
-}
-
-impl<'a> MessageBody for MediaMessage<'a> {
-    const MESSAGE_TYPE: MessageType = MessageType::Media;
-
-    fn len(&self) -> usize {
-        // is_last + payload_len + payload
-        1 + 4 + self.payload.len()
-    }
-
-    fn write(&self, w: &mut impl embedded_io::Write) {
-        let len = self.payload.len() as u32;
-        w.write(&[self.is_last.into()]).unwrap();
-        w.write(&len.to_be_bytes()).unwrap();
-        w.write(self.payload).unwrap();
-    }
-}
-
-struct ChatMessage<'a> {
-    payload: &'a [u8],
-}
-
-impl<'a> MessageBody for ChatMessage<'a> {
-    const MESSAGE_TYPE: MessageType = MessageType::Chat;
-
-    fn len(&self) -> usize {
-        // payload_len + payload
-        4 + self.payload.len()
-    }
-
-    fn write(&self, w: &mut impl embedded_io::Write) {
-        let len = self.payload.len() as u32;
-        w.write(&len.to_be_bytes()).unwrap();
-        w.write(self.payload).unwrap();
-    }
-}
-
-struct Message<B: MessageBody> {
-    channel_id: ChannelId,
-    body: B,
-}
-
-impl<B: MessageBody> Tlv for Message<B> {
-    const TYPE: PacketType = PacketType::Message;
-
-    fn len(&self) -> usize {
-        // ChannelId + MessageType + Body
-        2 + self.body.len()
-    }
-
-    fn write_payload(&self, w: &mut impl embedded_io::Write) {
-        w.write(&[self.channel_id.into(), B::MESSAGE_TYPE.into()])
-            .unwrap();
-        self.body.write(w);
-    }
-}
-*/
