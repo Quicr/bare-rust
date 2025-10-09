@@ -10,7 +10,7 @@ use embassy_stm32::{
     mode::{Async, Blocking},
     peripherals,
     spi::{Spi, Word},
-    usart::{self, UartRx, UartTx},
+    usart::{self, RingBufferedUartRx, UartRx, UartTx},
 };
 use embassy_time::Delay;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
@@ -111,7 +111,7 @@ pub struct Board {
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
-    pub net_rx: Option<UartRx<'static, Async>>,
+    pub net_rx: Option<RingBufferedUartRx<'static>>,
 }
 
 bind_interrupts!(struct Irqs {
@@ -122,7 +122,11 @@ static BUTTON_A_DOWN: AtomicBool = AtomicBool::new(false);
 static BUTTON_B_DOWN: AtomicBool = AtomicBool::new(false);
 
 impl Board {
-    pub fn new(i2s_tx: &'static mut [u16], i2s_rx: &'static mut [u16]) -> Self {
+    pub fn new(
+        net_rx_buf: &'static mut [u8],
+        i2s_tx: &'static mut [u16],
+        i2s_rx: &'static mut [u16],
+    ) -> Self {
         let config = {
             use embassy_stm32::{rcc::*, time::Hertz};
 
@@ -233,6 +237,7 @@ impl Board {
 
         let (net_tx, net_rx) = net_uart.split();
         let net_tx = NetTx::new(net_tx);
+        let net_rx = net_rx.into_ring_buffered(net_rx_buf);
 
         // I2C interface for EEPROM and audio chip control
         let i2c = {

@@ -10,7 +10,7 @@ use ui_app::{App, Event};
 use cortex_m::singleton;
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::{mode::Async, usart::UartRx};
+use embassy_stm32::{mode::Async, usart::RingBufferedUartRx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::Timer;
@@ -58,12 +58,7 @@ async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
 }
 
 #[embassy_executor::task]
-async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
-    const DMA_BUFFER_SIZE: usize = 1024;
-
-    // Wrap the raw receiver in a DMA-buffered, SLIP-parsing, TLV-parsing version
-    let mut dma_buf = [0u8; DMA_BUFFER_SIZE];
-    let mut from = from.into_ring_buffered(&mut dma_buf);
+async fn monitor_net(mut from: RingBufferedUartRx<'static>, events: EventSender) {
     let mut from = NetRx::new(&mut from);
 
     loop {
@@ -76,12 +71,14 @@ async fn monitor_net(from: UartRx<'static, Async>, events: EventSender) {
 async fn main(spawner: Spawner) {
     info!("about to instantiate board");
 
-    const BUFFER_SIZE: usize = 2 * ui_app::FRAME_SIZE;
+    const NET_RX_BUFFER_SIZE: usize = core::mem::size_of::<ui_app::FromNet>();
+    const I2S_BUFFER_SIZE: usize = 2 * ui_app::FRAME_SIZE;
 
-    let i2s_tx = singleton!(: [u16; BUFFER_SIZE] = [0; BUFFER_SIZE]).unwrap();
-    let i2s_rx = singleton!(: [u16; BUFFER_SIZE] = [0; BUFFER_SIZE]).unwrap();
+    let net_rx_buf = singleton!(: [u8; NET_RX_BUFFER_SIZE] = [0; NET_RX_BUFFER_SIZE]).unwrap();
+    let i2s_tx = singleton!(: [u16; I2S_BUFFER_SIZE] = [0; I2S_BUFFER_SIZE]).unwrap();
+    let i2s_rx = singleton!(: [u16; I2S_BUFFER_SIZE] = [0; I2S_BUFFER_SIZE]).unwrap();
 
-    let mut board = Board::new(i2s_tx, i2s_rx);
+    let mut board = Board::new(net_rx_buf, i2s_tx, i2s_rx);
     let mut app = App::new();
 
     info!("done setting up board and app");
