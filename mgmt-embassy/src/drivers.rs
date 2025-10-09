@@ -91,68 +91,7 @@ impl UiControl {
             boot1: Output::new(boot1, Level::High, Speed::Low),
         }
     }
-}
 
-/// Control pins for NET chip
-pub struct NetControl {
-    pub nrst: Output<'static>,
-    pub boot: Output<'static>,
-}
-
-impl NetControl {
-    pub fn new(
-        nrst: Peri<'static, impl embassy_stm32::gpio::Pin>,
-        boot: Peri<'static, impl embassy_stm32::gpio::Pin>,
-    ) -> Self {
-        Self {
-            nrst: Output::new(nrst, Level::High, Speed::Low),
-            boot: Output::new(boot, Level::High, Speed::Low),
-        }
-    }
-}
-
-/// Control functions for NET chip
-impl NetControl {
-    /// Power cycle the NET chip reset pin
-    fn power_cycle(&mut self, delay_ms: u64) {
-        let mut delay = Delay;
-        self.nrst.set_low();
-        delay.delay_ms(delay_ms as u32);
-        self.nrst.set_high();
-    }
-
-    /// Put NET chip into bootloader mode
-    pub fn bootloader_mode(&mut self) {
-        self.power_cycle(10);
-
-        // Bring boot low for ESP bootloader mode
-        self.boot.set_low();
-
-        // Power cycle
-        self.power_cycle(10);
-    }
-
-    /// Put NET chip into normal mode
-    pub fn normal_mode(&mut self) {
-        self.boot.set_high();
-
-        // Power cycle
-        self.power_cycle(10);
-    }
-
-    /// Hold NET chip in reset
-    pub fn hold_in_reset(&mut self) {
-        let mut delay = Delay;
-        self.boot.set_high();
-
-        // Reset and hold
-        self.nrst.set_low();
-        delay.delay_ms(100);
-    }
-}
-
-/// Control functions for UI chip
-impl UiControl {
     /// Put UI chip into bootloader mode (boot0=1, boot1=0)
     pub fn bootloader_mode(&mut self) {
         self.boot0.set_high();
@@ -196,5 +135,60 @@ impl UiControl {
 
         // Switch to input mode with pull-up (matching C code behavior)
         self.nrst.set_as_input(Pull::Up);
+    }
+}
+
+/// Control pins for NET chip
+pub struct NetControl {
+    pub nrst: Output<'static>,
+    pub boot: Output<'static>,
+}
+
+impl NetControl {
+    pub fn new(
+        nrst: Peri<'static, impl embassy_stm32::gpio::Pin>,
+        boot: Peri<'static, impl embassy_stm32::gpio::Pin>,
+    ) -> Self {
+        Self {
+            nrst: Output::new(nrst, Level::High, Speed::Low),
+            boot: Output::new(boot, Level::High, Speed::Low),
+        }
+    }
+
+    /// Power cycle the NET chip reset pin
+    fn power_cycle(&mut self, delay_ms: u64) {
+        let mut delay = Delay;
+        self.nrst.set_low();
+        delay.delay_ms(delay_ms as u32);
+        self.nrst.set_high();
+    }
+
+    /// Put NET chip into bootloader mode
+    pub fn bootloader_mode(&mut self) {
+        self.power_cycle(10);
+
+        // Bring boot low for ESP bootloader mode
+        self.boot.set_low();
+
+        // Power cycle
+        self.power_cycle(10);
+    }
+
+    /// Put NET chip into normal mode
+    pub fn normal_mode(&mut self) {
+        self.boot.set_high();
+
+        // Power cycle
+        self.power_cycle(10);
+    }
+
+    /// Hold NET chip in reset
+    pub fn hold_in_reset(&mut self) {
+        let mut delay = Delay;
+        self.boot.set_high();
+
+        // Reset and hold
+        self.nrst.set_low();
+        delay.delay_ms(100);
     }
 }

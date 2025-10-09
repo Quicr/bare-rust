@@ -136,7 +136,7 @@ impl<'d> State<'d> {
         }
     }
 
-    pub async fn route_data<'a>(&mut self, src: Interface, buf: &'a mut [u8]) {
+    pub async fn route_data(&mut self, src: Interface, buf: &mut [u8]) {
         let dst = match src {
             Interface::Usb => self.routing.usb,
             Interface::Ui => self.routing.ui,
