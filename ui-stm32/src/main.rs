@@ -84,108 +84,35 @@ async fn main(spawner: Spawner) {
     info!("done setting up board and app");
 
     // Capture button events
-    unwrap!(spawner.spawn(monitor_button(
-        board.button_a.take().unwrap(),
-        ButtonId::A,
-        EVENT_QUEUE.sender()
-    )));
+    spawner.spawn(
+        monitor_button(
+            board.button_a.take().unwrap(),
+            ButtonId::A,
+            EVENT_QUEUE.sender(),
+        )
+        .unwrap(),
+    );
 
-    unwrap!(spawner.spawn(monitor_button(
-        board.button_b.take().unwrap(),
-        ButtonId::B,
-        EVENT_QUEUE.sender()
-    )));
+    spawner.spawn(
+        monitor_button(
+            board.button_b.take().unwrap(),
+            ButtonId::B,
+            EVENT_QUEUE.sender(),
+        )
+        .unwrap(),
+    );
 
     // Capture keyboard events
-    unwrap!(spawner.spawn(monitor_keyboard(
-        board.keyboard.take().unwrap(),
-        EVENT_QUEUE.sender()
-    )));
+    spawner.spawn(monitor_keyboard(board.keyboard.take().unwrap(), EVENT_QUEUE.sender()).unwrap());
 
+    // TODO Re-enable and debug NetRx
     // Capture UART events from the NET chip
-    unwrap!(spawner.spawn(monitor_net(
-        board.net_rx.take().unwrap(),
-        EVENT_QUEUE.sender()
-    )));
+    // spawner.spawn(monitor_net(board.net_rx.take().unwrap(), EVENT_QUEUE.sender()).unwrap());
 
     debug!("app start");
     app.start(&mut board);
 
-    /*
-    board.audio_control().start();
-
-    let mut i2s = board.i2s.take().unwrap();
-    i2s.start();
-
-    let mut frames = FrameAudio { i2s };
-
-    let square_wave = {
-        const AMPLITUDE: u16 = 0x1fff;
-        const LAMBDA: usize = 18;
-        let hi = core::iter::repeat(AMPLITUDE).take(LAMBDA);
-        let lo = core::iter::repeat(0).take(LAMBDA);
-
-        hi.chain(lo).cycle().take(CHANNELS * SAMPLES_PER_SEC)
-    };
-
-    trace!("before tx");
-    frames.write_iter(square_wave).await;
-    trace!("after tx");
-
-    const RECORDING_LENGTH: usize = 2;
-    trace!("recording {} seconds audio", RECORDING_LENGTH);
-    let mut recording = [0u16; RECORDING_LENGTH * CHANNELS * SAMPLES_PER_SEC];
-    for chunk in recording.chunks_mut(FRAME_SIZE) {
-        let frame = frames.read().await;
-        chunk.copy_from_slice(&frame.0);
-
-        trace!("rec {}", frame.0.iter().map(|x| *x as usize).sum::<usize>());
-    }
-
-    trace!("playing recording");
-    for chunk in recording.chunks(FRAME_SIZE) {
-        let mut frame = Frame::zero();
-        frame.0.copy_from_slice(chunk);
-        frames.write(&frame).await;
-
-        trace!(
-            "play {}",
-            frame.0.iter().map(|x| *x as usize).sum::<usize>()
-        );
-    }
-    */
-
     // Main event loop
     let receiver = EventSource(EVENT_QUEUE.receiver());
     app.run(receiver, board).await;
-
-    // here
-    // app.handle(EVENT_QUEUE, board).await
-
-    // in ui_ap
-    // async fn handle(EVENT_QUEUE, board) {
-    //      loop match event {
-    //          ButtonDown => record(EVENT_QUEUE, &mut board),
-    //          StartOfTalk => play(EVENT_QUEUE, &mut board),
-    //      }
-    // }
-    //
-    // async fn record(...) {
-    //      loop select {
-    //          event = EVENT_QUEUE.receive() => match event {
-    //              ButtonUp => return;
-    //              _ => self.handle_event(event)
-    //          }
-    //          frame = board.audio().read() => {
-    //              // Transmit frame
-    //          }
-    //      }
-    // }
-    //
-    // async fn play(...) {
-    //      loop match event {
-    //          ReceivedFrame => board.audio().write(frame),
-    //          EndOfTalk => return;
-    //      }
-    // }
 }

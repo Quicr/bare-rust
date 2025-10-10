@@ -19,8 +19,8 @@ defmt = "1.0.1"
 defmt-rtt = "1.0.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 
-embassy-executor = { version = "0.9.1", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
-embassy-futures = { version = "0.1.1", features = ["defmt"] }
+embassy-executor = { path = "../../embassy/embassy-executor", version = "0.9.1", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-futures = { path = "../../embassy/embassy-futures", version = "0.1.1", features = ["defmt"] }
 embassy-stm32 = { path = "../../embassy/embassy-stm32", version = "0.4.0", features = ["defmt", "stm32f405rg", "memory-x", "time-driver-tim1", "exti", "chrono", "unstable-pac"] }
 embassy-time = { path = "../../embassy/embassy-time", version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
 embassy-sync = { path = "../../embassy/embassy-sync", version = "0.7.1", features = ["defmt"] }
