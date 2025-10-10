@@ -10,7 +10,7 @@ use embassy_stm32::{
     mode::{Async, Blocking},
     peripherals,
     spi::{Spi, Word},
-    usart::{self, RingBufferedUartRx, UartRx, UartTx},
+    usart::{self, RingBufferedUartRx, UartTx},
 };
 use embassy_time::Delay;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};

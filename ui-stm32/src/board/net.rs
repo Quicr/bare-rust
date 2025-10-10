@@ -17,7 +17,7 @@ where
         Self { rx }
     }
 
-    pub async fn next(&mut self) -> FromNet {
+    pub async fn next(&mut self) -> Option<FromNet> {
         FromNet::read_tlv(&mut self.rx).await
     }
 }
@@ -65,19 +65,23 @@ enum ChannelId {
     Count = 4,
 }
 
-trait TlvRead {
-    async fn read_tlv(r: &mut impl embedded_io_async::Read) -> Self;
+trait TlvRead: Sized {
+    async fn read_tlv(r: &mut impl embedded_io_async::Read) -> Option<Self>;
 }
 
 impl TlvRead for FromNet {
-    async fn read_tlv(r: &mut impl embedded_io_async::Read) -> Self {
+    async fn read_tlv(r: &mut impl embedded_io_async::Read) -> Option<Self> {
         let mut type_length = [0u8; 5];
         r.read_exact(&mut type_length).await.unwrap();
 
-        let packet_type = PacketTypeFromNet::try_from(type_length[0]).unwrap();
+        let Ok(packet_type) = PacketTypeFromNet::try_from(type_length[0]) else {
+            defmt::info!("skipping unsupported TLV type {:x}", type_length[0]);
+            return None;
+        };
+
         let len = u32::from_be_bytes(type_length[1..].try_into().unwrap()) as usize;
 
-        match packet_type {
+        Some(match packet_type {
             PacketTypeFromNet::Pong => Self::Pong,
             PacketTypeFromNet::Message => {
                 let mut channel_id = [0];
@@ -108,7 +112,7 @@ impl TlvRead for FromNet {
                     _ => unreachable!("Unsupported Channel ID"),
                 }
             }
-        }
+        })
     }
 }
 
