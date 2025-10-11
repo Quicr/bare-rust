@@ -115,7 +115,7 @@ impl Board {
         let chip_select = Output::new(p.PB8, Level::Low, Speed::Low);
         let data_command = Output::new(p.PB9, Level::Low, Speed::Low);
         let reset = Output::new(p.PC13, Level::Low, Speed::Low);
-        let backlight = Output::new(p.PC14, Level::Low, Speed::Low);
+        let backlight = Output::new(p.PC14, Level::High, Speed::Low);
 
         let config = {
             use embassy_stm32::spi::*;
