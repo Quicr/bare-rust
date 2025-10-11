@@ -16,7 +16,7 @@ use embassy_time::Delay;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 use mipidsi::{
     interface::SpiInterface,
-    models::ILI9341Rgb565,
+    models::ST7789,
     options::{ColorOrder, Orientation},
     Builder, Display,
 };
@@ -28,7 +28,7 @@ type DisplaySpiInterface = SpiInterface<'static, DisplaySpiDevice, Output<'stati
 
 pub struct Board {
     status_led: StatusLed,
-    screen: Display<DisplaySpiInterface, ILI9341Rgb565, Output<'static>>,
+    screen: Display<DisplaySpiInterface, ST7789, Output<'static>>,
     net_tx: NetTx<UartTx<'static, Async>>,
     i2c: I2c<'static, Blocking, Master>,
     pub button_a: Option<Button>,
@@ -131,7 +131,7 @@ impl Board {
         let spi_dev = SpiDevice::new(spi_bus, chip_select);
         let spi_if = SpiInterface::new(spi_dev, data_command, display_buffer);
 
-        let screen = Builder::new(ILI9341Rgb565, spi_if)
+        let screen = Builder::new(ST7789, spi_if)
             .reset_pin(reset)
             .orientation(Orientation::new().flip_horizontal())
             .color_order(ColorOrder::Bgr)
