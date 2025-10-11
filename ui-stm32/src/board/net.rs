@@ -1,3 +1,4 @@
+use defmt::Format;
 use heapless::String;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ui_app::{Frame, FromNet, ToNet, FRAME_SIZE, MAX_MESSAGE_LEN};
@@ -42,21 +43,21 @@ where
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, PartialEq, Debug, IntoPrimitive, TryFromPrimitive)]
+#[derive(Copy, Clone, PartialEq, Debug, IntoPrimitive, TryFromPrimitive, Format)]
 enum PacketTypeToNet {
     Message = 0x09,
     Ping = 0x0e,
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, PartialEq, Debug, IntoPrimitive, TryFromPrimitive)]
+#[derive(Copy, Clone, PartialEq, Debug, IntoPrimitive, TryFromPrimitive, Format)]
 enum PacketTypeFromNet {
     Message = 0x09,
     Pong = 0x0f,
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, PartialEq, Debug, IntoPrimitive, TryFromPrimitive)]
+#[derive(Copy, Clone, PartialEq, Debug, IntoPrimitive, TryFromPrimitive, Format)]
 enum ChannelId {
     Ptt = 0,
     PttAi = 1,
@@ -124,10 +125,16 @@ impl TlvWrite for ToNet {
     fn write_tlv(&self, w: &mut impl embedded_io::Write) {
         match self {
             Self::Ping => {
+                defmt::info!("Writing packet of type: {:?}", PacketTypeToNet::Ping);
                 w.write(&[PacketTypeToNet::Ping.into(), 0, 0, 0, 0])
                     .unwrap();
             }
             Self::AudioFrame(frame) => {
+                defmt::info!(
+                    "Writing packet of type: {:?}::{:?}",
+                    PacketTypeToNet::Message,
+                    ChannelId::Ptt
+                );
                 let len = (frame.0.len() + 1) as u32;
                 let mut header = [0; 6];
                 header[0] = PacketTypeToNet::Message.into();
@@ -143,11 +150,16 @@ impl TlvWrite for ToNet {
                 w.write(&frame_data).unwrap();
             }
             Self::Chat(msg) => {
+                defmt::info!(
+                    "Writing packet of type: {:?}::{:?}",
+                    PacketTypeToNet::Message,
+                    ChannelId::Chat
+                );
                 let len = (msg.len() + 1) as u32;
                 let mut header = [0; 6];
                 header[0] = PacketTypeToNet::Message.into();
                 header[1..5].copy_from_slice(&len.to_be_bytes());
-                header[5] = ChannelId::Ptt.into();
+                header[5] = ChannelId::Chat.into();
 
                 w.write(&header).unwrap();
                 w.write(msg.as_str().as_bytes()).unwrap();

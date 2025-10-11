@@ -47,8 +47,6 @@ async fn monitor_button(mut button: Button, id: ButtonId, events: EventSender) {
 #[embassy_executor::task]
 async fn monitor_keyboard(mut keyboard: Keyboard, events: EventSender) {
     loop {
-        // XXX(RLB) This is currently broken.  The Timer call blocks forever.  I think something in
-        // the clock config has broken timers, but I'm not sure what.
         let _ = Timer::after_millis(KEYBOARD_SCAN_MILLIS).await;
         for event in keyboard.scan() {
             defmt::trace!("keyboard event {}", event);

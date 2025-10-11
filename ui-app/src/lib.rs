@@ -274,7 +274,7 @@ pub struct App {
     a_down: bool,
     b_down: bool,
     ptt_state: PttState,
-    message_buffer: String<128>,
+    message_buffer: String<MAX_MESSAGE_LEN>,
 }
 
 impl App {
@@ -393,9 +393,12 @@ impl App {
 
         // If this key press is a return, then clear things out
         if let Key::Enter = key {
-            let mut msg: String<64> = Default::default();
+            let mut msg: String<{ MAX_MESSAGE_LEN + 20 }> = Default::default();
             write!(&mut msg, "sending message: {}", self.message_buffer).unwrap();
             out.log(&msg);
+
+            out.net_tx()
+                .write(&ToNet::Chat(self.message_buffer.clone()));
 
             self.message_buffer.clear();
 
