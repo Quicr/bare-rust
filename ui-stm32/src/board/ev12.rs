@@ -1,5 +1,6 @@
 use super::{Button, Eeprom, Keyboard, NetTx, StatusLed};
-use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
+use core::cell::RefCell;
+use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice;
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
@@ -7,108 +8,37 @@ use embassy_stm32::{
     i2c::{mode::Master, I2c},
     mode::{Async, Blocking},
     peripherals,
-    spi::{Spi, Word},
+    spi::Spi,
     usart::{self, UartRx, UartTx},
 };
+use embassy_sync::blocking_mutex::{raw::NoopRawMutex, NoopMutex};
 use embassy_time::Delay;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
-use ili9341::{Ili9341, Orientation};
+use mipidsi::{
+    interface::SpiInterface,
+    models::ILI9341Rgb565,
+    options::{ColorOrder, Orientation},
+    Builder, Display,
+};
+use static_cell::StaticCell;
 use ui_app::{Led, Outputs};
 
-struct DisplayData {
-    // These fields are not used, but we need to keep them alive so that the chip select output is
-    // held low and the backlight output is held high.
-    _chip_select: Output<'static>,
-    _backlight: Output<'static>,
-
-    data_command: Output<'static>,
-    spi: Spi<'static, Blocking>,
-}
-
-impl DisplayData {
-    fn new(
-        mut backlight: Output<'static>,
-        mut chip_select: Output<'static>,
-        data_command: Output<'static>,
-        spi: Spi<'static, Blocking>,
-    ) -> Self {
-        backlight.set_high();
-        chip_select.set_low();
-
-        Self {
-            _backlight: backlight,
-            _chip_select: chip_select,
-            data_command,
-            spi,
-        }
-    }
-
-    fn write(&mut self, data: DataFormat<'_>) -> Result<(), DisplayError> {
-        use DataFormat::*;
-        match data {
-            U8(slice) => self.write_slice(slice),
-            U16(slice) => self.write_slice(slice),
-            U16BE(slice) => self.write_slice(slice),
-            U16LE(slice) => self.write_slice(slice),
-            U8Iter(iter) => self.write_iter(iter),
-            U16BEIter(iter) => self.write_iter(iter),
-            U16LEIter(iter) => self.write_iter(iter),
-            _ => unreachable!(),
-        }
-    }
-
-    fn write_slice<W: Word>(&mut self, data: &[W]) -> Result<(), DisplayError> {
-        self.spi.blocking_write(data).unwrap();
-        Ok(())
-    }
-
-    fn write_iter<W: Word>(
-        &mut self,
-        iter: &mut dyn Iterator<Item = W>,
-    ) -> Result<(), DisplayError> {
-        // 1kb of render buffer
-        const CHUNK_SIZE: usize = 512;
-
-        // XXX(RLB) Very C-style iteration, could probably write this in a way that would optimize
-        // better.
-        let mut data = [W::default(); CHUNK_SIZE];
-        let mut n = 0;
-        for (i, x) in iter.enumerate() {
-            data[i % CHUNK_SIZE] = x;
-            n += 1;
-
-            if n > 0 && n % CHUNK_SIZE == 0 {
-                self.spi.blocking_write(&data).unwrap();
-                n = 0;
-            }
-        }
-
-        self.spi.blocking_write(&data[..n]).unwrap();
-        Ok(())
-    }
-}
-
-impl WriteOnlyDataCommand for DisplayData {
-    fn send_commands(&mut self, cmd: DataFormat<'_>) -> Result<(), DisplayError> {
-        self.data_command.set_low();
-        self.write(cmd)
-    }
-
-    fn send_data(&mut self, buf: DataFormat<'_>) -> Result<(), DisplayError> {
-        self.data_command.set_high();
-        self.write(buf)
-    }
-}
+type DisplaySpiDevice = SpiDevice<'static, NoopRawMutex, Spi<'static, Blocking>, Output<'static>>;
+type DisplaySpiInterface = SpiInterface<'static, DisplaySpiDevice, Output<'static>>;
 
 pub struct Board {
     status_led: StatusLed,
-    screen: Ili9341<DisplayData, Output<'static>>,
+    screen: Display<DisplaySpiInterface, ILI9341Rgb565, Output<'static>>,
     net_tx: NetTx<UartTx<'static, Async>>,
     i2c: I2c<'static, Blocking, Master>,
     pub button_a: Option<Button>,
     pub button_b: Option<Button>,
     pub keyboard: Option<Keyboard>,
     pub net_rx: Option<UartRx<'static, Async>>,
+
+    // This field isn't used, but is held to keep the pin low instead of floating
+    #[allow(dead_code)]
+    backlight: Output<'static>,
 }
 
 bind_interrupts!(struct Irqs {
@@ -179,6 +109,9 @@ impl Board {
         let keyboard = Keyboard::new(cols, rows);
 
         // Screen
+        static SPI_BUS: StaticCell<NoopMutex<RefCell<Spi<'static, Blocking>>>> = StaticCell::new();
+        let display_buffer = cortex_m::singleton!(: [u8; 512] = [0; 512]).unwrap();
+
         let chip_select = Output::new(p.PB8, Level::Low, Speed::Low);
         let data_command = Output::new(p.PB9, Level::Low, Speed::Low);
         let reset = Output::new(p.PC13, Level::Low, Speed::Low);
@@ -193,15 +126,17 @@ impl Board {
             config
         };
         let spi = Spi::new_blocking_txonly(p.SPI1, p.PA5, p.PA7, config);
+        let spi_bus = NoopMutex::new(RefCell::new(spi));
+        let spi_bus = SPI_BUS.init(spi_bus);
+        let spi_dev = SpiDevice::new(spi_bus, chip_select);
+        let spi_if = SpiInterface::new(spi_dev, data_command, display_buffer);
 
-        let screen = Ili9341::new(
-            DisplayData::new(backlight, chip_select, data_command, spi),
-            reset,
-            &mut Delay,
-            Orientation::Portrait,
-            ili9341::DisplaySize240x320,
-        )
-        .unwrap();
+        let screen = Builder::new(ILI9341Rgb565, spi_if)
+            .reset_pin(reset)
+            .orientation(Orientation::new().flip_horizontal())
+            .color_order(ColorOrder::Bgr)
+            .init(&mut Delay)
+            .unwrap();
 
         // NET UART
         let net_uart = {
@@ -230,6 +165,7 @@ impl Board {
             button_b: Some(button_b),
             keyboard: Some(keyboard),
             net_rx: Some(net_rx),
+            backlight,
         }
     }
 }
