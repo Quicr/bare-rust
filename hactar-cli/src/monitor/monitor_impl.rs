@@ -2,8 +2,12 @@ use crate::utility::colors::*;
 use crate::utility::commands::{get_command_map, get_net_command_map, get_ui_command_map, BypassTarget};
 use crate::utility::errors::{HactarError, Result};
 use crate::utility::scanning::{select_hactar_port, UartConfig};
+use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+use rustyline::{Context, Editor, Helper};
 use serialport::{DataBits, Parity, StopBits};
 use std::io::{Read, Write};
 use std::str::FromStr;
@@ -35,6 +39,76 @@ pub fn monitor(args: MonitorArgs) -> Result<()> {
     let mut monitor = Monitor::new(&port_name, &uart_config)?;
     monitor.run()
 }
+
+/// Command completer for rustyline
+struct CommandCompleter {
+    commands: Vec<String>,
+}
+
+impl CommandCompleter {
+    fn new() -> Self {
+        let mut commands = Vec::new();
+
+        // Add simple commands
+        let command_map = get_command_map();
+        for cmd in command_map.keys() {
+            commands.push(cmd.to_string());
+        }
+
+        // Add UI commands
+        let ui_commands = get_ui_command_map();
+        for cmd in ui_commands.keys() {
+            commands.push(format!("ui {}", cmd));
+        }
+
+        // Add NET commands
+        let net_commands = get_net_command_map();
+        for cmd in net_commands.keys() {
+            commands.push(format!("net {}", cmd));
+        }
+
+        // Add special commands
+        commands.push("exit".to_string());
+
+        commands.sort();
+        Self { commands }
+    }
+}
+
+impl Completer for CommandCompleter {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> std::result::Result<(usize, Vec<Pair>), ReadlineError> {
+        let line_to_pos = &line[..pos];
+
+        let matches: Vec<Pair> = self
+            .commands
+            .iter()
+            .filter(|cmd| cmd.starts_with(line_to_pos))
+            .map(|cmd| Pair {
+                display: cmd.clone(),
+                replacement: cmd.clone(),
+            })
+            .collect();
+
+        Ok((0, matches))
+    }
+}
+
+impl Hinter for CommandCompleter {
+    type Hint = String;
+}
+
+impl Highlighter for CommandCompleter {}
+
+impl Validator for CommandCompleter {}
+
+impl Helper for CommandCompleter {}
 
 struct Monitor {
     port: Arc<Mutex<Box<dyn serialport::SerialPort>>>,
@@ -242,8 +316,10 @@ impl Monitor {
     fn run(&mut self) -> Result<()> {
         self.start_reader_thread();
 
-        let mut rl = DefaultEditor::new()
+        let completer = CommandCompleter::new();
+        let mut rl = Editor::new()
             .map_err(|e| HactarError::Other(format!("Failed to create editor: {}", e)))?;
+        rl.set_helper(Some(completer));
 
         loop {
             let readline = rl.readline("> ");
