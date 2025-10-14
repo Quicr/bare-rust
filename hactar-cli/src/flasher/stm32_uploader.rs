@@ -3,7 +3,7 @@
 
 use crate::config::{ChipConfig, ChipConfigs};
 use crate::flasher::uart_utils::*;
-use crate::utility::colors::*;
+use colored::Colorize;
 use crate::utility::errors::{HactarError, Result};
 use serialport::{Parity, SerialPort};
 use std::time::Duration;
@@ -59,17 +59,17 @@ impl STM32Uploader {
         match reply {
             Ok(ACK) => {
                 if output_success {
-                    println!("{}: {}", caller, success("SUCCESSFUL"));
+                    println!("{}: {}", caller, "SUCCESSFUL".bright_green());
                 }
                 Ok(true)
             }
             Ok(NACK) => {
-                println!("{}: {}", caller, error("FAILED"));
+                println!("{}: {}", caller, "FAILED".bright_red());
                 self.synced = false;
                 Err(HactarError::Nack)
             }
             Err(_) => {
-                println!("{}: {}", caller, warning("NO REPLY"));
+                println!("{}: {}", caller, "NO REPLY".bright_yellow());
                 self.synced = false;
                 Err(HactarError::NoResponse)
             }
@@ -87,7 +87,7 @@ impl STM32Uploader {
             match get_bytes(&mut self.port, 1) {
                 Ok(ACK) => {
                     self.synced = true;
-                    println!("Sync: {}", success("SUCCESSFUL"));
+                    println!("Sync: {}", "SUCCESSFUL".bright_green());
                     return Ok(());
                 }
                 Ok(resp) => {
@@ -97,7 +97,7 @@ impl STM32Uploader {
                 }
                 Err(_) => {
                     if attempt == retry_num - 1 {
-                        println!("Sync: {}", error("NO RESPONSE"));
+                        println!("Sync: {}", "NO RESPONSE".bright_red());
                     }
                 }
             }
@@ -151,7 +151,7 @@ impl STM32Uploader {
         let pid = u16::from_be_bytes([pid_bytes[0], pid_bytes[1]]);
         self.chip_id = Some(pid);
 
-        println!("Chip ID: {}", highlight(&format!("{:#x}", pid)));
+        println!("Chip ID: {}", format!("{:#x}", pid).bright_cyan());
 
         self.set_chip_config(pid)?;
 
@@ -160,12 +160,12 @@ impl STM32Uploader {
 
     /// Set chip configuration based on chip ID
     fn set_chip_config(&mut self, pid: u16) -> Result<()> {
-        println!("Retrieving configurations for chip ID: {}", highlight(&format!("{:#x}", pid)));
+        println!("Retrieving configurations for chip ID: {}", format!("{:#x}", pid).bright_cyan());
 
         let pid_str = pid.to_string();
         if let Some(config) = self.configs.get(&pid_str) {
             self.chip_config = Some(config.clone());
-            println!("Found configuration for: {}", info(&config.name));
+            println!("Found configuration for: {}", config.name.bright_blue());
             Ok(())
         } else {
             Err(HactarError::UnknownChipId(pid))
@@ -192,7 +192,7 @@ impl STM32Uploader {
         let reply = get_bytes(&mut self.port, 1);
         self.handle_reply(reply, "Get Commands Receive", "Failed to get available commands", false)?;
 
-        println!("Bootloader version: {}", emphasis(&format!("{}", bootloader_version)));
+        println!("Bootloader version: {}", format!("{}", bootloader_version).bright_white());
 
         // Map received command bytes to names
         let command_names = self.map_commands_to_names(&recv_commands);
@@ -246,7 +246,7 @@ impl STM32Uploader {
 
         if self.chip == "mgmt" {
             self.port.set_parity(Parity::Even)?;
-            println!("Updated uart to parity: {}", info("EVEN"));
+            println!("Updated uart to parity: {}", "EVEN".bright_blue());
             println!("User, put Hactar into bootloader mode!!");
             println!("Press enter once it is done...");
             let mut input = String::new();
@@ -261,18 +261,18 @@ impl STM32Uploader {
                 self.port.flush()?;
 
                 try_pattern(&mut self.port, OK, 1, 5)?;
-                println!("Flash UI command: {}", success("CONFIRMED"));
+                println!("Flash UI command: {}", "CONFIRMED".bright_green());
 
-                println!("Update uart to parity: {}", info("EVEN"));
+                println!("Update uart to parity: {}", "EVEN".bright_blue());
                 self.port.set_parity(Parity::Even)?;
 
                 try_pattern(&mut self.port, READY, 1, 5)?;
-                println!("Flash UI: {}", info("READY"));
+                println!("Flash UI: {}", "READY".bright_blue());
 
                 self.port.flush()?;
                 self.port.clear(serialport::ClearBuffer::Input)?;
 
-                println!("Activating UI Upload Mode: {}", success("SUCCESS"));
+                println!("Activating UI Upload Mode: {}", "SUCCESS".bright_green());
 
                 std::thread::sleep(Duration::from_secs(1));
             }
@@ -333,8 +333,8 @@ impl STM32Uploader {
     pub fn send_extended_erase_memory(&mut self, sectors_to_delete: &[usize], fast_verify: bool) -> Result<()> {
         self.check_init()?;
 
-        println!("Erase: {}", info("STARTED"));
-        println!("Erase  {} {}", info("SECTORS"), warning(&format!("{:?}", sectors_to_delete)));
+        println!("Erase: {}", "STARTED".bright_blue());
+        println!("Erase  {} {}", "SECTORS".bright_blue(), format!("{:?}", sectors_to_delete).bright_yellow());
 
         let mut deleted_sectors = Vec::new();
 
@@ -353,7 +353,7 @@ impl STM32Uploader {
             let checksum = Self::calculate_checksum(&data);
             data.push(checksum);
 
-            print!("\rErased {} {}", info("SECTORS"), warning(&format!("{:?}", deleted_sectors)));
+            print!("\rErased {} {}", "SECTORS".bright_blue(), format!("{:?}", deleted_sectors).bright_yellow());
             std::io::Write::flush(&mut std::io::stdout())?;
 
             // Erasing takes time, increase timeout
@@ -370,13 +370,13 @@ impl STM32Uploader {
             deleted_sectors.push(sector);
         }
 
-        println!("\rErased {} {}", info("SECTORS"), warning(&format!("{:?}", deleted_sectors)));
+        println!("\rErased {} {}", "SECTORS".bright_blue(), format!("{:?}", deleted_sectors).bright_yellow());
 
         if fast_verify {
             self.fast_erase_verify(&deleted_sectors)?;
         }
 
-        println!("Erase: {}", success("COMPLETE"));
+        println!("Erase: {}", "COMPLETE".bright_green());
         Ok(())
     }
 
@@ -384,7 +384,7 @@ impl STM32Uploader {
     fn fast_erase_verify(&mut self, sectors: &[usize]) -> Result<()> {
         self.check_init()?;
 
-        println!("Erase Verify: {}", info("BEGIN"));
+        println!("Erase Verify: {}", "BEGIN".bright_blue());
 
         // Clone the sector addresses to avoid borrowing issues
         let sector_addrs: Vec<u32> = {
@@ -401,17 +401,17 @@ impl STM32Uploader {
 
         for (i, (&sector, &addr)) in sectors.iter().zip(sector_addrs.iter()).enumerate() {
             let percent_verified = (i * 100) / num_sectors;
-            print!("\rVerifying erase: {}{}% verified", success(&format!("{:2}", percent_verified)), dim(""));
+            print!("\rVerifying erase: {}{}% verified", format!("{:2}", percent_verified).bright_green(), "".white());
             std::io::Write::flush(&mut std::io::stdout())?;
 
             if !self.flash_compare(&expected_mem, addr)? {
-                println!("\nVerifying: {} sector [{}]", error("Failed to verify"), sector);
+                println!("\nVerifying: {} sector [{}]", "Failed to verify".bright_red(), sector);
                 return Err(HactarError::EraseVerificationFailed(sector));
             }
         }
 
-        println!("\rVerifying erase: {}% verified", success("100"));
-        println!("Erase: {}", success("COMPLETE"));
+        println!("\rVerifying erase: {}% verified", "100".bright_green());
+        println!("Erase: {}", "COMPLETE".bright_green());
         Ok(())
     }
 
@@ -439,9 +439,9 @@ impl STM32Uploader {
 
         const MAX_NUM_BYTES: usize = 256;
 
-        println!("Write to Memory: {}", info("STARTED"));
-        println!("Address: {}", emphasis(&format!("{:#04x}", address)));
-        println!("Byte Stream Size: {}", emphasis(&format!("{}", data.len())));
+        println!("Write to Memory: {}", "STARTED".bright_blue());
+        println!("Address: {}", format!("{:#04x}", address).bright_white());
+        println!("Byte Stream Size: {}", data.len().to_string().bright_white());
 
         let total_bytes = data.len();
         let mut data_addr = 0;
@@ -453,7 +453,7 @@ impl STM32Uploader {
 
         while data_addr < total_bytes {
             let percent_flashed = (data_addr as f32 / total_bytes as f32) * 100.0;
-            print!("\rFlashing: {}{:.2}%", success(""), percent_flashed);
+            print!("\rFlashing: {}{:.2}%", "".bright_green(), percent_flashed);
             std::io::Write::flush(&mut std::io::stdout())?;
 
             let reply = write_byte_wait_for_ack(&mut self.port, commands::WRITE_MEMORY, 1, true);
@@ -497,7 +497,7 @@ impl STM32Uploader {
         // Restore timeout
         self.port.set_timeout(original_timeout)?;
 
-        println!("\rFlashing: {}%", success("100.00"));
+        println!("\rFlashing: {}%", "100.00".bright_green());
 
         // Verify write
         let mut verify_addr = address;
@@ -505,7 +505,7 @@ impl STM32Uploader {
 
         while verify_data_addr < total_bytes {
             let percent_verified = (verify_data_addr as f32 / total_bytes as f32) * 100.0;
-            print!("\rVerifying write: {}{:.2}% verified", success(""), percent_verified);
+            print!("\rVerifying write: {}{:.2}% verified", "".bright_green(), percent_verified);
             std::io::Write::flush(&mut std::io::stdout())?;
 
             let end_addr = std::cmp::min(verify_data_addr + MAX_NUM_BYTES, total_bytes);
@@ -513,7 +513,7 @@ impl STM32Uploader {
             let mem = self.send_read_memory(verify_addr, chunk.len())?;
 
             if chunk != mem.as_slice() {
-                println!("\n{} memory address {:#x}", error("Failed to verify at"), verify_addr);
+                println!("\n{} memory address {:#x}", "Failed to verify at".bright_red(), verify_addr);
                 return Err(HactarError::VerificationFailed(verify_addr));
             }
 
@@ -521,8 +521,8 @@ impl STM32Uploader {
             verify_data_addr += chunk.len();
         }
 
-        println!("\rVerifying write: {}% verified", success("100.00"));
-        println!("Write: {}", success("COMPLETE"));
+        println!("\rVerifying write: {}% verified", "100.00".bright_green());
+        println!("Write: {}", "COMPLETE".bright_green());
 
         Ok(())
     }
@@ -541,7 +541,7 @@ impl STM32Uploader {
         addr_with_checksum.push(checksum);
 
         let reply = write_bytes_wait_for_ack(&mut self.port, &addr_with_checksum, 1);
-        self.handle_reply(reply, &format!("Jump to address {}", info(&format!("{:#x}", address))), &format!("Failed to jump to address {:#x}", address), true)?;
+        self.handle_reply(reply, &format!("Jump to address {}", format!("{:#x}", address).bright_blue()), &format!("Failed to jump to address {:#x}", address), true)?;
 
         Ok(())
     }

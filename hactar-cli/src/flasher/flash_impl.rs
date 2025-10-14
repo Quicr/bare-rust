@@ -1,8 +1,8 @@
 use crate::config::load_stm32_configs;
 use crate::flasher::{esp32_uploader::ESP32S3Uploader, stm32_uploader::STM32Uploader};
-use crate::utility::colors::*;
 use crate::utility::errors::{HactarError, Result};
 use crate::utility::scanning::{scan_for_hactars, UartConfig};
+use colored::Colorize;
 use serialport::{DataBits, Parity, SerialPort, StopBits};
 use std::fs;
 use std::time::Duration;
@@ -14,60 +14,6 @@ pub struct FlashArgs {
     pub chip: String,
     pub binary_path: Option<String>,
     pub use_external_flasher: bool,
-}
-
-enum Uploader {
-    STM32(STM32Uploader),
-    ESP32(ESP32S3Uploader),
-}
-
-impl Uploader {
-    fn flash_select(&mut self) -> Result<()> {
-        match self {
-            Uploader::STM32(u) => u.flash_select(),
-            Uploader::ESP32(u) => u.flash_select(),
-        }
-    }
-
-    fn flash_firmware(&mut self, binary_path: &str) -> Result<bool> {
-        match self {
-            Uploader::STM32(u) => {
-                let binary = fs::read(binary_path)?;
-                let sectors = u.get_sectors_for_firmware(binary.len())?;
-                u.send_extended_erase_memory(&sectors, true)?;
-
-                let start_addr = u.chip_config.as_ref()
-                    .ok_or_else(|| HactarError::Other("Chip config not set".to_string()))?
-                    .usr_start_addr;
-
-                u.send_write_memory(&binary, start_addr)?;
-
-                // For mgmt chip, jump to the application
-                if u.chip == "mgmt" {
-                    u.send_go(start_addr)?;
-                }
-
-                Ok(true)
-            }
-            Uploader::ESP32(u) => u.flash_firmware(binary_path),
-        }
-    }
-}
-
-fn create_uploader(port: Box<dyn SerialPort>, chip: &str) -> Result<Uploader> {
-    let chip_lower = chip.to_lowercase();
-
-    if chip_lower == "mgmt" || chip_lower == "ui" {
-        let configs = load_stm32_configs()
-            .map_err(|e| HactarError::ConfigNotFound(format!("STM32 config: {}", e)))?;
-        let uploader = STM32Uploader::new(port, chip_lower, configs)?;
-        Ok(Uploader::STM32(uploader))
-    } else if chip_lower == "net" {
-        let uploader = ESP32S3Uploader::new(port, chip_lower)?;
-        Ok(Uploader::ESP32(uploader))
-    } else {
-        Err(HactarError::UnsupportedChip(chip.to_string()))
-    }
 }
 
 pub fn flash(args: FlashArgs) -> Result<()> {
@@ -103,34 +49,11 @@ pub fn flash(args: FlashArgs) -> Result<()> {
 
     // Flash each device
     for port_name in ports {
-        let mut flashed = false;
-        let num_attempts = 5;
-
-        for attempt in 1..=num_attempts {
-            println!("\nAttempt {}/{} for port {}", attempt, num_attempts, info(&port_name));
-
-            match flash_device(&port_name, &uart_config, &args) {
-                Ok(()) => {
-                    flashed = true;
-                    println!("Done Flashing {}", success("SUCCESS"));
-                    break;
-                }
-                Err(e) => {
-                    println!("{} {}, will try again", error("[Error]"), e);
-                    if attempt < num_attempts {
-                        std::thread::sleep(Duration::from_secs(12));
-                    }
-                }
-            }
-        }
-
-        if !flashed {
-            println!("Failed to flash {} after {} attempts", error(&port_name), num_attempts);
-            return Err(HactarError::Other(format!("Failed to flash {}", port_name)));
-        }
+        flash_device(&port_name, &uart_config, &args)?;
+        println!("Done Flashing {}", "SUCCESS".bright_green());
     }
 
-    println!("\nDone Flashing {}", success("GOODBYE"));
+    println!("\nDone Flashing {}", "GOODBYE".bright_green());
     Ok(())
 }
 
@@ -143,7 +66,7 @@ fn flash_device(port_name: &str, uart_config: &UartConfig, args: &FlashArgs) -> 
         .timeout(uart_config.timeout)
         .open()?;
 
-    println!("Opened port: {} baudrate: {}", info(port_name), success(&format!("{}", uart_config.baudrate)));
+    println!("Opened port: {} baudrate: {}", port_name.bright_blue(), uart_config.baudrate.to_string().bright_green());
 
     // Disable logs
     use crate::utility::commands::get_command_map;
@@ -162,8 +85,49 @@ fn flash_device(port_name: &str, uart_config: &UartConfig, args: &FlashArgs) -> 
         port.set_timeout(uart_config.timeout)?;
     }
 
-    // Create uploader
-    let mut uploader = create_uploader(port, &args.chip)?;
+    // Flash based on chip type
+    let chip_lower = args.chip.to_lowercase();
+
+    if chip_lower == "mgmt" || chip_lower == "ui" {
+        flash_stm32(port, &chip_lower, args)?;
+    } else if chip_lower == "net" {
+        flash_esp32(port, &chip_lower, args)?;
+    } else {
+        return Err(HactarError::UnsupportedChip(args.chip.clone()));
+    }
+
+    Ok(())
+}
+
+fn flash_stm32(port: Box<dyn SerialPort>, chip: &str, args: &FlashArgs) -> Result<()> {
+    let configs = load_stm32_configs()
+        .map_err(|e| HactarError::ConfigNotFound(format!("STM32 config: {}", e)))?;
+    let mut uploader = STM32Uploader::new(port, chip.to_string(), configs)?;
+
+    if args.use_external_flasher {
+        uploader.flash_select()?;
+    } else if let Some(binary_path) = &args.binary_path {
+        let binary = fs::read(binary_path)?;
+        let sectors = uploader.get_sectors_for_firmware(binary.len())?;
+        uploader.send_extended_erase_memory(&sectors, true)?;
+
+        let start_addr = uploader.chip_config.as_ref()
+            .ok_or_else(|| HactarError::Other("Chip config not set".to_string()))?
+            .usr_start_addr;
+
+        uploader.send_write_memory(&binary, start_addr)?;
+
+        // For mgmt chip, jump to the application
+        if chip == "mgmt" {
+            uploader.send_go(start_addr)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn flash_esp32(port: Box<dyn SerialPort>, chip: &str, args: &FlashArgs) -> Result<()> {
+    let mut uploader = ESP32S3Uploader::new(port, chip.to_string())?;
 
     if args.use_external_flasher {
         uploader.flash_select()?;

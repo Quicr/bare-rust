@@ -1,8 +1,8 @@
 // Hactar device scanning functionality
 
-use crate::utility::colors::{error, info, success, warning};
 use crate::utility::commands::get_command_map;
 use crate::utility::errors::{HactarError, Result};
+use colored::Colorize;
 use serialport::{DataBits, Parity, StopBits};
 use std::io::{Read, Write};
 use std::time::Duration;
@@ -98,10 +98,10 @@ pub fn scan_for_hactars(uart_config: &UartConfig) -> Result<Vec<String>> {
                         let device_response = &response[3..];
 
                         if device_response == HELLO_RESPONSE {
-                            println!("Device on port {} {} a Hactar!", warning(&port_name), success("is"));
+                            println!("Device on port {} {} a Hactar!", port_name.bright_yellow(), "is".bright_green());
                             hactar_ports.push(port_name.clone());
                         } else {
-                            println!("Device on port {} {} a Hactar!", warning(&port_name), error("not"));
+                            println!("Device on port {} {} a Hactar!", port_name.bright_yellow(), "not".bright_red());
                         }
                     }
                 }
@@ -127,7 +127,7 @@ pub fn select_hactar_port(uart_config: &UartConfig) -> Result<String> {
     }
 
     if ports.len() == 1 {
-        println!("Found 1 Hactar device: {}", info(&ports[0]));
+        println!("Found 1 Hactar device: {}", ports[0].bright_blue());
         return Ok(ports[0].clone());
     }
 

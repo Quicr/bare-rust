@@ -3,7 +3,7 @@
 
 use crate::flasher::esp32_slip_packet::ESP32SlipPacket;
 use crate::flasher::uart_utils;
-use crate::utility::colors::*;
+use colored::Colorize;
 use crate::utility::errors::{HactarError, Result};
 use serialport::{Parity, SerialPort};
 use serde::{Deserialize, Serialize};
@@ -136,10 +136,10 @@ impl ESP32S3Uploader {
         let reply = self.write_packet_wait_for_response(&mut packet, SYNC, false, 5)?;
 
         if reply.get_command() == SYNC {
-            println!("Activating device: {}", success("SUCCESS"));
+            println!("Activating device: {}", "SUCCESS".bright_green());
             Ok(())
         } else {
-            println!("Activating device: {}", warning("NO REPLY"));
+            println!("Activating device: {}", "NO REPLY".bright_yellow());
             Err(HactarError::Other("Failed to Activate device".to_string()))
         }
     }
@@ -214,7 +214,7 @@ impl ESP32S3Uploader {
         let mut data_ptr = 0;
         let mut packet_idx = 0;
 
-        print!("\rFlashing: {}{:.2}%", success(""), 0.0);
+        print!("\rFlashing: {}{:.2}%", "".bright_green(), 0.0);
         std::io::stdout().flush()?;
 
         while data_ptr < size {
@@ -248,14 +248,14 @@ impl ESP32S3Uploader {
                 return Err(HactarError::Esp32FlashError);
             }
 
-            print!("\rFlashing: {}{:.2}%", success(""), (data_ptr as f32 / size as f32) * 100.0);
+            print!("\rFlashing: {}{:.2}%", "".bright_green(), (data_ptr as f32 / size as f32) * 100.0);
             std::io::stdout().flush()?;
 
             data_ptr += BLOCK_SIZE;
             packet_idx += 1;
         }
 
-        println!("\rFlashing: {}%", success("100.00"));
+        println!("\rFlashing: {}%", "100.00".bright_green());
         Ok(())
     }
 
@@ -270,7 +270,7 @@ impl ESP32S3Uploader {
             println!("Failed to restart board");
         }
 
-        println!("Flashing: {}", success("COMPLETE"));
+        println!("Flashing: {}", "COMPLETE".bright_green());
         Ok(())
     }
 
@@ -335,7 +335,7 @@ impl ESP32S3Uploader {
                 .map_err(|_| HactarError::Other("Invalid offset".to_string()))?;
             let num_blocks = size.div_ceil(BLOCK_SIZE);
 
-            println!("Flashing: {}, size: {:#x}, start_addr: {:#x}", warning(name), size, offset);
+            println!("Flashing: {}, size: {:#x}, start_addr: {:#x}", name.bright_yellow(), size, offset);
 
             self.start_flash(size, num_blocks, offset)?;
             self.write_flash(&binary.file, &data, num_blocks)?;
@@ -359,18 +359,18 @@ impl ESP32S3Uploader {
             self.port.flush()?;
 
             uart_utils::try_pattern(&mut self.port, uart_utils::OK, 1, 5)?;
-            println!("Flash Net command: {}", success("CONFIRMED"));
+            println!("Flash Net command: {}", "CONFIRMED".bright_green());
 
-            println!("Update uart to parity: {}", info("NONE"));
+            println!("Update uart to parity: {}", "NONE".bright_blue());
             self.port.set_parity(Parity::None)?;
 
             uart_utils::try_pattern(&mut self.port, READY, 1, 5)?;
-            println!("Flash Net: {}", info("READY"));
+            println!("Flash Net: {}", "READY".bright_blue());
 
             self.port.flush()?;
             self.port.clear(serialport::ClearBuffer::Input)?;
 
-            println!("Activating NET Upload Mode: {}", success("SUCCESS"));
+            println!("Activating NET Upload Mode: {}", "SUCCESS".bright_green());
         }
 
         Ok(())
@@ -378,7 +378,7 @@ impl ESP32S3Uploader {
 
     /// Flash firmware (full workflow)
     pub fn flash_firmware(&mut self, binary_path: &str) -> Result<bool> {
-        println!("{}", emphasis("Starting Net Upload"));
+        println!("{}", "Starting Net Upload".bright_white());
 
         self.flash_select()?;
         self.sync()?;

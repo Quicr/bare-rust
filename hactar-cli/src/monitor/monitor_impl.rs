@@ -1,4 +1,4 @@
-use crate::utility::colors::*;
+use colored::Colorize;
 use crate::utility::commands::{get_command_map, get_net_command_map, get_ui_command_map, BypassTarget};
 use crate::utility::errors::{HactarError, Result};
 use crate::utility::scanning::{select_hactar_port, UartConfig};
@@ -125,7 +125,7 @@ impl Monitor {
             .timeout(uart_config.timeout)
             .open()?;
 
-        println!("{} {} {}={}", success("Opened port:"), info(port_name), success("baudrate"), info(&format!("{}", uart_config.baudrate)));
+        println!("{} {} {}={}", "Opened port:".bright_green(), port_name.bright_blue(), "baudrate".bright_green(), uart_config.baudrate.to_string().bright_blue());
 
         let port = Arc::new(Mutex::new(port));
         let running = Arc::new(Mutex::new(true));
@@ -209,7 +209,7 @@ impl Monitor {
 
     fn process_bypass_command(&self, parts: &[&str]) -> Result<()> {
         if parts.len() < 2 {
-            println!("{} Not enough parameters to determine sub command", error("[ERROR]"));
+            println!("{} Not enough parameters to determine sub command", "[ERROR]".bright_red());
             return Ok(());
         }
 
@@ -221,7 +221,7 @@ impl Monitor {
         let bypass_target = match BypassTarget::from_str(target) {
             Ok(t) => t,
             Err(_) => {
-                println!("{} Unknown target: {}", error("[ERROR]"), target);
+                println!("{} Unknown target: {}", "[ERROR]".bright_red(), target);
                 return Ok(());
             }
         };
@@ -237,7 +237,7 @@ impl Monitor {
         let cmd_info = match chip_commands.get(command) {
             Some(c) => c,
             None => {
-                println!("{} subcommand {} is unknown", error("[ERROR]"), command);
+                println!("{} subcommand {} is unknown", "[ERROR]".bright_red(), command);
                 return Ok(());
             }
         };
@@ -246,7 +246,7 @@ impl Monitor {
         if params.len() < cmd_info.num_params {
             println!(
                 "{} Not enough parameters for command {} expected {} got {}",
-                error("[ERROR]"),
+                "[ERROR]".bright_red(),
                 command,
                 cmd_info.num_params,
                 params.len()
@@ -257,7 +257,7 @@ impl Monitor {
         if params.len() > cmd_info.num_params {
             println!(
                 "{} Too many parameters for command {} expected {} got {}",
-                error("[ERROR]"),
+                "[ERROR]".bright_red(),
                 command,
                 cmd_info.num_params,
                 params.len()
