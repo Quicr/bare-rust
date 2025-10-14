@@ -8,13 +8,12 @@ use ui_app::Button as ButtonId;
 use ui_app::{App, Event};
 
 use cortex_m::singleton;
-use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::usart::RingBufferedUartRx;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::Timer;
-use {defmt_rtt as _, panic_probe as _};
+use {defmt as _, defmt_rtt as _, panic_probe as _};
 
 // Configuration parameters
 const EVENT_QUEUE_DEPTH: usize = 10;
@@ -69,7 +68,7 @@ async fn monitor_net(mut from: RingBufferedUartRx<'static>, events: EventSender)
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("about to instantiate board");
+    defmt::info!("about to instantiate board");
 
     const NET_RX_BUFFER_SIZE: usize = core::mem::size_of::<ui_app::FromNet>();
     const I2S_BUFFER_SIZE: usize = 2 * ui_app::FRAME_SIZE;
@@ -78,7 +77,59 @@ async fn main(spawner: Spawner) {
     let i2s_tx = singleton!(: [u16; I2S_BUFFER_SIZE] = [0; I2S_BUFFER_SIZE]).unwrap();
     let i2s_rx = singleton!(: [u16; I2S_BUFFER_SIZE] = [0; I2S_BUFFER_SIZE]).unwrap();
 
-    let mut board = Board::new(net_rx_buf, i2s_tx, i2s_rx);
+    let board = Board::new(net_rx_buf, i2s_tx, i2s_rx);
+
+    #[cfg(feature = "tx_demo")]
+    tx_demo(board).await;
+
+    #[cfg(feature = "rx_demo")]
+    rx_demo(board).await;
+
+    #[cfg(not(any(feature = "tx_demo", feature = "rx_demo")))]
+    app_main(board, spawner).await;
+}
+
+#[cfg(feature = "tx_demo")]
+async fn tx_demo(mut board: Board) {
+    use core::fmt::Write;
+    use heapless::String;
+    use ui_app::{NetTx, Outputs, ToNet};
+
+    let mut msg = String::default();
+
+    for i in 0.. {
+        write!(&mut msg, "{} bottles of beer on the wall...", i);
+        defmt::trace!("tx: {}", msg);
+        board.net_tx().write(&ToNet::Chat(msg.clone()));
+        Timer::after_millis(1000).await;
+    }
+}
+
+#[cfg(feature = "rx_demo")]
+async fn rx_demo(mut board: Board) {
+    use core::fmt::Write;
+    use heapless::String;
+    use ui_app::FromNet;
+
+    let mut from = board.net_rx.take().unwrap();
+    let mut from = NetRx::new(&mut from);
+
+    loop {
+        let Some(from_net) = from.next().await else {
+            defmt::trace!("rx fail");
+            continue;
+        };
+
+        match from_net {
+            FromNet::Pong => defmt::trace!("rx pong (?)"),
+            FromNet::AudioFrame(frame) => defmt::trace!("rx audio {} (?)", frame.0.len()),
+            FromNet::Chat(msg) => defmt::trace!("rx chat [{}]", msg),
+        }
+    }
+}
+
+#[cfg(not(any(feature = "tx_demo", feature = "rx_demo")))]
+async fn app_main(mut board: Board, spawner: Spawner) {
     let mut app = App::new();
 
     info!("stack usage after startup: {}", cortex_m_stack::usage());
