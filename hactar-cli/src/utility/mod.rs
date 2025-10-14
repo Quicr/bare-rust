@@ -5,3 +5,4 @@ pub mod errors;
 
 pub use colors::*;
 pub use errors::*;
+pub use scanning::UartConfig;
