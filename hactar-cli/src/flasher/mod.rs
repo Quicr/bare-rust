@@ -5,5 +5,6 @@ pub mod flash_impl;
 pub mod uploader;
 pub mod uart_utils;
 pub mod stm32_uploader;
+pub mod esp32_slip_packet;
 
 pub use flash_impl::*;
