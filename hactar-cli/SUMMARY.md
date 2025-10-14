@@ -31,7 +31,6 @@ src/
 │   ├── esp32_uploader.rs      # ESP32-S3 bootloader protocol
 │   ├── esp32_slip_packet.rs   # SLIP packet encoding/decoding
 │   ├── uart_utils.rs          # Low-level UART utilities
-│   ├── uploader.rs            # Uploader trait (unused - Python remnant)
 │   └── mod.rs                 # Module declarations
 ├── monitor/
 │   ├── monitor_impl.rs        # Interactive serial monitor
