@@ -14,6 +14,8 @@ use embassy_stm32::{
 };
 use embassy_time::Delay;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
+use heapless::String;
+use hex::ToHex;
 use ili9341::{Ili9341, Orientation};
 use ui_app::{Led, Outputs};
 
@@ -102,10 +104,29 @@ impl WriteOnlyDataCommand for DisplayData {
     }
 }
 
+struct LogTx<W: embedded_io::Write>(W);
+
+impl<W: embedded_io::Write> embedded_io::ErrorType for LogTx<W> {
+    type Error = W::Error;
+}
+
+impl<W: embedded_io::Write> embedded_io::Write for LogTx<W> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        let hex: String<1024> = buf.encode_hex();
+        defmt::info!("write: {}", hex);
+
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.0.flush()
+    }
+}
+
 pub struct Board {
     status_led: StatusLed,
     screen: Ili9341<DisplayData, Output<'static>>,
-    net_tx: NetTx<UartTx<'static, Async>>,
+    net_tx: NetTx<LogTx<UartTx<'static, Async>>>,
     i2c: I2c<'static, Blocking, Master>,
     audio_data: AudioData<'static>,
     pub button_a: Option<Button>,
@@ -236,7 +257,7 @@ impl Board {
         };
 
         let (net_tx, net_rx) = net_uart.split();
-        let net_tx = NetTx::new(net_tx);
+        let net_tx = NetTx::new(LogTx(net_tx));
         let net_rx = net_rx.into_ring_buffered(net_rx_buf);
 
         // I2C interface for EEPROM and audio chip control

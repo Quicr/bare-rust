@@ -7,8 +7,8 @@ license = "MIT OR Apache-2.0"
 [features]
 ev12 = []
 ev13 = []
-tx_demo = []
-rx_demo = []
+tx-demo = []
+rx-demo = []
 default = ["ev13"]
 
 [dependencies]

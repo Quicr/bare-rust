@@ -1,5 +1,6 @@
 use defmt::Format;
 use heapless::String;
+use hex::ToHex;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ui_app::{Frame, FromNet, ToNet, FRAME_SIZE, MAX_MESSAGE_LEN};
 
@@ -38,7 +39,7 @@ where
     Writer: embedded_io::Write,
 {
     fn write(&mut self, to_net: &ToNet) {
-        to_net.write_tlv(&mut self.tx);
+        to_net.write_tlv(&mut LogTx(&mut self.tx));
     }
 }
 
@@ -138,7 +139,8 @@ impl TlvWrite for ToNet {
                 let len = (frame.0.len() + 1) as u32;
                 let mut header = [0; 6];
                 header[0] = PacketTypeToNet::Message.into();
-                header[1..5].copy_from_slice(&len.to_be_bytes());
+                // XXX(RLB) This should use le or be
+                header[1..5].copy_from_slice(&len.to_ne_bytes());
                 header[5] = ChannelId::Ptt.into();
 
                 let mut frame_data = [0; 2 * FRAME_SIZE];
@@ -158,7 +160,7 @@ impl TlvWrite for ToNet {
                 let len = (msg.len() + 1) as u32;
                 let mut header = [0; 6];
                 header[0] = PacketTypeToNet::Message.into();
-                header[1..5].copy_from_slice(&len.to_be_bytes());
+                header[1..5].copy_from_slice(&len.to_le_bytes());
                 header[5] = ChannelId::Chat.into();
 
                 w.write(&header).unwrap();

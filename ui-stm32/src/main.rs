@@ -79,33 +79,38 @@ async fn main(spawner: Spawner) {
 
     let board = Board::new(net_rx_buf, i2s_tx, i2s_rx);
 
-    #[cfg(feature = "tx_demo")]
+    #[cfg(feature = "tx-demo")]
     tx_demo(board).await;
 
-    #[cfg(feature = "rx_demo")]
+    #[cfg(feature = "rx-demo")]
     rx_demo(board).await;
 
-    #[cfg(not(any(feature = "tx_demo", feature = "rx_demo")))]
+    #[cfg(not(any(feature = "tx-demo", feature = "rx-demo")))]
     app_main(board, spawner).await;
 }
 
-#[cfg(feature = "tx_demo")]
+#[cfg(feature = "tx-demo")]
 async fn tx_demo(mut board: Board) {
     use core::fmt::Write;
     use heapless::String;
+    use hex::ToHex;
     use ui_app::{NetTx, Outputs, ToNet};
 
     let mut msg = String::default();
+    let mut msg_hex: String<256> = String::default();
 
     for i in 0.. {
-        write!(&mut msg, "{} bottles of beer on the wall...", i);
-        defmt::trace!("tx: {}", msg);
+        msg.clear();
+        let _ = write!(&mut msg, "{:03}", i);
+        let msg_hex: String<256> = msg.encode_hex();
+        defmt::trace!("tx: {} {}", msg, msg_hex);
+
         board.net_tx().write(&ToNet::Chat(msg.clone()));
         Timer::after_millis(1000).await;
     }
 }
 
-#[cfg(feature = "rx_demo")]
+#[cfg(feature = "rx-demo")]
 async fn rx_demo(mut board: Board) {
     use core::fmt::Write;
     use heapless::String;
@@ -128,11 +133,11 @@ async fn rx_demo(mut board: Board) {
     }
 }
 
-#[cfg(not(any(feature = "tx_demo", feature = "rx_demo")))]
+#[cfg(not(any(feature = "tx-demo", feature = "rx-demo")))]
 async fn app_main(mut board: Board, spawner: Spawner) {
     let mut app = App::new();
 
-    info!("stack usage after startup: {}", cortex_m_stack::usage());
+    defmt::info!("stack usage after startup: {}", cortex_m_stack::usage());
 
     // Capture button events
     spawner.spawn(
@@ -159,7 +164,7 @@ async fn app_main(mut board: Board, spawner: Spawner) {
     // Capture UART events from the NET chip
     spawner.spawn(monitor_net(board.net_rx.take().unwrap(), EVENT_QUEUE.sender()).unwrap());
 
-    info!(
+    defmt::info!(
         "stack usage after spawning tasks: {}",
         cortex_m_stack::usage()
     );
@@ -167,7 +172,7 @@ async fn app_main(mut board: Board, spawner: Spawner) {
     // Start up the app
     app.start(&mut board);
 
-    info!("stack usage after app start: {}", cortex_m_stack::usage());
+    defmt::info!("stack usage after app start: {}", cortex_m_stack::usage());
 
     // Main event loop
     let receiver = EventSource(EVENT_QUEUE.receiver());
