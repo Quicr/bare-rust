@@ -1,0 +1,26 @@
+[package]
+edition = "2021"
+name = "mgmt-embassy"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+cortex-m = { version = "0.7.6", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7.0"
+
+defmt = "1.0.1"
+defmt-rtt = "1.0.0"
+
+embassy-executor = { version = "0.8.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-stm32 = { version = "0.3.0", features = ["defmt", "stm32f072cb", "memory-x", "exti", "chrono", "time-driver-any"] }
+embassy-sync = { version = "0.7.0", features = ["defmt"] }
+embassy-time = { version = "0.4.0", features = ["defmt"] }
+heapless = "0.8"
+embedded-hal = "1.0"
+
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+num_enum = { version = "0.7.4", default-features = false }
+embedded-io-async = "0.6.1"
+
+[profile.release]
+debug = 2
